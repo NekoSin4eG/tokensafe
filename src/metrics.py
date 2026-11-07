@@ -7,11 +7,10 @@ Uses SQLite for persistent, fast, zero-dependency storage.
 import os
 import json
 import sqlite3
+from contextlib import contextmanager
 from datetime import datetime
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional, Any, Generator
 
-# Standard reference pricing per 1,000,000 input tokens (Gemini / Claude / GPT blended)
-# Blended developer rate: ~$1.50 per 1M input tokens ($0.0000015 per token)
 USD_PER_TOKEN = 1.50 / 1_000_000.0
 
 
@@ -20,7 +19,6 @@ class MetricsTracker:
 
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
-            # Default to data/metrics.db relative to this file
             base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
             data_dir = os.path.join(base_dir, "data")
             os.makedirs(data_dir, exist_ok=True)
@@ -29,10 +27,15 @@ class MetricsTracker:
         self.db_path = db_path
         self._init_db()
 
-    def _get_connection(self) -> sqlite3.Connection:
+    @contextmanager
+    def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
         conn = sqlite3.connect(self.db_path)
         conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            yield conn
+            conn.commit()
+        finally:
+            conn.close()
 
     def _init_db(self):
         with self._get_connection() as conn:
@@ -53,7 +56,7 @@ class MetricsTracker:
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     session_id TEXT NOT NULL,
                     timestamp TEXT NOT NULL,
-                    event_type TEXT NOT NULL, -- 'PROMPT', 'TOOL_READ', 'COMMAND_OUTPUT'
+                    event_type TEXT NOT NULL,
                     original_tokens INTEGER NOT NULL,
                     optimized_tokens INTEGER NOT NULL,
                     saved_tokens INTEGER NOT NULL,
@@ -62,7 +65,6 @@ class MetricsTracker:
                     details TEXT
                 )
             """)
-            conn.commit()
 
     def record_event(
         self,
@@ -104,7 +106,6 @@ class MetricsTracker:
                     total_usd_saved = total_usd_saved + excluded.total_usd_saved
             """, (session_id, now_iso, now_iso, original_tokens,
                   optimized_tokens, saved_tokens, est_usd))
-            conn.commit()
 
         return {
             "saved_tokens": saved_tokens,
@@ -128,7 +129,6 @@ class MetricsTracker:
             """)
             row = cursor.fetchone()
 
-            # Breakdown by event type
             cursor.execute("""
                 SELECT event_type, COUNT(*) as count, COALESCE(SUM(saved_tokens), 0) as saved
                 FROM events
@@ -180,4 +180,3 @@ class MetricsTracker:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM events")
             cursor.execute("DELETE FROM sessions")
-            conn.commit()

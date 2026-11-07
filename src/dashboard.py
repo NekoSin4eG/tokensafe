@@ -63,10 +63,13 @@ class Dashboard:
             for source, data in breakdown.items():
                 s_name = {
                     "PROMPT": "Prompt Compactor (TOCP)",
-                    "TOOL_READ": "File Tool Slicer (AST)",
+                    "TOOL_READ": "File Line Slicer (AST)",
+                    "AST_SKELETON": "AST Skeletonizer (Signatures)",
+                    "COMMAND_FILTER": "Command Sanitizer (CLI)",
+                    "HISTORY_FOLD": "Multi-turn History Fold",
                     "COMMAND_OUTPUT": "Terminal Log Sanitizer"
                 }.get(source, source)
-                out.append(f"  • {BOLD}{s_name:<28}{RESET} : {GREEN}{data['saved']:,} tokens saved{RESET} ({data['count']} events)")
+                out.append(f"  • {BOLD}{s_name:<30}{RESET} : {GREEN}{data['saved']:,} tokens saved{RESET} ({data['count']} events)")
             out.append("")
 
         # Recent events log
@@ -116,7 +119,10 @@ class Dashboard:
         for source, data in summary.get("breakdown", {}).items():
             s_name = {
                 "PROMPT": "Prompt Compactor (TOCP)",
-                "TOOL_READ": "File Tool Slicer (AST)",
+                "TOOL_READ": "File Line Slicer (AST)",
+                "AST_SKELETON": "AST Skeletonizer (Signatures)",
+                "COMMAND_FILTER": "Command Sanitizer (CLI)",
+                "HISTORY_FOLD": "Multi-turn History Fold",
                 "COMMAND_OUTPUT": "Terminal Log Sanitizer"
             }.get(source, source)
             md.append(f"| **{s_name}** | {data['count']} | `{data['saved']:,}` |")
