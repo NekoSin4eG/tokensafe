@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package agy.token.optimizer.v1;
+
+// ActionType defines the core intent of the developer request.
+enum ActionType {
+  ACTION_UNKNOWN = 0;
+  REFACTOR = 1;
+  DEBUG = 2;
+  CREATE = 3;
+  OPTIMIZE = 4;
+  EXPLAIN = 5;
+  AUDIT = 6;
+  TEST = 7;
+  RUN = 8;
+}
+
+// CodeTarget identifies specific code locations without verbosity.
+message CodeTarget {
+  string file_path = 1;
+  string symbol_name = 2; // function, class, or variable
+  int32 start_line = 3;
+  int32 end_line = 4;
+}
+
+// IntentPayload is the compacted representation of a developer prompt.
+message IntentPayload {
+  ActionType action = 1;
+  CodeTarget target = 2;
+  repeated string constraints = 3; // e.g., ["async", "redis_cache", "no_alloc"]
+  string minimal_intent = 4;      // Stripped of courtesy and fluff
+  
+  // S-Expression representation for ultra-low token BPE encoding:
+  // (ACTION "path" "symbol" [CONSTRAINTS] "INTENT")
+  string s_expression = 5;
+}
+
+// TokenOptimizationMetrics records token efficiency gains.
+message TokenOptimizationMetrics {
+  string session_id = 1;
+  int64 timestamp = 2;
+  string event_type = 3; // "PROMPT", "TOOL_READ", "COMMAND_OUTPUT"
+  int32 original_tokens = 4;
+  int32 optimized_tokens = 5;
+  int32 saved_tokens = 6;
+  double savings_ratio = 7; // e.g. 0.65 for 65% reduction
+  double est_usd_saved = 8;
+}

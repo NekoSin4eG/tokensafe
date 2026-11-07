@@ -1,0 +1,14 @@
+{
+  "name": "agy-token-optimizer",
+  "version": "1.0.0",
+  "description": "Next-generation token economy plugin for Google Antigravity. Features TOCP intent compaction, smart tool call slicing, and real-time SQLite savings tracking.",
+  "author": {
+    "name": "Oleg Savelev",
+    "url": "https://github.com/olegsavelev"
+  },
+  "homepage": "https://github.com/olegsavelev/agy-token-optimizer",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/olegsavelev/agy-token-optimizer"
+  }
+}
