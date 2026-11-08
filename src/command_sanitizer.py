@@ -10,14 +10,17 @@ from typing import Tuple, Dict, Any, Optional
 class CommandSanitizer:
     """Optimizes terminal command lines to eliminate token waste."""
 
-    # Lockfiles and binary patterns that should never be dumped in git diffs
+    # Lockfiles and binary patterns that should never be dumped in git diffs or searches
     LOCKFILE_EXCLUDES = [
         "':!package-lock.json'",
         "':!pnpm-lock.yaml'",
         "':!yarn.lock'",
+        "':!bun.lock'",
+        "':!bun.lockb'",
         "':!Cargo.lock'",
         "':!go.sum'",
         "':!composer.lock'",
+        "':!*.lock'",
         "':!*.min.js'",
         "':!*.min.css'",
         "':!*.bundle.js'",
@@ -80,11 +83,23 @@ class CommandSanitizer:
                 est_saved = 1500
                 return new_cmd, est_saved, "Pruned .git, node_modules, and venv from find"
 
-        # 5. grep / ripgrep unbounded search
-        if re.search(r"\b(grep|egrep)\b", cmd):
+        # 5. git grep search (Exclude lockfiles & directories via pathspecs)
+        if re.search(r"\bgit\b.*?\bgrep\b", cmd):
+            if ":!*.lock" not in cmd and ":!bun.lock" not in cmd:
+                git_excludes = "':!*.lock' ':!bun.lock' ':!bun.lockb' ':!package-lock.json' ':!dist' ':!build' ':!node_modules'"
+                new_cmd = f"{cmd} -- . {git_excludes}"
+                has_real_pipe = bool(re.search(r'(?<!\|)\|(?!\|)', new_cmd))
+                if not has_real_pipe:
+                    new_cmd = f"{new_cmd} | head -n 30"
+                est_saved = 3500
+                return new_cmd, est_saved, "Excluded lockfiles from git grep and capped output"
+
+        # 6. grep / ripgrep unbounded search
+        if re.search(r"\b(grep|egrep)\b", cmd) and not re.search(r"\bgit\b.*?\bgrep\b", cmd):
             if "--exclude-dir" not in cmd and "node_modules" not in cmd:
-                new_cmd = f"{cmd} --exclude-dir={{dist,build,node_modules,.git,coverage,__pycache__,.next,data}}"
-                if "|" not in new_cmd:
+                new_cmd = f"{cmd} --exclude='*.lock' --exclude='*.lockb' --exclude-dir={{dist,build,node_modules,.git,coverage,__pycache__,.next,data}}"
+                has_real_pipe = bool(re.search(r'(?<!\|)\|(?!\|)', new_cmd))
+                if not has_real_pipe:
                     new_cmd = f"{new_cmd} | head -n 30"
                 est_saved = 2500
                 return new_cmd, est_saved, "Sanitized grep directories and capped output to 30 matches"

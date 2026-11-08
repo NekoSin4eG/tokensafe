@@ -40,5 +40,13 @@ class TestCommandSanitizer(unittest.TestCase):
         self.assertIn("--exclude-dir=", new_cmd)
         self.assertIn("head -n 30", new_cmd)
 
+    def test_git_grep_sanitization(self):
+        cmd = "git -C /some/path grep -rn '5+' frontend/ || true"
+        new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
+        self.assertIsNotNone(new_cmd)
+        self.assertIn("':!bun.lock'", new_cmd)
+        self.assertIn("':!*.lock'", new_cmd)
+        self.assertIn("head -n 30", new_cmd)
+
 if __name__ == "__main__":
     unittest.main()
