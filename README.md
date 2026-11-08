@@ -1,14 +1,14 @@
 # ⚡ TokenSafe (`tokensafe`)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](https://opensource.org/licenses/MIT)
-[![SWE-bench: Verified](https://img.shields.io/badge/SWE--bench-61.8%25_to_92.1%25_Savings-06B6D4.svg)](https://tokensafe-ai.b-cdn.net#benchmarks)
+[![SWE-bench: Verified](https://img.shields.io/badge/SWE--bench-61.8%25_to_92.1%25_Savings-06B6D4.svg)](https://tokensafe.dev#benchmarks)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10+-3B82F6.svg)](https://python.org)
-[![Trial: 7 Days Free](https://img.shields.io/badge/Trial-7_Days_Free-10B981.svg)](https://tokensafe-ai.b-cdn.net#pricing)
+[![Trial: 7 Days Free](https://img.shields.io/badge/Trial-7_Days_Free-10B981.svg)](https://tokensafe.dev#pricing)
 
 > **Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents.**  
 > Slashes LLM token costs by **60%–90%** with zero quality loss. Built for **Google Antigravity, OpenAI Codex, Cursor, Claude Desktop, Z.ai Code, Windsurf & Cline**.
 
-🌐 **Official Website:** [https://tokensafe-ai.b-cdn.net](https://tokensafe-ai.b-cdn.net) | [https://tokensafe.dev](https://tokensafe.dev)
+🌐 **Official Website:** [https://tokensafe.dev](https://tokensafe.dev)
 
 ---
 
@@ -17,7 +17,7 @@
 Install and connect TokenSafe to all detected AI coding agents on your machine in 5 seconds:
 
 ```bash
-curl -fsSL https://tokensafe-ai.b-cdn.net/install.sh | bash
+curl -fsSL https://tokensafe.dev/install.sh | bash
 ```
 
 Or clone and run the interactive setup manually:
@@ -84,7 +84,7 @@ Verified across 5 real-world production scenarios:
 | **Engineering Team** | **$29 / dev / mo** | **7-Day Free Trial**, Team Budget Caps, Centralized Ledger, B2B Docker Proxy |
 | **Enterprise** | Custom | On-Premise Nuitka C-compiled Docker Proxy, Custom Compliance, SAML SSO |
 
-👉 **[Start your 7-Day Free Trial on our website](https://tokensafe-ai.b-cdn.net#pricing)**
+👉 **[Start your 7-Day Free Trial on our website](https://tokensafe.dev#pricing)**
 
 ---
 
