@@ -25,7 +25,10 @@ keywords = [
     "mcp",
     "mcp-server",
     "ast",
-    "proxy"
+    "proxy",
+    "jwt",
+    "ed25519",
+    "zero-trust"
 ]
 classifiers = [
     "Development Status :: 5 - Production/Stable",
@@ -53,4 +56,4 @@ tokensafe-stats = "src.dashboard:main"
 
 [tool.setuptools.packages.find]
 include = ["src*"]
-exclude = ["src.cloud_backend*"]
+exclude = ["src.cloud_backend*", "src.mailer*"]

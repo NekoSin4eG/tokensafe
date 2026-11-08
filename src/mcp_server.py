@@ -188,8 +188,15 @@ def handle_tool_call(name: str, args: dict) -> dict:
         return {"content": [{"type": "text", "text": dashboard.render_markdown()}]}
 
     elif name == "get_architecture_graph":
-        target = args.get("project_path") or os.getcwd()
-        graph = GraphEngine.get_instance(target)
+        target = args.get("project_path") or args.get("root_dir") or args.get("path") or args.get("directory") or os.getcwd()
+        target_abs = os.path.abspath(target)
+        system_roots = {"/", "/Users", "/home", "/root", os.path.expanduser("~")}
+        if target_abs in system_roots:
+            return {
+                "isError": True,
+                "content": [{"type": "text", "text": "Error: Invalid or root project_path. Please specify an explicit 'project_path' pointing to your project directory."}]
+            }
+        graph = GraphEngine.get_instance(target_abs)
         god_nodes = graph.get_god_nodes(7)
         banner = graph.format_topology_banner()
         payload = {
@@ -211,8 +218,15 @@ def handle_tool_call(name: str, args: dict) -> dict:
         return {"content": [{"type": "text", "text": json.dumps(payload, indent=2, ensure_ascii=False)}]}
 
     elif name == "get_api_surface":
-        target = args.get("project_path") or os.getcwd()
-        graph = GraphEngine.get_instance(target)
+        target = args.get("project_path") or args.get("root_dir") or args.get("path") or args.get("directory") or os.getcwd()
+        target_abs = os.path.abspath(target)
+        system_roots = {"/", "/Users", "/home", "/root", os.path.expanduser("~")}
+        if target_abs in system_roots:
+            return {
+                "isError": True,
+                "content": [{"type": "text", "text": "Error: Invalid or root project_path. Please specify an explicit 'project_path' pointing to your project directory."}]
+            }
+        graph = GraphEngine.get_instance(target_abs)
         surface_md = graph.generate_api_surface()
         surface_tokens = count_tokens(surface_md)
         est_orig_tokens = max(10000, len(graph.file_symbols) * 1200)

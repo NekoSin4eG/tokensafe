@@ -152,9 +152,48 @@ tokensafe benchmark
 # Run the local transparent AI proxy (127.0.0.1:8765/v1)
 tokensafe proxy
 
-# Activate your Pro License key
-tokensafe activate TS1.eyJlbWFpbCI6...
+# Activate your Pro License key (TS2 Asymmetric Ed25519 Key)
+tokensafe activate TS2.eyJlbWFpbCI6...
 ```
+
+---
+
+## 🔒 Security Architecture & Cloud API Endpoints
+
+TokenSafe Cloud Backend enforces enterprise zero-trust security across all communications:
+
+### 1. Cryptographic Authentication & Licensing
+- **Asymmetric RFC 8032 Ed25519 Signatures (`TS2.*`)**: Client instances verify digital signatures offline using an embedded 32-byte public key. The private signing key never leaves the secure cloud enclave.
+- **JWT Session Tokens**: Cloud endpoints authenticate sessions via standard HS256 JWT bearer tokens or Clerk session tokens.
+- **Dual Bearer Support**: Client endpoints accept either a signed license key (`TS2.*` / `TS1.*`) or a JWT in the `Authorization: Bearer <token>` header.
+- **Zero Hardcoded Secrets**: All SMTP, Stripe, Admin, and signing keys are strictly injected via environment variables.
+
+### 2. Cloud API Endpoint Reference
+
+| Method | Endpoint | Auth Required | Headers / Parameters | Description |
+|---|---|---|---|---|
+| `GET` | `/api/health` | Public | None | Healthcheck and service version status. |
+| `GET` | `/api/dashboard` | **Bearer Auth** | `Authorization: Bearer <jwt\|key>` or `?license=<key>` | Authenticated user metrics, token savings, and license status. |
+| `POST` | `/api/team/seat/create` | **Bearer Auth** | `Authorization: Bearer <jwt\|key>`, JSON `{ owner_email, member_email }` | Generates a cryptographically signed seat license for a team member. |
+| `POST` | `/api/team/seat/revoke` | **Bearer Auth** | `Authorization: Bearer <jwt\|key>`, JSON `{ owner_email, license_key }` | Revokes an active team seat license key. |
+| `POST` | `/api/telemetry/sync` | **License Auth** | JSON `{ license_key, email, events: [...] }` | Syncs batch telemetry events (enforces max 50 events/batch). |
+| `POST` | `/webhook/stripe` | **HMAC Sig** | `Stripe-Signature: t=...,v1=...` | Verifies Stripe webhook payload against `STRIPE_WEBHOOK_SECRET`. |
+| `GET` | `/api/admin/overview` | **Admin Only** | `X-Admin-Secret` or Admin JWT | Global overview of MRR, seats, active licenses, and system health. |
+| `POST` | `/api/admin/license/issue`| **Admin Only** | `X-Admin-Secret` or Admin JWT | Manually issues or provisions a custom tier license. |
+| `POST` | `/api/admin/license/revoke`| **Admin Only**| `X-Admin-Secret` or Admin JWT | Immediately revokes a license. |
+| `POST` | `/api/admin/license/extend`| **Admin Only**| `X-Admin-Secret` or Admin JWT | Extends an active license duration. |
+
+### 3. Server Configuration & Environment Variables
+
+| Variable | Required | Default / Description |
+|---|---|---|
+| `TOKENSAFE_PRIVATE_KEY` | Production | 64-character hex Ed25519 seed for issuing `TS2.` licenses. |
+| `ADMIN_SECRET_KEY` | Yes | High-entropy secret for administrative API access (`X-Admin-Secret`). |
+| `ADMIN_EMAILS` | Optional | Comma-separated admin emails (e.g. `nekosin4eg@gmail.com`). |
+| `STRIPE_WEBHOOK_SECRET` | Production | Webhook secret (`whsec_...`) used to verify Stripe webhooks. |
+| `SMTP_PASS` | Production | Password/token for transactional mail delivery via ImprovMX SMTP. |
+| `JWT_SECRET` | Optional | Shared HMAC secret for verifying custom JWT tokens. |
+
 
 ---
 

@@ -11,6 +11,7 @@
     "bin/agy-tokens",
     "src/*.py",
     "!src/cloud_backend.py",
+    "!src/mailer.py",
     "rules/",
     "skills/",
     "hooks/",
@@ -37,7 +38,10 @@
     "mcp",
     "mcp-server",
     "ast",
-    "proxy"
+    "proxy",
+    "jwt",
+    "ed25519",
+    "zero-trust"
   ],
   "author": "TokenSafe",
   "license": "MIT",

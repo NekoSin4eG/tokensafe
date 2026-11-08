@@ -45,6 +45,7 @@ Commands:
   npx tokensafe map          Generate tokensafe-out/API_SURFACE.md interface snapshot
   npx tokensafe stats        Show token economy savings & performance metrics
   npx tokensafe benchmark    Run zero-loss verification benchmark suite
+  npx tokensafe update       One-click self-update for npm, pip & all AI agent rules
   npx tokensafe activate     Activate commercial or team seat license key
   npx tokensafe --help       Show this help screen
 `);
@@ -95,6 +96,12 @@ switch (command) {
   case 'activate':
     scriptPath = path.join(ROOT_DIR, 'src', 'license_manager.py');
     scriptArgs = args.slice(1);
+    break;
+
+  case 'update':
+  case 'upgrade':
+    scriptPath = path.join(ROOT_DIR, 'src', 'installer.py');
+    scriptArgs = ['update', ...args.slice(1)];
     break;
 
   case 'install':

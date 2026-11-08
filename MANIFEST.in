@@ -1,7 +1,7 @@
 include README.md
 include LICENSE
 exclude src/cloud_backend.py
+exclude src/mailer.py
 exclude tests/test_cloud_backend.py
 recursive-exclude data *
 recursive-exclude frontend *
-recursive-exclude landing *

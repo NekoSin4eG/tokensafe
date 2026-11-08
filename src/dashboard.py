@@ -14,6 +14,10 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from src.metrics import MetricsTracker
+try:
+    from src.version_checker import VersionChecker
+except ImportError:
+    VersionChecker = None
 
 RESET = "\033[0m"
 BOLD = "\033[1m"
@@ -102,7 +106,15 @@ class Dashboard:
                 out.append(f"  [{DIM}{t_str}{RESET}] {CYAN}{ev_type:<15}{RESET} {detail_desc:<20} ➔ {GREEN}+{saved:,} saved{RESET} ({pct_ev:.1f}%)")
 
         out.append(f"\n{DIM}Run `agy-tokens test \"<prompt>\"` to test compression on custom input.{RESET}")
-        out.append(f"{DIM}Run `agy-tokens html` to view interactive browser dashboard.{RESET}\n")
+        out.append(f"{DIM}Run `agy-tokens html` to view interactive browser dashboard.{RESET}")
+
+        if VersionChecker:
+            banner = VersionChecker.get_banner()
+            if banner:
+                out.append(banner)
+        else:
+            out.append("")
+
         return "\n".join(out)
 
     def render_markdown(self) -> str:

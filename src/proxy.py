@@ -33,7 +33,23 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
         # Mute noisy default server logs
         pass
 
+    def _validate_origin(self) -> bool:
+        """Protects against DNS rebinding and cross-origin attacks from arbitrary browser origins."""
+        origin = self.headers.get("Origin", "")
+        if origin:
+            allowed_prefixes = ("http://127.0.0.1", "http://localhost", "https://tokensafe.dev")
+            if not any(origin.startswith(a) for a in allowed_prefixes):
+                self.send_response(403)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error": "Forbidden: Untrusted cross-origin request rejected"}')
+                return False
+        return True
+
     def do_GET(self):
+        if not self._validate_origin():
+            return
+
         tracker = MetricsTracker()
         dashboard = Dashboard(tracker)
 
@@ -62,6 +78,9 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             self.end_headers()
 
     def do_POST(self):
+        if not self._validate_origin():
+            return
+
         if self.path.startswith("/v1/chat/completions"):
             self.handle_chat_completions()
         else:

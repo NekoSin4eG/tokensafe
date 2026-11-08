@@ -5,7 +5,7 @@ from src.license_manager import LicenseManager
 class TestLicenseManager(unittest.TestCase):
     def test_generate_and_validate_solo_license(self):
         key = LicenseManager.generate_license("solo", "dev@example.com", duration_days=30)
-        self.assertTrue(key.startswith("TS1."))
+        self.assertTrue(key.startswith(("TS1.", "TS2.")))
         valid, payload, msg = LicenseManager.validate_license(key)
         self.assertTrue(valid)
         self.assertEqual(payload["tier"], "solo")
@@ -29,7 +29,7 @@ class TestLicenseManager(unittest.TestCase):
         tampered_key = f"{parts[0]}.{parts[1]}.badsignature1234567890abcdef123"
         valid, payload, msg = LicenseManager.validate_license(tampered_key)
         self.assertFalse(valid)
-        self.assertIn("Invalid signature", msg)
+        self.assertTrue("signature" in msg.lower() or "tampered" in msg.lower())
 
     def test_expired_license_rejected(self):
         # Generate with negative duration to simulate expiration

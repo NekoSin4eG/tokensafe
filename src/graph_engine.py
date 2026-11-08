@@ -88,6 +88,10 @@ class CodeGraph:
         Fast incremental scan of the workspace.
         Parses modified files only; returns number of files re-indexed.
         """
+        system_roots = {"/", "/Users", "/home", "/root", os.path.expanduser("~")}
+        if self.root_dir in system_roots:
+            return 0
+
         reindexed = 0
         current_files = set()
 

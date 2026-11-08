@@ -1,8 +1,8 @@
 src/cloud_backend.py
+src/mailer.py
 src/__pycache__/
 tests/
 frontend/
-landing/
 bin/sync-public.sh
 data/
 .github/

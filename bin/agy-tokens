@@ -58,6 +58,10 @@ def main():
         from src.installer import AgentInstaller
         AgentInstaller.run_interactive()
 
+    elif command in ("update", "upgrade"):
+        from src.installer import AgentInstaller
+        AgentInstaller.self_update()
+
     elif command == "proxy":
         from src.proxy import run_proxy
         port = int(args[1]) if len(args) > 1 else 8765

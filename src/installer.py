@@ -15,7 +15,15 @@ import sys
 import json
 import shutil
 import re
+import subprocess
 from typing import Dict, List, Any, Optional, Tuple
+
+RESET = "\033[0m"
+BOLD = "\033[1m"
+GREEN = "\033[32m"
+CYAN = "\033[36m"
+YELLOW = "\033[33m"
+RED = "\033[31m"
 
 HOME = os.path.expanduser("~")
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -462,8 +470,87 @@ class AgentInstaller:
         print(f"\n\033[32m\033[1m✅ TokenSafe successfully connected to {installed_count} agent(s)!\033[0m")
         print("   Restart your IDE / Agent to start saving tokens automatically.\n")
 
+    @classmethod
+    def self_update(cls):
+        """
+        One-click self update for TokenSafe:
+        1. Detects package installation source (git, npm, pip).
+        2. Upgrades TokenSafe engine to latest release.
+        3. Re-synchronizes MCP configs and rules for all active agents.
+        4. Refreshes local version cache.
+        """
+        print(f"\n{BOLD}{CYAN}╔════════════════════════════════════════════════════════════════════╗{RESET}")
+        print(f"{BOLD}{CYAN}║             ⚡ TOKENSAFE ONE-CLICK SELF-UPDATE ⚡                 ║{RESET}")
+        print(f"{BOLD}{CYAN}╚════════════════════════════════════════════════════════════════════╝{RESET}\n")
+
+        # 1. Check if git clone installation (e.g. ~/.tokensafe)
+        is_git_clone = os.path.isdir(os.path.join(PROJECT_ROOT, ".git"))
+        if is_git_clone and PROJECT_ROOT.endswith((".tokensafe", "agy-token-optimizer")):
+            print(f"  {CYAN}→{RESET} Detected local repository at {PROJECT_ROOT}. Pulling latest changes...")
+            try:
+                res = subprocess.run(["git", "pull", "--quiet"], cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=10)
+                if res.returncode == 0:
+                    print(f"  {GREEN}✔{RESET} Git repository updated to latest commit.")
+            except Exception as e:
+                print(f"  {YELLOW}⚠{RESET} Git pull skipped: {e}")
+
+        # 2. Check npm global
+        if shutil.which("npm"):
+            try:
+                res = subprocess.run(["npm", "list", "-g", "--depth=0", "tokensafe"], capture_output=True, text=True, timeout=5)
+                if "tokensafe@" in res.stdout:
+                    print(f"  {CYAN}→{RESET} Updating global npm package (npm install -g tokensafe@latest)...")
+                    up_res = subprocess.run(["npm", "install", "-g", "tokensafe@latest"], capture_output=True, text=True, timeout=30)
+                    if up_res.returncode == 0:
+                        print(f"  {GREEN}✔{RESET} npm package upgraded successfully.")
+            except Exception:
+                pass
+
+        # 3. Check pip
+        pip_cmd = "pip3" if shutil.which("pip3") else ("pip" if shutil.which("pip") else None)
+        if pip_cmd:
+            try:
+                res = subprocess.run([pip_cmd, "list"], capture_output=True, text=True, timeout=5)
+                if "tokensafe" in res.stdout:
+                    print(f"  {CYAN}→{RESET} Updating Python package ({pip_cmd} install --upgrade tokensafe)...")
+                    up_res = subprocess.run([pip_cmd, "install", "--upgrade", "tokensafe"], capture_output=True, text=True, timeout=30)
+                    if up_res.returncode == 0:
+                        print(f"  {GREEN}✔{RESET} Python package upgraded successfully.")
+            except Exception:
+                pass
+
+        # 4. Re-synchronize all detected agents
+        print(f"\n  {CYAN}→{RESET} Re-synchronizing AI Agent MCP configs & rules...")
+        agents = cls.detect_available_agents()
+        synced_count = 0
+        for key, info in agents.items():
+            if info["installed"]:
+                ok, msg = cls.install_mcp_config(key)
+                if ok:
+                    print(f"    {GREEN}✔{RESET} {info['name']}: {msg}")
+                    synced_count += 1
+                else:
+                    print(f"    {YELLOW}⚠{RESET} {info['name']}: {msg}")
+
+        # 5. Refresh local version cache
+        try:
+            data_dir = os.path.join(PROJECT_ROOT, "data")
+            cache_file = os.path.join(data_dir, "version_cache.json")
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
+        except Exception:
+            pass
+
+        print(f"\n{BOLD}{GREEN}✅ Self-update complete!{RESET}")
+        print(f"   Synchronized {synced_count} agent environments with zero-loss AST & God Nodes rules.")
+        print(f"   Run {BOLD}tokensafe stats{RESET} to view token savings.\n")
+
 def main():
-    AgentInstaller.run_interactive()
+    args = sys.argv[1:]
+    if args and args[0] in ("update", "--update", "upgrade", "--upgrade"):
+        AgentInstaller.self_update()
+    else:
+        AgentInstaller.run_interactive()
 
 if __name__ == "__main__":
     main()

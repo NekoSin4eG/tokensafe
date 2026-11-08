@@ -38,22 +38,23 @@ class CommandSanitizer:
             return None, 0, ""
 
         cmd = command.strip()
+        has_compound_operators = bool(re.search(r"(&&|\|\||;)", cmd))
 
-        # 1. git diff optimization (Exclude massive lockfiles and bundles)
+        # 1. git diff optimization (Exclude massive lockfiles and bundles only when diffing unscoped repository)
         if re.search(r"\bgit\s+diff\b", cmd):
             # Check if user already specified lockfile exclusion
             if ":!package-lock" not in cmd and ":!*.lock" not in cmd and ":!" not in cmd:
-                # Append pathspec exclusions
-                # If " -- " already exists, append exclusions; otherwise add " -- "
-                excludes_str = " ".join(cls.LOCKFILE_EXCLUDES)
-                if " -- " in cmd:
-                    new_cmd = f"{cmd} {excludes_str}"
-                else:
-                    new_cmd = f"{cmd} -- . {excludes_str}"
+                tokens = cmd.split()[2:] # args after git diff
+                has_path = any(not t.startswith('-') and not re.match(r'^(HEAD(~[0-9]+)?|main|master|[0-9a-f]{7,40})$', t) for t in tokens)
+                if not has_path:
+                    excludes_str = " ".join(cls.LOCKFILE_EXCLUDES)
+                    if " -- " in cmd:
+                        new_cmd = f"{cmd} {excludes_str}"
+                    else:
+                        new_cmd = f"{cmd} -- {excludes_str}"
 
-                # Typical lockfile diff can easily exceed 2,000 - 10,000 tokens
-                est_saved = 3500
-                return new_cmd, est_saved, "Excluded lockfiles/bundles from git diff"
+                    est_saved = 3500
+                    return new_cmd, est_saved, "Excluded lockfiles/bundles from git diff"
 
         # 2. git log optimization (Cap unbounded commit history)
         if re.search(r"\bgit\s+log\b", cmd):
@@ -90,7 +91,15 @@ class CommandSanitizer:
                 stages = [s.strip() for s in re.split(r'(?<!\|)\|(?!\|)', cmd)]
                 for i, stage in enumerate(stages):
                     if re.search(r"\bgit\b.*?\bgrep\b", stage):
-                        if " -- " in stage:
+                        if "||" in stage:
+                            left, right = stage.split("||", 1)
+                            left = left.strip()
+                            if " -- " in left:
+                                left = f"{left} {git_excludes}"
+                            else:
+                                left = f"{left} -- . {git_excludes}"
+                            stages[i] = f"{left} || {right.strip()}"
+                        elif " -- " in stage:
                             stages[i] = f"{stage} {git_excludes}"
                         else:
                             stages[i] = f"{stage} -- . {git_excludes}"
