@@ -3,6 +3,7 @@ __pycache__/
 *.pyo
 .DS_Store
 data/config.json
+data/metrics.db
 data/skeletons/
 data/loop_state.json
 data/dashboard.html
