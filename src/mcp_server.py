@@ -23,6 +23,8 @@ from src.metrics import MetricsTracker
 from src.dashboard import Dashboard
 from src.graph_engine import GraphEngine
 from src.tokenizer import count_tokens
+from src.agent_firewall import AgentFirewall
+from src.diff_slicer import DiffSlicer
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
@@ -87,6 +89,18 @@ TOOLS = [
         }
     },
     {
+        "name": "slice_diff",
+        "description": "Slices unified diffs, omitting lockfiles and minimizing context lines to reduce tokens by up to 80%.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "diff": {"type": "string", "description": "Raw git diff text"},
+                "max_context": {"type": "integer", "description": "Maximum surrounding context lines (default: 2)"}
+            },
+            "required": ["diff"]
+        }
+    },
+    {
         "name": "get_token_savings_metrics",
         "description": "Returns cumulative token and cost savings analytics.",
         "inputSchema": {
@@ -107,6 +121,11 @@ def handle_tool_call(name: str, args: dict) -> dict:
 
         if not path or not os.path.exists(path):
             return {"isError": True, "content": [{"type": "text", "text": f"File not found: {path}"}]}
+
+        # Check Subagent Firewall dedup cache
+        is_hit, cached_text, saved_dedup = AgentFirewall.check_cache("mcp_session", path, symbol=symbol or "", tracker=tracker)
+        if is_hit and cached_text:
+            return {"content": [{"type": "text", "text": cached_text}]}
 
         # Check loop detector
         is_loop, repeats, msg = LoopDetector.check_loop("mcp_session", "smart_read_file", args)
@@ -182,6 +201,21 @@ def handle_tool_call(name: str, args: dict) -> dict:
             "reason": reason or "No modification needed"
         }
         return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+
+    elif name == "slice_diff":
+        raw_diff = args.get("diff", "")
+        max_ctx = int(args.get("max_context", 2))
+        sliced, orig_t, opt_t = DiffSlicer.slice_diff(raw_diff, max_context_lines=max_ctx)
+        saved = max(0, orig_t - opt_t)
+        if saved > 0:
+            tracker.record_event(
+                session_id="mcp_session",
+                event_type="DIFF_SLICER",
+                original_tokens=orig_t,
+                optimized_tokens=opt_t,
+                details={"saved_tokens": saved, "max_context": max_ctx}
+            )
+        return {"content": [{"type": "text", "text": sliced}]}
 
     elif name == "get_token_savings_metrics":
         dashboard = Dashboard(tracker)

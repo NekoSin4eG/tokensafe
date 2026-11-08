@@ -8,10 +8,12 @@ Endpoint: http://127.0.0.1:8765/v1
 import sys
 import os
 import json
+import queue
+import threading
 import urllib.request
 import urllib.error
 from http.server import HTTPServer, BaseHTTPRequestHandler
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, BASE_DIR)
@@ -22,10 +24,43 @@ from src.dashboard import Dashboard
 from src.loop_detector import LoopDetector
 from src.secret_redactor import SecretRedactor
 from src.graph_engine import GraphEngine
+from src.cache_normalizer import PromptCacheNormalizer
+from src.governor import ContextGovernor
 
 DEFAULT_PORT = 8765
 DEFAULT_HOST = os.environ.get("HOST", os.environ.get("TOKENSAFE_HOST", "0.0.0.0"))
 DEFAULT_UPSTREAM = "https://api.deepseek.com/v1"
+
+class EventBroadcaster:
+    """Thread-safe pub/sub for Server-Sent Events (SSE) streaming."""
+    def __init__(self):
+        self._subscribers: List[queue.Queue] = []
+        self._lock = threading.Lock()
+
+    def subscribe(self) -> queue.Queue:
+        q = queue.Queue(maxsize=50)
+        with self._lock:
+            self._subscribers.append(q)
+        return q
+
+    def unsubscribe(self, q: queue.Queue):
+        with self._lock:
+            if q in self._subscribers:
+                self._subscribers.remove(q)
+
+    def publish(self, event_type: str, data: Dict[str, Any]):
+        payload = f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+        with self._lock:
+            dead = []
+            for q in self._subscribers:
+                try:
+                    q.put_nowait(payload)
+                except queue.Full:
+                    dead.append(q)
+            for d in dead:
+                self._subscribers.remove(d)
+
+BROADCASTER = EventBroadcaster()
 
 class TokenSafeProxyHandler(BaseHTTPRequestHandler):
     """Handles HTTP requests and proxies /v1/chat/completions with token optimization."""
@@ -70,6 +105,35 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Type", "application/json")
             self.end_headers()
             self.wfile.write(json.dumps(summary, indent=2).encode("utf-8"))
+
+        elif self.path in ("/api/events", "/events"):
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Cache-Control", "no-cache")
+            self.send_header("Connection", "keep-alive")
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.end_headers()
+
+            q = BROADCASTER.subscribe()
+            try:
+                initial_summary = tracker.get_summary()
+                init_msg = f"event: init\ndata: {json.dumps(initial_summary, ensure_ascii=False)}\n\n"
+                self.wfile.write(init_msg.encode("utf-8"))
+                self.wfile.flush()
+
+                while True:
+                    try:
+                        msg = q.get(timeout=15.0)
+                        self.wfile.write(msg.encode("utf-8"))
+                        self.wfile.flush()
+                    except queue.Empty:
+                        self.wfile.write(b": heartbeat\n\n")
+                        self.wfile.flush()
+            except (BrokenPipeError, ConnectionResetError):
+                pass
+            finally:
+                BROADCASTER.unsubscribe(q)
+            return
 
         elif self.path == "/health":
             self.send_response(200)
@@ -134,31 +198,75 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-        # 4. Forward to Upstream
-        auth_header = self.headers.get("Authorization", "")
-        # Check environment variable first, then fallback to local config
-        upstream_key = os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("TOKENSAFE_UPSTREAM_KEY", "")
-        if not upstream_key:
-            data_dir = os.environ.get("TOKENSAFE_DATA_DIR", os.path.join(BASE_DIR, "data"))
-            config_path = os.path.join(data_dir, "config.json")
-            if os.path.exists(config_path):
-                try:
-                    with open(config_path) as f:
-                        conf = json.load(f)
-                        upstream_key = conf.get("deepseek_api_key", "")
-                except Exception:
-                    pass
+        # 4. Prompt Cache Prefix Normalization (100% Cache Hits)
+        if messages:
+            messages, cache_meta = PromptCacheNormalizer.normalize_messages(messages)
+            payload["messages"] = messages
 
-        final_auth = auth_header or (f"Bearer {upstream_key}" if upstream_key else "")
-        upstream_url = os.environ.get("TOKENSAFE_UPSTREAM_URL", "https://api.deepseek.com/chat/completions")
+        # 5. Context Window Governor (Budget Autothrottle)
+        if messages:
+            messages, gov_stats = ContextGovernor.govern_messages(messages, session_id="proxy_session")
+            payload["messages"] = messages
+            if gov_stats.get("throttled"):
+                BROADCASTER.publish("governor_throttle", gov_stats)
+
+        # 6. Resolve Multi-Provider Upstream & API Key
+        auth_header = self.headers.get("Authorization", "")
+        custom_url = os.environ.get("TOKENSAFE_UPSTREAM_URL", "")
+
+        # Supported keys from environment or config
+        data_dir = os.environ.get("TOKENSAFE_DATA_DIR", os.path.join(BASE_DIR, "data"))
+        conf_keys = {}
+        config_path = os.path.join(data_dir, "config.json")
+        if os.path.exists(config_path):
+            try:
+                with open(config_path) as f:
+                    conf_keys = json.load(f)
+            except Exception:
+                pass
+
+        deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "") or conf_keys.get("deepseek_api_key", "")
+        openai_key = os.environ.get("OPENAI_API_KEY", "") or conf_keys.get("openai_api_key", "")
+        gemini_key = os.environ.get("GEMINI_API_KEY", "") or conf_keys.get("gemini_api_key", "")
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "") or conf_keys.get("anthropic_api_key", "")
+        generic_upstream_key = os.environ.get("TOKENSAFE_UPSTREAM_KEY", "")
+
+        # Infer upstream URL if not provided
+        if not custom_url:
+            if openai_key and not deepseek_key:
+                upstream_url = "https://api.openai.com/v1/chat/completions"
+                resolved_key = openai_key
+            elif anthropic_key and not deepseek_key:
+                upstream_url = "https://api.anthropic.com/v1/messages"
+                resolved_key = anthropic_key
+            else:
+                upstream_url = "https://api.deepseek.com/chat/completions"
+                resolved_key = deepseek_key or generic_upstream_key
+        else:
+            upstream_url = custom_url
+            if "openai.com" in upstream_url:
+                resolved_key = openai_key or generic_upstream_key or deepseek_key
+            elif "anthropic.com" in upstream_url:
+                resolved_key = anthropic_key or generic_upstream_key
+            elif "googleapis.com" in upstream_url:
+                resolved_key = gemini_key or generic_upstream_key
+            else:
+                resolved_key = deepseek_key or generic_upstream_key or openai_key
+
+        headers = {"Content-Type": "application/json"}
+        if auth_header:
+            headers["Authorization"] = auth_header
+        elif resolved_key:
+            if "anthropic.com" in upstream_url:
+                headers["x-api-key"] = resolved_key
+                headers["anthropic-version"] = "2023-06-01"
+            else:
+                headers["Authorization"] = f"Bearer {resolved_key}"
 
         req = urllib.request.Request(
             upstream_url,
             data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Authorization": final_auth,
-                "Content-Type": "application/json"
-            }
+            headers=headers
         )
 
         try:
@@ -170,6 +278,14 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                         self.send_header(k, v)
                 self.end_headers()
                 self.wfile.write(resp_data)
+
+                # Broadcast live telemetry update to SSE dashboard subscribers
+                try:
+                    tracker = MetricsTracker()
+                    summary = tracker.get_summary()
+                    BROADCASTER.publish("stats_update", summary)
+                except Exception:
+                    pass
         except urllib.error.HTTPError as e:
             self.send_response(e.code)
             self.end_headers()

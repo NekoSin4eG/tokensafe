@@ -22,6 +22,8 @@ from src.command_sanitizer import CommandSanitizer
 from src.loop_detector import LoopDetector
 from src.metrics import MetricsTracker
 from src.tokenizer import count_tokens
+from src.agent_firewall import AgentFirewall
+from src.diff_slicer import DiffSlicer
 
 def main():
     try:
@@ -105,7 +107,17 @@ def main():
         start_line = args.get("StartLine")
         end_line = args.get("EndLine")
 
-        # Step 3A: If model explicitly specified line range, respect it
+        # Step 3A: Subagent Firewall — Check if file was already read in active session
+        is_hit, cached_text, saved_dedup = AgentFirewall.check_cache(
+            session_id=conversation_id,
+            file_path=path,
+            tracker=tracker
+        )
+        if is_hit and saved_dedup > 0:
+            # Point to cached skeleton view or let tool proceed with cached metadata
+            response["reason"] = f"Token Optimizer: Subagent Firewall dedup hit (Saved ~{saved_dedup} tokens)"
+
+        # Step 3B: If model explicitly specified line range, respect it
         if start_line is not None and end_line is not None:
             print(json.dumps(response))
             return
@@ -178,10 +190,18 @@ def main():
                 print(json.dumps(response))
                 return
 
-    # 4. run_command Optimization (Command Sanitizer)
+    # 4. run_command Optimization (Command Sanitizer & Diff Slicer)
     elif tool_name == "run_command":
         cmd = args.get("CommandLine", "")
-        new_cmd, est_saved, reason = CommandSanitizer.sanitize(cmd)
+        # Check AST Diff Slicer first
+        diff_cmd, diff_saved, diff_reason = DiffSlicer.optimize_git_diff_command(cmd)
+        if diff_cmd:
+            new_cmd = diff_cmd
+            est_saved = diff_saved
+            reason = diff_reason
+        else:
+            new_cmd, est_saved, reason = CommandSanitizer.sanitize(cmd)
+
         if new_cmd and est_saved > 0:
             response["overwrite"] = {"CommandLine": new_cmd}
             response["reason"] = f"Token Optimizer: {reason} (Saved ~{est_saved} tokens)"

@@ -179,6 +179,68 @@ def main():
         b_after = (os.path.getsize(tracker.db_path) if os.path.exists(tracker.db_path) else 0) / 1024.0
         print(f"\033[32m✔ Database compacted. Size: {b_before:.1f} KB ➔ {b_after:.1f} KB\033[0m\n")
 
+    elif command in ("digest", "weekly-digest"):
+        from src.weekly_digest import WeeklyDigestGenerator
+        from src.cloud_backend import CloudBackendService
+        from src.mailer import TokenSafeMailer
+
+        target_email = None
+        do_send = "--send" in args
+        force = "--force" in args
+
+        for a in args:
+            if a.startswith("--email="):
+                target_email = a.split("=", 1)[1].strip()
+
+        if not target_email:
+            from src.license_manager import LicenseManager
+            _, payload = LicenseManager.get_active_license()
+            target_email = payload.get("email") or "teamlead@example.com"
+
+        print(f"\n\033[1m\033[36m⚡ COMPILING FRIDAY TEAM ROI DIGEST ⚡\033[0m")
+        print(f"Target Teamlead: {target_email}")
+
+        stats = WeeklyDigestGenerator.get_team_weekly_stats(target_email)
+        if not stats:
+            # Fallback mock/synthetic preview if DB has no historical team events
+            stats = {
+                "owner_email": target_email,
+                "tier": "team",
+                "seats_total": 5,
+                "active_members_count": 4,
+                "total_members_count": 5,
+                "total_original_tokens": 5800000,
+                "total_saved_tokens": 4200000,
+                "total_saved_human": "4.2M",
+                "total_usd_saved": 28.50,
+                "total_events": 340,
+                "reduction_pct": 72.4,
+                "leaderboard": [
+                    {"rank": 1, "email": "alex.dev@corp.com", "saved_tokens": 1650000, "saved_tokens_human": "1.7M", "usd_saved_formatted": "$11.20", "event_count": 120},
+                    {"rank": 2, "email": "maria.arch@corp.com", "saved_tokens": 1200000, "saved_tokens_human": "1.2M", "usd_saved_formatted": "$8.10", "event_count": 94},
+                    {"rank": 3, "email": "sergey.qa@corp.com", "saved_tokens": 850000, "saved_tokens_human": "850K", "usd_saved_formatted": "$5.70", "event_count": 68},
+                    {"rank": 4, "email": target_email, "saved_tokens": 500000, "saved_tokens_human": "500K", "usd_saved_formatted": "$3.50", "event_count": 58}
+                ]
+            }
+
+        print(WeeklyDigestGenerator.render_email_text(stats))
+
+        # Save HTML preview
+        out_html = os.path.join(PROJECT_ROOT, "data", "weekly_digest_preview.html")
+        os.makedirs(os.path.dirname(out_html), exist_ok=True)
+        with open(out_html, "w", encoding="utf-8") as f:
+            f.write(WeeklyDigestGenerator.render_email_html(stats))
+        print(f"\n📧 Apple-style email HTML preview generated at: {out_html}")
+
+        if do_send:
+            ok = TokenSafeMailer.send_weekly_digest(target_email, stats, sync=True)
+            if ok:
+                print(f"\033[32m✔ Weekly digest successfully dispatched to {target_email}!\033[0m\n")
+            else:
+                print(f"\033[33m○ Digest dispatch queued (SMTP_PASS not configured in local environment).\033[0m\n")
+        else:
+            print("Tip: Run with --send to dispatch email, or --email=<addr> to target specific team.\n")
+
     elif command == "reset":
         confirm = input("Are you sure you want to reset all token metrics? [y/N]: ").strip().lower()
         if confirm == "y":

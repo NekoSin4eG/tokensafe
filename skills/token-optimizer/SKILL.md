@@ -23,6 +23,7 @@ This skill provides autonomous AI coding assistants with deterministic, zero-tok
 | `tokensafe:get_api_surface` | Exports public signatures and types for the entire project. | ~300-600 tokens |
 | `tokensafe:smart_read_file` | Reads `path` focusing on `symbol` + 1-hop dependencies; folds inert code into signatures. | -85% to -92% vs raw read |
 | `tokensafe:sanitize_command` | Strips lockfiles, limits test/build output, and prevents context poisoning. | Saves 10k-50k tokens |
+| `tokensafe:slice_diff` | Slices unified git diffs, eliminates lockfiles, and minimizes hunk context lines. | -50% to -80% |
 | `tokensafe:compress_prompt` | Compresses verbose user instructions into lean TOCP S-expressions. | -40% to -65% |
 | `tokensafe:get_token_savings_metrics` | Returns total tokens saved, USD value, and breakdown by source. | ~100 tokens |
 

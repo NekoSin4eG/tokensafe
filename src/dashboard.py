@@ -262,25 +262,27 @@ class Dashboard:
         <h1 class="title">⚡ Antigravity Token Optimizer</h1>
         <p class="subtitle">Next-gen Autonomous Token Economy & Context Preservation</p>
       </div>
-      <div class="subtitle">Live SQLite Tracking</div>
+      <div id="live-pill" class="subtitle" style="display: flex; align-items: center; gap: 6px;">
+        <span style="color: #10b981;">●</span> Live SQLite Tracking
+      </div>
     </div>
 
     <div class="stats-grid">
       <div class="stat-card">
         <div class="stat-label">Total Tokens Saved</div>
-        <div class="stat-value highlight">{total_saved:,}</div>
+        <div id="val-total-saved" class="stat-value highlight">{total_saved:,}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Net Efficiency Gain</div>
-        <div class="stat-value">{pct:.1f}%</div>
+        <div id="val-efficiency-gain" class="stat-value">{pct:.1f}%</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Estimated Value Saved</div>
-        <div class="stat-value highlight">${usd:.4f}</div>
+        <div id="val-usd-saved" class="stat-value highlight">${usd:.4f}</div>
       </div>
       <div class="stat-card">
         <div class="stat-label">Context Traffic</div>
-        <div class="stat-value" style="font-size: 20px; line-height: 38px;">{orig:,} ➔ {opt:,}</div>
+        <div id="val-traffic" class="stat-value" style="font-size: 20px; line-height: 38px;">{orig:,} ➔ {opt:,}</div>
       </div>
     </div>
 
@@ -301,12 +303,45 @@ class Dashboard:
             <th>Savings</th>
           </tr>
         </thead>
-        <tbody>
+        <tbody id="events-tbody">
           {recent_rows}
         </tbody>
       </table>
     </div>
   </div>
+  <script>
+    if (window.EventSource) {{
+      const source = new EventSource('/api/events');
+      const pill = document.getElementById('live-pill');
+      source.onopen = () => {{
+        if (pill) pill.innerHTML = '<span style="color: #10b981;">●</span> LIVE SSE STREAMING';
+      }};
+      source.addEventListener('stats_update', (e) => {{
+        try {{
+          const data = JSON.parse(e.data);
+          if (data.total_saved_tokens !== undefined) {{
+            const el = document.getElementById('val-total-saved');
+            if (el) el.innerText = Number(data.total_saved_tokens).toLocaleString();
+          }}
+          if (data.overall_reduction_pct !== undefined) {{
+            const el = document.getElementById('val-efficiency-gain');
+            if (el) el.innerText = data.overall_reduction_pct.toFixed(1) + '%';
+          }}
+          if (data.total_usd_saved !== undefined) {{
+            const el = document.getElementById('val-usd-saved');
+            if (el) el.innerText = '$' + data.total_usd_saved.toFixed(4);
+          }}
+          if (data.total_original_tokens !== undefined && data.total_optimized_tokens !== undefined) {{
+            const el = document.getElementById('val-traffic');
+            if (el) el.innerText = Number(data.total_original_tokens).toLocaleString() + ' ➔ ' + Number(data.total_optimized_tokens).toLocaleString();
+          }}
+        }} catch (err) {{}}
+      }});
+      source.onerror = () => {{
+        if (pill) pill.innerHTML = '<span style="color: #64748b;">○</span> Disconnected (Reconnecting)';
+      }};
+    }}
+  </script>
 </body>
 </html>
 """
