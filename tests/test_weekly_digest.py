@@ -1,9 +1,17 @@
 import unittest
 import time
 from src.weekly_digest import WeeklyDigestGenerator, format_token_number
-from src.cloud_backend import CloudBackendService, init_cloud_db, get_db_connection
-from src.mailer import TokenSafeMailer
 
+try:
+    from src.cloud_backend import CloudBackendService, init_cloud_db, get_db_connection
+    from src.mailer import TokenSafeMailer
+except ImportError:
+    CloudBackendService = None
+    init_cloud_db = None
+    get_db_connection = None
+    TokenSafeMailer = None
+
+@unittest.skipIf(CloudBackendService is None, "src.cloud_backend is a server-side component not distributed in client repo")
 class TestWeeklyDigest(unittest.TestCase):
     def setUp(self):
         init_cloud_db()

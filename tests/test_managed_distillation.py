@@ -13,14 +13,21 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.cloud_backend import (
-    CloudBackendService,
-    init_cloud_db,
-    get_db_connection
-)
+try:
+    from src.cloud_backend import (
+        CloudBackendService,
+        init_cloud_db,
+        get_db_connection
+    )
+except ImportError:
+    CloudBackendService = None
+    init_cloud_db = None
+    get_db_connection = None
+
 from src.license_manager import LicenseManager
 from src.distiller import UniversalDistiller
 
+@unittest.skipIf(CloudBackendService is None, "src.cloud_backend is a server-side component not distributed in client repo")
 class TestManagedCloudDistillation(unittest.TestCase):
 
     def setUp(self):
