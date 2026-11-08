@@ -22,3 +22,8 @@ Run unit tests with:
 python3 -m unittest discover tests
 ```
 Before submitting changes, ensure zero external runtime dependencies are introduced (standard library only for maximum portability).
+
+## Agent Code Inspection Protocol (TokenSafe MCP)
+- **Architecture Navigation**: Always call `tokensafe:get_architecture_graph` before grep or multi-file reading.
+- **Symbol Inspection**: Always call `tokensafe:smart_read_file` with `symbol` specified to retrieve graph-guided slices with 1-hop dependencies.
+- **Raw Grep**: Strictly prohibited for architectural surveys. Use `tokensafe-out/API_SURFACE.md` or `get_architecture_graph`.
