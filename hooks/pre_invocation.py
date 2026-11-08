@@ -19,6 +19,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from src.compactor import PromptCompactor
 from src.history_compactor import HistoryCompactor
 from src.metrics import MetricsTracker
+from src.environment_auditor import EnvironmentAuditor
 
 def main():
     try:
@@ -39,6 +40,22 @@ def main():
 
     tracker = MetricsTracker()
     inject_steps = []
+
+    # 0. Context Bloat Audit (Fires on first invocation)
+    if invocation_num <= 1:
+        try:
+            bloat_warning = EnvironmentAuditor.get_bloat_warning()
+            if bloat_warning:
+                inject_steps.append({
+                    "systemMessage": {
+                        "systemMessage": "",
+                        "metadata": {
+                            "user_markdown": bloat_warning
+                        }
+                    }
+                })
+        except Exception:
+            pass
 
     # 1. Prompt Compaction
     if last_user_input and len(last_user_input.strip()) >= 5:

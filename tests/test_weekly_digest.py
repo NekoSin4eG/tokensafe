@@ -13,6 +13,13 @@ class TestWeeklyDigest(unittest.TestCase):
             conn.execute("DELETE FROM telemetry WHERE customer_email LIKE '%@digest-test.com'")
             conn.commit()
 
+    def tearDown(self):
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM customers WHERE email LIKE '%@digest-test.com'")
+            conn.execute("DELETE FROM licenses WHERE customer_email LIKE '%@digest-test.com' OR parent_email LIKE '%@digest-test.com'")
+            conn.execute("DELETE FROM telemetry WHERE customer_email LIKE '%@digest-test.com'")
+            conn.commit()
+
     def test_token_number_formatter(self):
         self.assertEqual(format_token_number(4_200_000), "4.2M")
         self.assertEqual(format_token_number(850_000), "850.0K")

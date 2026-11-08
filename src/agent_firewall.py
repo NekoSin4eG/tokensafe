@@ -66,6 +66,7 @@ class AgentFirewall:
         abs_path = os.path.abspath(file_path)
         symbol_key = (symbol or "").strip()
 
+        hit_data = None
         with tracker._get_connection() as conn:
             row = conn.execute("""
                 SELECT id, content, tokens, mtime, hit_count 
@@ -74,15 +75,17 @@ class AgentFirewall:
             """, (session_id, abs_path, symbol_key)).fetchone()
 
             if row and row["mtime"] >= current_mtime:
-                # Cache HIT!
                 cache_id = row["id"]
                 content = row["content"]
                 tokens = row["tokens"]
                 hit_count = row["hit_count"] + 1
 
                 conn.execute("UPDATE subagent_file_cache SET hit_count = ? WHERE id = ?;", (hit_count, cache_id))
+                hit_data = (content, tokens, hit_count)
 
-                # Record savings
+        if hit_data:
+            content, tokens, hit_count = hit_data
+            try:
                 tracker.record_event(
                     session_id=session_id,
                     event_type="SUBAGENT_DEDUP",
@@ -94,12 +97,14 @@ class AgentFirewall:
                         "hit_number": hit_count
                     }
                 )
+            except Exception:
+                pass
 
-                header = (
-                    f"// [TokenSafe Subagent Firewall: Reused session read for '{os.path.basename(abs_path)}' "
-                    f"(Dedup Hit #{hit_count}, Saved ~{tokens - 40} tokens)]\n"
-                )
-                return True, header + content, max(0, tokens - 40)
+            header = (
+                f"// [TokenSafe Subagent Firewall: Reused session read for '{os.path.basename(abs_path)}' "
+                f"(Dedup Hit #{hit_count}, Saved ~{tokens - 40} tokens)]\n"
+            )
+            return True, header + content, max(0, tokens - 40)
 
         return False, None, 0
 
