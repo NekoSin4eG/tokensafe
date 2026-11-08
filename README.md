@@ -56,10 +56,31 @@ Traditional AI code interactions suffer from massive context bloat:
 3. **Stuck Loops & Bloated Diffs:** Terminal `git diff` and repetitive failed commands spiral context into overflow.
 
 ### TokenSafe Solves All Three Autonomously:
+- **Graph-Guided AST Skeletonization:** Folds inactive function bodies into signatures, keeping target functions and 1-hop dependencies full while collapsing unrelated code (`-85% to -92%`).
+- **God Nodes & Architectural Hub Detection:** Calculates Degree Centrality to identify structural project hubs and injects topology awareness into agent sessions without expensive file crawling.
 - **TOCP Prompt Distillation:** Intercepts prompts and distills intent into lean S-Expressions via **Google Gemini (2.0 Flash-Lite), OpenAI ChatGPT (gpt-4o-mini), or DeepSeek-Flash** (`-40% to -70%`). Automatically detects `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `DEEPSEEK_API_KEY`.
-- **AST Skeletonization & Slicing:** Folds inactive function bodies into signatures and windows targeted symbols (`-80% to -92%`).
+- **API Surface Map Generator:** Generates high-density `tokensafe-out/API_SURFACE.md` (~1.5k tokens) for instant agent codebase onboarding.
 - **Predictive Dependency Prefetcher:** Attaches imported symbol signatures to eliminate downstream exploratory `read_file` roundtrips.
+- **Local Secret Redactor:** Sanitizes Stripe, AWS, JWT, and database credentials before network transmission.
 - **Output Guard & Loop Guard:** Blocks destructive full-file rewrites on files $\ge 40$ lines and halts command loops.
+
+---
+
+## ⚡ TokenSafe vs. Graphify: Dynamic In-Flight Defense vs. Static Reports
+
+How TokenSafe complements or supersedes static graph tools like **Graphify** (`graphify-labs/graphify`):
+
+| Capability | Graphify | TokenSafe |
+|---|---|---|
+| **Primary Focus** | Static knowledge graph reports & MCP queries | **In-flight real-time token compression & defense** |
+| **Indexing Cost** | Expensive LLM tokens / heavy graph extraction | **0 tokens, 100% deterministic local AST (< 30ms)** |
+| **Execution Latency** | Offline / CLI-initiated build | **Sub-millisecond inline proxy & lifecycle hooks** |
+| **Active Slicing** | Static file output (`GRAPH_REPORT.md`) | **Dynamic call-graph skeletonization (85–92% saved)** |
+| **Multi-Project Workspace** | Requires manual directory targeting | **Auto-detects project roots per file on the fly** |
+| **Agent Prompt Optimization** | None | **TOCP S-Expression prompt distillation (-40% to -70%)** |
+| **Safety & Runaway Prevention** | None | **Output rewrite guard, loop detector, secret scrubbing** |
+
+> **Complements & Replaces**: If you already use Graphify for repository mapping, TokenSafe works alongside it by compressing real-time agent tool reads on the wire. Or use TokenSafe standalone for a zero-configuration, zero-cost, sub-30ms architecture engine out of the box.
 
 ---
 
@@ -110,6 +131,12 @@ Verified across 5 real-world production scenarios:
 ## 🛠️ CLI Quickstart
 
 ```bash
+# Analyze repository God Nodes and dependency topology
+tokensafe graph
+
+# Generate compact tokensafe-out/API_SURFACE.md interface snapshot
+tokensafe map
+
 # View live savings dashboard in your terminal
 tokensafe stats
 

@@ -21,10 +21,11 @@ from src.command_sanitizer import CommandSanitizer
 from src.loop_detector import LoopDetector
 from src.metrics import MetricsTracker
 from src.dashboard import Dashboard
+from src.graph_engine import GraphEngine
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
-    "version": "1.0.0"
+    "version": "1.1.0"
 }
 
 TOOLS = [
@@ -35,11 +36,31 @@ TOOLS = [
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Absolute path to the code file"},
-                "symbol": {"type": "string", "description": "Optional: targeted function or class name"},
+                "symbol": {"type": "string", "description": "Optional: targeted function or class name for graph-guided skeletonization"},
                 "start_line": {"type": "integer", "description": "Optional: starting line number"},
                 "end_line": {"type": "integer", "description": "Optional: ending line number"}
             },
             "required": ["path"]
+        }
+    },
+    {
+        "name": "get_architecture_graph",
+        "description": "Returns top architectural God Nodes and dependency topology for the target project.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project_path": {"type": "string", "description": "Optional: root directory or file path of the project"}
+            }
+        }
+    },
+    {
+        "name": "get_api_surface",
+        "description": "Generates and returns a compact markdown map of all exported interfaces, classes, and types in the project.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "project_path": {"type": "string", "description": "Optional: root directory or file path of the project"}
+            }
         }
     },
     {
@@ -102,6 +123,15 @@ def handle_tool_call(name: str, args: dict) -> dict:
             return {"content": [{"type": "text", "text": (prefetch_block or "") + content}]}
 
         if symbol:
+            try:
+                graph, rel_path = GraphEngine.for_file(path)
+                graph_skel = graph.graph_guided_skeletonize(path, target_symbol=symbol)
+                if graph_skel:
+                    header = f"// [TokenSafe Graph-Guided Skeleton for '{symbol}' | Full body + 1-hop dependencies]\n"
+                    return {"content": [{"type": "text", "text": (prefetch_block or "") + header + graph_skel}]}
+            except Exception:
+                pass
+
             overwrite, metrics = ToolSlicer.optimize_read_file({"Path": path}, context_hint=symbol)
             if overwrite:
                 with open(path, "r", encoding="utf-8", errors="replace") as f:
@@ -143,6 +173,26 @@ def handle_tool_call(name: str, args: dict) -> dict:
     elif name == "get_token_savings_metrics":
         dashboard = Dashboard(tracker)
         return {"content": [{"type": "text", "text": dashboard.render_markdown()}]}
+
+    elif name == "get_architecture_graph":
+        target = args.get("project_path") or os.getcwd()
+        graph = GraphEngine.get_instance(target)
+        god_nodes = graph.get_god_nodes(7)
+        banner = graph.format_topology_banner()
+        payload = {
+            "project_root": graph.root_dir,
+            "banner": banner,
+            "total_files": len(graph.file_symbols),
+            "total_symbols": len(graph.symbols),
+            "god_nodes": god_nodes
+        }
+        return {"content": [{"type": "text", "text": json.dumps(payload, indent=2, ensure_ascii=False)}]}
+
+    elif name == "get_api_surface":
+        target = args.get("project_path") or os.getcwd()
+        graph = GraphEngine.get_instance(target)
+        surface_md = graph.generate_api_surface()
+        return {"content": [{"type": "text", "text": surface_md}]}
 
     return {"isError": True, "content": [{"type": "text", "text": f"Unknown tool: {name}"}]}
 

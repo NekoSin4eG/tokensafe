@@ -415,20 +415,48 @@ class CodeGraph:
 
 
 class GraphEngine:
-    """Singleton Manager for automatic background graph execution."""
+    """Multi-Project Manager for automatic background graph execution."""
 
-    _instance: Optional[CodeGraph] = None
+    _instances: Dict[str, CodeGraph] = {}
+
+    @classmethod
+    def find_project_root(cls, start_path: str) -> str:
+        """Walks up from start_path to locate project boundary markers."""
+        curr = os.path.abspath(start_path)
+        if os.path.isfile(curr):
+            curr = os.path.dirname(curr)
+
+        root = os.path.abspath(os.sep)
+        while curr and curr != root:
+            for marker in (".git", "package.json", "pyproject.toml", "go.mod", "Cargo.toml", "requirements.txt"):
+                if os.path.exists(os.path.join(curr, marker)):
+                    return curr
+            parent = os.path.dirname(curr)
+            if parent == curr:
+                break
+            curr = parent
+        return os.path.abspath(start_path if os.path.isdir(start_path) else os.path.dirname(start_path))
 
     @classmethod
     def get_instance(cls, root_dir: str = ".") -> CodeGraph:
-        if cls._instance is None or cls._instance.root_dir != os.path.abspath(root_dir):
-            cls._instance = CodeGraph(root_dir)
-            cls._instance.scan()
+        root_abs = os.path.abspath(root_dir)
+        if root_abs not in cls._instances:
+            graph = CodeGraph(root_abs)
+            graph.scan()
+            cls._instances[root_abs] = graph
         else:
-            # Incremental scan if older than 3 seconds
-            if time.time() - cls._instance.last_scanned > 3.0:
-                cls._instance.scan()
-        return cls._instance
+            graph = cls._instances[root_abs]
+            if time.time() - graph.last_scanned > 3.0:
+                graph.scan()
+        return graph
+
+    @classmethod
+    def for_file(cls, file_path: str) -> Tuple[CodeGraph, str]:
+        """Resolves the owning project graph and relative file path for any arbitrary file."""
+        root = cls.find_project_root(file_path)
+        graph = cls.get_instance(root)
+        rel_path = os.path.relpath(os.path.abspath(file_path), root).replace("\\", "/")
+        return graph, rel_path
 
 def main():
     import sys
