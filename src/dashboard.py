@@ -14,6 +14,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 from src.metrics import MetricsTracker
+from src.license_manager import LicenseManager
 try:
     from src.version_checker import VersionChecker
 except ImportError:
@@ -24,6 +25,7 @@ BOLD = "\033[1m"
 GREEN = "\033[32m"
 CYAN = "\033[36m"
 YELLOW = "\033[33m"
+RED = "\033[31m"
 MAGENTA = "\033[35m"
 BLUE = "\033[34m"
 DIM = "\033[2m"
@@ -72,6 +74,23 @@ class Dashboard:
         out.append(f"{BOLD}{CYAN}╚════════════════════════════════════════════════════════════════════╝{RESET}\n")
 
         # Top summary cards
+        tier, payload = LicenseManager.get_active_license()
+        tier_upper = tier.upper()
+        if tier == "free":
+            monthly_saved = self.tracker.get_monthly_saved_tokens()
+            limit = 500_000
+            q_pct = min(100.0, (monthly_saved / limit * 100.0))
+            if monthly_saved >= limit:
+                out.append(f"  {BOLD}Subscription Tier:{RESET}   {YELLOW}COMMUNITY (Free){RESET} • {RED}{BOLD}500k Monthly Quota Reached{RESET}")
+                out.append(f"  {BOLD}Quota Usage:{RESET}         {RED}{render_bar(q_pct)}{RESET} (Upgrade to Solo for Unlimited: {CYAN}https://tokensafe.dev/#pricing{RESET})")
+            else:
+                out.append(f"  {BOLD}Subscription Tier:{RESET}   {YELLOW}COMMUNITY (Free){RESET} • {monthly_saved:,} / {limit:,} tokens this month")
+                out.append(f"  {BOLD}Quota Usage:{RESET}         {YELLOW}{render_bar(q_pct)}{RESET} (Upgrade to Solo for Unlimited)")
+        else:
+            email_info = f" ({payload.get('email', '')})" if payload.get('email') else ""
+            out.append(f"  {BOLD}Subscription Tier:{RESET}   {GREEN}{BOLD}{tier_upper} (Unlimited){RESET}{email_info}")
+        out.append("")
+
         out.append(f"  {BOLD}Total Tokens Saved:{RESET}  {GREEN}{BOLD}{total_saved:,}{RESET} tokens")
         out.append(f"  {BOLD}Efficiency Gain:{RESET}     {YELLOW}{BOLD}{render_bar(pct)}{RESET}")
         out.append(f"  {BOLD}Estimated Savings:{RESET}   {GREEN}${usd:.4f} USD{RESET}")
@@ -203,6 +222,29 @@ class Dashboard:
             </tr>
             """
 
+        tier, payload = LicenseManager.get_active_license()
+        if tier == "free":
+            monthly_saved = self.tracker.get_monthly_saved_tokens()
+            limit = 500_000
+            q_pct = min(100.0, round(monthly_saved / limit * 100.0, 1))
+            banner_html = f"""
+    <div style="background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 12px; padding: 14px 18px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+      <div>
+        <strong style="color: #eab308;">⚡ Community Edition:</strong> {monthly_saved:,} / {limit:,} free tokens saved this month ({q_pct}%).
+      </div>
+      <a href="https://tokensafe.dev/#pricing" target="_blank" style="background: #10b981; color: #090a0f; font-weight: 700; padding: 6px 14px; border-radius: 8px; text-decoration: none; font-size: 12px;">Upgrade to Solo (Unlimited)</a>
+    </div>
+            """
+        else:
+            banner_html = f"""
+    <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 12px; padding: 14px 18px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
+      <div>
+        <strong style="color: #10b981;">⚡ License Active:</strong> TokenSafe {tier.upper()} Plan (Unlimited Tokens).
+      </div>
+      <span style="color: #9ca3af; font-size: 12px;">{payload.get('email', '')}</span>
+    </div>
+            """
+
         html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -266,6 +308,8 @@ class Dashboard:
         <span style="color: #10b981;">●</span> Live SQLite Tracking
       </div>
     </div>
+
+    {banner_html}
 
     <div class="stats-grid">
       <div class="stat-card">

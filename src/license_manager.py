@@ -129,7 +129,7 @@ class LicenseManager:
     """Manages TokenSafe subscription tiers, offline signature verification, and 7-day trials."""
 
     TIERS = {
-        "free": {"max_tokens_monthly": 100_000, "deepseek_cloud": False, "team_analytics": False},
+        "free": {"max_tokens_monthly": 500_000, "deepseek_cloud": False, "team_analytics": False},
         "solo": {"max_tokens_monthly": None, "deepseek_cloud": True, "team_analytics": False},
         "team": {"max_tokens_monthly": None, "deepseek_cloud": True, "team_analytics": True},
         "enterprise": {"max_tokens_monthly": None, "deepseek_cloud": True, "team_analytics": True, "self_hosted": True}
@@ -257,7 +257,7 @@ class LicenseManager:
             if valid:
                 return payload.get("tier", "solo"), payload
 
-        return "free", {"tier": "free", "max_tokens_monthly": 100_000}
+        return "free", {"tier": "free", "max_tokens_monthly": 500_000}
 
     @classmethod
     def save_license(cls, license_key: str) -> Tuple[bool, str]:
@@ -280,3 +280,63 @@ class LicenseManager:
         tier_name = payload.get("tier", "").upper()
         trial_note = " (7-Day Trial)" if payload.get("trial") else ""
         return True, f"Successfully activated TokenSafe {tier_name}{trial_note}!"
+
+    @classmethod
+    def check_quota(cls, tracker: Optional[Any] = None) -> Dict[str, Any]:
+        """
+        Evaluates whether the current active license quota is exceeded.
+        Returns:
+        {
+            "tier": str,
+            "is_quota_exceeded": bool,
+            "monthly_limit": Optional[int],
+            "monthly_saved": int,
+            "warning": Optional[str]
+        }
+        """
+        tier, payload = cls.get_active_license()
+        tier_cfg = cls.TIERS.get(tier, cls.TIERS["free"])
+        max_tokens = tier_cfg.get("max_tokens_monthly")
+
+        # Paid tiers (solo, team, enterprise) have unlimited local optimization
+        if max_tokens is None:
+            return {
+                "tier": tier,
+                "is_quota_exceeded": False,
+                "monthly_limit": None,
+                "monthly_saved": 0,
+                "warning": None
+            }
+
+        # For free tier, calculate trailing 30 days saved tokens
+        if tracker is None:
+            try:
+                from src.metrics import MetricsTracker
+                tracker = MetricsTracker()
+            except Exception:
+                tracker = None
+
+        monthly_saved = tracker.get_monthly_saved_tokens() if tracker else 0
+        exceeded = monthly_saved >= max_tokens
+
+        warning = None
+        if exceeded:
+            warning = (
+                f"⚡ **TokenSafe Quota Alert**: Community Edition limit reached "
+                f"({monthly_saved:,}/{max_tokens:,} tokens saved this month). "
+                f"Advanced optimization is throttled. Upgrade to Solo for unlimited optimization: `tokensafe activate <key>` or visit https://tokensafe.dev."
+            )
+        elif monthly_saved >= int(max_tokens * 0.85):
+            warning = (
+                f"⚡ **TokenSafe Quota Notice**: Community Edition is at {int(monthly_saved / max_tokens * 100)}% of monthly limit "
+                f"({monthly_saved:,}/{max_tokens:,} tokens). "
+                f"Upgrade to Solo for unlimited optimization: `tokensafe activate <key>` or https://tokensafe.dev."
+            )
+
+        return {
+            "tier": tier,
+            "is_quota_exceeded": exceeded,
+            "monthly_limit": max_tokens,
+            "monthly_saved": monthly_saved,
+            "warning": warning
+        }

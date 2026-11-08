@@ -211,6 +211,19 @@ class MetricsTracker:
             "breakdown": combined_breakdown
         }
 
+    def get_monthly_saved_tokens(self) -> int:
+        """Returns total tokens saved in the trailing 30 days for quota calculations."""
+        thirty_days_ago = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT COALESCE(SUM(saved_tokens), 0) as monthly_saved
+                FROM events
+                WHERE timestamp >= ?
+            """, (thirty_days_ago,))
+            row = cursor.fetchone()
+            return int(row["monthly_saved"]) if row else 0
+
     def get_recent_events(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Returns the most recent optimization events."""
         with self._get_connection() as conn:

@@ -400,6 +400,21 @@ python3 -m unittest discover tests
 
 ---
 
+## 💎 Pricing & Plans
+
+TokenSafe is built on an **Open-Core** model designed to give every developer immediate zero-friction value while offering unlimited throughput and centralized governance for professionals and teams:
+
+| Plan | Price | Monthly Token Savings | Capabilities |
+| :--- | :---: | :---: | :--- |
+| **Community (Free)** | **$0** forever | **500,000 tokens / mo** | Multilingual Local Regex Compactor, AST Slicer, Output Guard, Loop Guard, Local SQLite & HTML Dashboard |
+| **Solo Developer** | **$9 / mo** | **Unlimited** | Multi-Provider Distillation (Gemini Flash-Lite, DeepSeek), Subagent Swarm Firewall, Cascading Governor, Multi-turn History Fold |
+| **Engineering Team** | **$29 / seat / mo** | **Unlimited** | Everything in Solo + Friday Team ROI Digest, Cloud Organization Console, Seat Quota Management, Self-Hosted Docker Proxy |
+
+> [!TIP]
+> **500,000 free tokens / month** are included out of the box with zero registration. When your monthly community limit is reached, basic regex compaction continues safely, and you can unlock unlimited Solo optimization anytime at [tokensafe.dev](https://tokensafe.dev/#pricing) or activate via `tokensafe activate <key>`.
+
+---
+
 ## 📄 License
 MIT License. Commercial enterprise licenses available for on-premise B2B deployments.
 

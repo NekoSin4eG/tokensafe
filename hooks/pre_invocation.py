@@ -20,6 +20,7 @@ from src.compactor import PromptCompactor
 from src.history_compactor import HistoryCompactor
 from src.metrics import MetricsTracker
 from src.environment_auditor import EnvironmentAuditor
+from src.license_manager import LicenseManager
 
 def main():
     try:
@@ -41,8 +42,18 @@ def main():
     tracker = MetricsTracker()
     inject_steps = []
 
-    # 0. Context Bloat Audit (Fires on first invocation)
+    # 0. Quota and Environment Audits (Fires on first invocation)
+    quota = LicenseManager.check_quota(tracker)
     if invocation_num <= 1:
+        if quota.get("warning"):
+            inject_steps.append({
+                "systemMessage": {
+                    "systemMessage": "",
+                    "metadata": {
+                        "user_markdown": quota["warning"]
+                    }
+                }
+            })
         try:
             bloat_warning = EnvironmentAuditor.get_bloat_warning()
             if bloat_warning:
@@ -57,9 +68,10 @@ def main():
         except Exception:
             pass
 
-    # 1. Prompt Compaction
+    # 1. Prompt Compaction (Tier 2 LLM Distillation paused if community quota exceeded)
     if last_user_input and len(last_user_input.strip()) >= 5:
-        compaction = PromptCompactor.compact(last_user_input)
+        enable_distill = not quota.get("is_quota_exceeded", False)
+        compaction = PromptCompactor.compact(last_user_input, enable_deepseek=enable_distill)
         saved_tokens = compaction["saved_tokens"]
         reduction_pct = compaction["reduction_pct"]
 
@@ -79,10 +91,16 @@ def main():
                 }
             )
 
-            badge_markdown = (
-                f"⚡ **Token Optimizer:** Compaction active ({tier}) — saved **{saved_tokens} tokens** "
-                f"(-{reduction_pct}%) on this prompt."
-            )
+            if quota.get("is_quota_exceeded"):
+                badge_markdown = (
+                    f"⚡ **TokenSafe:** Saved **{saved_tokens} tokens** via local regex "
+                    f"(Community 500k quota reached — [Upgrade to Solo](https://tokensafe.dev/#pricing) for unlimited deep distillation & history folding)."
+                )
+            else:
+                badge_markdown = (
+                    f"⚡ **Token Optimizer:** Compaction active ({tier}) — saved **{saved_tokens} tokens** "
+                    f"(-{reduction_pct}%) on this prompt."
+                )
 
             inject_steps.append({
                 "systemMessage": {
@@ -93,8 +111,8 @@ def main():
                 }
             })
 
-    # 2. Multi-turn History Compaction
-    if invocation_num >= 3 and transcript_path:
+    # 2. Multi-turn History Compaction (Paused when community quota is exceeded)
+    if not quota.get("is_quota_exceeded", False) and invocation_num >= 3 and transcript_path:
         folded_text, orig_hist_tokens, folded_tokens, stats = HistoryCompactor.fold_transcript(
             transcript_path, invocation_num
         )
