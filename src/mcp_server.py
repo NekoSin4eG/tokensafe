@@ -25,7 +25,7 @@ from src.graph_engine import GraphEngine
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
-    "version": "1.1.0"
+    "version": "1.1.1"
 }
 
 TOOLS = [
