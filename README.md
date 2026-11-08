@@ -68,8 +68,47 @@ Traditional AI code interactions suffer from massive context bloat:
 - **Live SSE Streaming Dashboard:** Real-time reactive Web UI streaming token reductions, live event logs, and USD savings via Server-Sent Events (`/api/events`).
 - **Friday Team ROI Digest:** Automatically aggregates 7-day token economics every Friday and emails team leads an executive HTML report with engineer savings leaderboards.
 - **Environment Overhead Auditor (`tokensafe doctor`):** Inspects active MCP servers and Antigravity skills, measuring system prompt token tax and pruning redundant tool schemas.
+- **MCP Tool Schema Bloat Guard:** Stops heavy MCP servers (50–200+ tools) from injecting 5,000–15,000 hidden schema tokens into every API turn. 1-click toggle (`tokensafe mcp disable <name>`) and real-time in-chat bloat alerts.
+- **Data Retention & Compact Rollups (`tokensafe prune` / `vacuum`):** Automated sliding-window log cleanup with lifetime metric rollups, cutting telemetry database disk footprint by up to 40%.
 - **Local Secret Redactor:** Sanitizes Stripe, AWS, JWT, and database credentials before network transmission.
 - **Output Guard & Loop Guard:** Blocks destructive full-file rewrites on files $\ge 40$ lines and halts command loops.
+
+---
+
+## 🛡️ The Hidden Context Killer: MCP Tool Schema Bloat
+
+Why do AI coding agent quotas (like Antigravity's **5-Hour Limit** or Claude/OpenAI monthly token budgets) evaporate after just a few prompts?
+
+### The Hidden System Prompt Tax
+Whenever an MCP server is configured in your editor (Cursor, Claude Desktop, Antigravity, Windsurf), **the complete JSON schema for every single tool is injected into the LLM's system prompt on EVERY API TURN** — even if you never use that tool!
+
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│  SYSTEM PROMPT ANATOMY (EVERY SINGLE TURN)                            │
+├────────────────────────────────────────────────────────────────────────┤
+│  Base System Instructions                                ~1,500 tokens │
+│  Active Workspace Skills & Prompts                       ~8,000 tokens │
+│  Regular MCP Tools (context7, prisma, etc.)                ~800 tokens │
+│  🚨 Heavy MCP Tools (200+ schemas from cloud/re tools)   ~6,000 tokens │
+├────────────────────────────────────────────────────────────────────────┤
+│  TOTAL HIDDEN BASE TAX BEFORE YOU TYPE A SINGLE CHARACTER:             │
+│  🔥 ~16,300 tokens PER TURN × 15 turns = 244,500 tokens burned!       │
+└────────────────────────────────────────────────────────────────────────┘
+```
+
+- **1 Server with 50 tools** = **~1,500 – 2,500 tokens** of static tax on every turn.
+- **1 Server with 200+ tools** = **~5,000 – 10,000 tokens** per turn!
+- In a 15-turn coding task, **75,000 to 150,000 tokens** are burned on tool schemas alone.
+
+### How TokenSafe Eliminates MCP Bloat:
+1. **`tokensafe doctor` (Context Tax Auditor)**: Scans all configured MCP servers and active skills, measures the exact token overhead per turn, and flags servers with $\ge 40$ tools as `CRITICAL BLOAT`.
+2. **1-Click MCP Management**: Instantly toggle heavy servers without editing JSON files manually:
+   ```bash
+   tokensafe mcp disable rea     # Prunes 208 schemas from system prompt
+   tokensafe mcp enable rea      # Re-enables when actively needed
+   ```
+3. **PreInvocation Bloat Alerts**: Live in-chat warning badges in the IDE when critical MCP bloat is detected on session start.
+4. **Data Retention & Compact Rollups**: Automatic rolling-window event cleanup (`tokensafe prune` and `tokensafe vacuum`) prevents SQLite telemetry from ballooning on disk.
 
 ---
 
