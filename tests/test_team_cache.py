@@ -12,6 +12,8 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+os.environ["TOKENSAFE_PRIVATE_KEY"] = "65b68297d7a3901d8a4b3287b7757f11e7cfc34377a21b039d0f750d643ad9d5"
+
 try:
     from src.cloud_backend import (
         CloudBackendService,

@@ -1,3 +1,6 @@
+import os
+os.environ["TOKENSAFE_PRIVATE_KEY"] = "65b68297d7a3901d8a4b3287b7757f11e7cfc34377a21b039d0f750d643ad9d5"
+
 import unittest
 import time
 from src.weekly_digest import WeeklyDigestGenerator, format_token_number

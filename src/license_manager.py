@@ -18,9 +18,9 @@ DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 LICENSE_FILE = os.path.join(DATA_DIR, "license.json")
 
 # Master Public Key for client-side offline verification (RFC 8032 Ed25519)
-DEFAULT_ED25519_PUBLIC_KEY = "244ea9d4a20e697578b7b7b31db71613c659678d221300dea1c5a03083bc90e9"
-# Private key for cloud server signing (never distributed to untrusted clients)
-DEFAULT_ED25519_PRIVATE_KEY = os.environ.get("TOKENSAFE_PRIVATE_KEY", "6785d298e2df4c2c305bd4956f124f038d2da5cbda7f4146513645f1733064c0")
+DEFAULT_ED25519_PUBLIC_KEY = "beb27bc42a723943822ea1ba5d50b7abb55e430cb691518b0b05edef889d0132"
+# Private key for cloud server signing (never distributed to client, loaded strictly from environment)
+DEFAULT_ED25519_PRIVATE_KEY = os.environ.get("TOKENSAFE_PRIVATE_KEY", "")
 # Rotated HMAC salt for backward compatibility with TS1 legacy licenses
 ROTATED_HMAC_SALT = os.environ.get("TOKENSAFE_HMAC_SALT", "ts-sec-rotated-7b3f9c2d1e0a4f5b6829e1c3a70428e5")
 DEFAULT_SIGNING_SALT = ROTATED_HMAC_SALT
@@ -166,7 +166,9 @@ class LicenseManager:
         payload_b64 = base64.urlsafe_b64encode(payload_bytes).decode("ascii").rstrip("=")
 
         if version == 2:
-            priv_hex = signing_key or DEFAULT_ED25519_PRIVATE_KEY
+            priv_hex = signing_key or os.environ.get("TOKENSAFE_PRIVATE_KEY") or DEFAULT_ED25519_PRIVATE_KEY
+            if not priv_hex:
+                raise ValueError("TOKENSAFE_PRIVATE_KEY environment variable is required to generate license signatures.")
             priv_bytes = bytes.fromhex(priv_hex)
             pub_bytes = bytes.fromhex(DEFAULT_ED25519_PUBLIC_KEY)
             sig_raw = _ed25519_sign_bytes(payload_bytes, priv_bytes, pub_bytes)
