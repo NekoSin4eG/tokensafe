@@ -1,0 +1,26 @@
+version: '3.8'
+
+services:
+  tokensafe-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tokensafe/proxy:latest
+    container_name: tokensafe-enterprise-proxy
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      - PORT=8765
+      - TOKENSAFE_LICENSE_KEY=${TOKENSAFE_LICENSE_KEY:-}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+    volumes:
+      - tokensafe_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8765/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  tokensafe_data:

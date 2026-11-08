@@ -67,6 +67,40 @@ def main():
         from src.mcp_server import run_mcp_server
         run_mcp_server()
 
+    elif command == "activate":
+        from src.license_manager import LicenseManager
+        if len(args) < 2:
+            print("Usage: agy-tokens activate <LICENSE_KEY>")
+            sys.exit(1)
+        key = args[1].strip()
+        ok, msg = LicenseManager.save_license(key)
+        if ok:
+            print(f"\n\033[32m\033[1m✔ {msg}\033[0m\n")
+        else:
+            print(f"\n\033[31m\033[1m✖ {msg}\033[0m\n")
+            sys.exit(1)
+
+    elif command in ("license", "tier"):
+        from src.license_manager import LicenseManager
+        tier, payload = LicenseManager.get_active_license()
+        print("\n\033[1m\033[36m⚡ TOKENSAFE LICENSE STATUS ⚡\033[0m\n")
+        print(f"  Tier:       \033[32m\033[1m{tier.upper()}\033[0m")
+        if tier != "free":
+            print(f"  Email:      {payload.get('email', 'N/A')}")
+            if payload.get("trial"):
+                print(f"  Mode:       \033[33m7-Day Free Trial\033[0m")
+            exp = payload.get("expires_at", 0)
+            if exp > 0:
+                import datetime
+                dt = datetime.datetime.fromtimestamp(exp).strftime('%Y-%m-%d %H:%M:%S')
+                print(f"  Expires:    {dt}")
+            else:
+                print(f"  Expires:    Never (Lifetime)")
+        else:
+            print("  Status:     Free Tier (up to 100,000 tokens/mo)")
+            print("  Upgrade:    https://tokensafe.dev ($9/mo Solo with 7-Day Free Trial)\n")
+        print()
+
     elif command in ("markdown", "md", "export"):
         print(dashboard.render_markdown())
 
