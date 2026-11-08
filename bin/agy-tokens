@@ -3,6 +3,7 @@
 CLI entry point for Antigravity Token Optimizer.
 Usage:
   agy-tokens [stats]           Show visual metrics dashboard
+  agy-tokens html              Generate and open interactive browser dashboard
   agy-tokens test "<prompt>"   Test prompt compression and view savings
   agy-tokens markdown          Output GitHub Markdown report
   agy-tokens reset             Reset metrics database
@@ -10,8 +11,8 @@ Usage:
 
 import sys
 import os
+import subprocess
 
-# Ensure project root is in sys.path
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 sys.path.insert(0, PROJECT_ROOT)
@@ -31,6 +32,19 @@ def main():
     if command in ("stats", "dashboard"):
         print(dashboard.render_terminal())
 
+    elif command in ("html", "web"):
+        html_content = dashboard.render_html()
+        out_path = os.path.join(PROJECT_ROOT, "data", "dashboard.html")
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        print(f"\n⚡ Interactive HTML Dashboard generated at: {out_path}")
+        try:
+            subprocess.run(["open", out_path])
+            print("   Opened in default browser.")
+        except Exception:
+            pass
+
     elif command in ("markdown", "md", "export"):
         print(dashboard.render_markdown())
 
@@ -44,6 +58,7 @@ def main():
         print("\n\033[1m\033[36m⚡ TOKEN COMPRESSION TEST ⚡\033[0m\n")
         print(f"\033[1mOriginal Input:\033[0m  {res['original_text']}")
         print(f"\033[1mCompacted DSL:\033[0m   \033[32m\033[1m{res['compact_text']}\033[0m\n")
+        print(f"\033[1mRouting Tier:\033[0m   \033[33m{res.get('tier', 'REGEX')}\033[0m")
         print(f"\033[1mExtracted Action:\033[0m {res['action']}")
         print(f"\033[1mTarget File:\033[0m      {res['target_file'] or 'None'}")
         print(f"\033[1mScope Symbol:\033[0m     {res['symbol'] or 'None'}")
@@ -62,7 +77,7 @@ def main():
 
     else:
         print(f"Unknown command: {command}")
-        print("Available commands: stats, test, markdown, reset")
+        print("Available commands: stats, html, test, markdown, reset")
         sys.exit(1)
 
 if __name__ == "__main__":

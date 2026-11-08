@@ -33,5 +33,12 @@ class TestCommandSanitizer(unittest.TestCase):
         self.assertIsNotNone(new_cmd)
         self.assertIn("-not -path '*/node_modules/*'", new_cmd)
 
+    def test_grep_sanitization(self):
+        cmd = "grep -rn 'getUserBalance' ."
+        new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
+        self.assertIsNotNone(new_cmd)
+        self.assertIn("--exclude-dir=", new_cmd)
+        self.assertIn("head -n 30", new_cmd)
+
 if __name__ == "__main__":
     unittest.main()

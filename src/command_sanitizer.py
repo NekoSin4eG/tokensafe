@@ -80,4 +80,13 @@ class CommandSanitizer:
                 est_saved = 1500
                 return new_cmd, est_saved, "Pruned .git, node_modules, and venv from find"
 
+        # 5. grep / ripgrep unbounded search
+        if re.search(r"\b(grep|egrep)\b", cmd):
+            if "--exclude-dir" not in cmd and "node_modules" not in cmd:
+                new_cmd = f"{cmd} --exclude-dir={{dist,build,node_modules,.git,coverage,__pycache__,.next,data}}"
+                if "|" not in new_cmd:
+                    new_cmd = f"{new_cmd} | head -n 30"
+                est_saved = 2500
+                return new_cmd, est_saved, "Sanitized grep directories and capped output to 30 matches"
+
         return None, 0, ""

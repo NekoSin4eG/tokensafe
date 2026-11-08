@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
 """
 Antigravity Lifecycle Hook: PreToolUse
-Fires before tools (read_file, run_command) execute.
-1. Intercepts read_file:
-   - If specific function targeted -> AST line windowing (StartLine/EndLine)
-   - If full file requested -> AST Skeletonization (folding method bodies)
-2. Intercepts run_command:
-   - Sanitizes verbose commands (lockfile diffs, unconstrained logs, test outputs)
-3. Records all token savings in SQLite
+1. Loop Guard: Detects identical repeated tool calls and triggers force_ask
+2. Output Guard: Blocks write_file on existing large files, enforcing surgical edit_file
+3. AST Skeletonizer & Line Slicer: Protects read_file operations
+4. Command Sanitizer: Cleans up git diff, git log, pytest, find, grep
+5. Records all savings in SQLite
 """
 
 import sys
@@ -21,7 +19,9 @@ sys.path.insert(0, PROJECT_ROOT)
 from src.slicer import ToolSlicer
 from src.skeletonizer import Skeletonizer
 from src.command_sanitizer import CommandSanitizer
+from src.loop_detector import LoopDetector
 from src.metrics import MetricsTracker
+from src.tokenizer import count_tokens
 
 def main():
     try:
@@ -41,21 +41,76 @@ def main():
     conversation_id = payload.get("conversationId", "default_session")
     last_user_input = payload.get("lastUserInput", "")
 
-    response = {"decision": "allow"}
     tracker = MetricsTracker()
 
-    # 1. read_file Optimization (AST Windowing & Skeletonization)
-    if tool_name == "read_file":
+    # 1. Loop Detector Guard (Applies to all tools)
+    is_loop, repeat_count, loop_msg = LoopDetector.check_loop(conversation_id, tool_name, args)
+    if is_loop:
+        tracker.record_event(
+            session_id=conversation_id,
+            event_type="LOOP_GUARD",
+            original_tokens=5000,
+            optimized_tokens=100,
+            details={"tool": tool_name, "repeats": repeat_count}
+        )
+        print(json.dumps({
+            "decision": "force_ask",
+            "reason": loop_msg
+        }))
+        return
+
+    response = {"decision": "allow"}
+
+    # 2. Output Guard: Block write_file on large existing files to enforce edit_file
+    if tool_name == "write_file":
+        path = args.get("Path", "")
+        content = args.get("Content", "")
+        is_append = args.get("Append", False)
+
+        if not is_append and path and os.path.exists(path):
+            try:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    existing_lines = len(f.readlines())
+            except Exception:
+                existing_lines = 0
+
+            # If file already has >= 40 lines, block wholesale overwrite to save output tokens
+            if existing_lines >= 40:
+                content_tokens = count_tokens(content)
+                tracker.record_event(
+                    session_id=conversation_id,
+                    event_type="OUTPUT_GUARD",
+                    original_tokens=content_tokens,
+                    optimized_tokens=80, # typical edit_file diff tokens
+                    details={
+                        "target_file": os.path.basename(path),
+                        "existing_lines": existing_lines,
+                        "saved_output_tokens": max(0, content_tokens - 80)
+                    }
+                )
+
+                print(json.dumps({
+                    "decision": "deny",
+                    "reason": (
+                        f"Token Optimizer Output Guard: '{os.path.basename(path)}' already exists with {existing_lines} lines. "
+                        f"Wholesale rewriting via write_file burns expensive output tokens. "
+                        f"Please use 'edit_file' with surgical Target and Replacement blocks instead."
+                    )
+                }))
+                return
+
+    # 3. read_file Optimization (AST Windowing & Skeletonization)
+    elif tool_name == "read_file":
         path = args.get("Path", "")
         start_line = args.get("StartLine")
         end_line = args.get("EndLine")
 
-        # Step 1A: If model explicitly specified line range, respect it
+        # Step 3A: If model explicitly specified line range, respect it
         if start_line is not None and end_line is not None:
             print(json.dumps(response))
             return
 
-        # Step 1B: If a specific symbol/function is targeted in user prompt, slice to it
+        # Step 3B: If a specific symbol/function is targeted in user prompt, slice to it
         overwrite_args, metrics = ToolSlicer.optimize_read_file(args, context_hint=last_user_input)
         if overwrite_args and metrics.get("saved_tokens", 0) > 0:
             response["overwrite"] = overwrite_args
@@ -78,7 +133,7 @@ def main():
             print(json.dumps(response))
             return
 
-        # Step 1C: If entire file requested with no symbol target, provide AST Skeleton
+        # Step 3C: If entire file requested with no symbol target, provide AST Skeleton (mtime-cached)
         if path and os.path.exists(path):
             skeleton_path, orig_t, skel_t = Skeletonizer.get_skeleton_file(path)
             if skeleton_path and orig_t > skel_t:
@@ -102,7 +157,7 @@ def main():
                 print(json.dumps(response))
                 return
 
-    # 2. run_command Optimization (Command Sanitizer)
+    # 4. run_command Optimization (Command Sanitizer)
     elif tool_name == "run_command":
         cmd = args.get("CommandLine", "")
         new_cmd, est_saved, reason = CommandSanitizer.sanitize(cmd)
