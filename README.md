@@ -98,8 +98,8 @@ Verified across 5 real-world production scenarios:
 
 | Tier | Price | Highlights |
 |---|---|---|
-| **Hacker (Open-Core)** | **$0** (Free Forever) | 100k tokens/mo, Local Regex compactor, use own DeepSeek key |
-| **Solo Developer** | **$9 / month** | **7-Day Free Trial**, Unlimited Managed DeepSeek-V3, AST Prefetcher, Output Guards |
+| **Hacker (Open-Core)** | **$0** (Free Forever) | 100k tokens/mo, Local Regex compactor, use own DeepSeek / Gemini key |
+| **Solo Developer** | **$9 / month** | **7-Day Free Trial**, Unlimited Managed DeepSeek-Flash / Gemini Flash-Lite, AST Prefetcher, Output Guards |
 | **Engineering Team** | **$29 / dev / mo** | **7-Day Free Trial**, Team Budget Caps, Centralized Ledger, B2B Docker Proxy |
 | **Enterprise** | Custom | On-Premise Nuitka C-compiled Docker Proxy, Custom Compliance, SAML SSO |
 
