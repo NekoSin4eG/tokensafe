@@ -3,9 +3,13 @@
 CLI entry point for Antigravity Token Optimizer.
 Usage:
   agy-tokens [stats]           Show visual metrics dashboard
+  agy-tokens doctor            Audit environment and static context tax (MCP & skills)
+  agy-tokens mcp [list|disable|enable] Manage MCP servers to prune turn overhead
   agy-tokens html              Generate and open interactive browser dashboard
   agy-tokens test "<prompt>"   Test prompt compression and view savings
   agy-tokens markdown          Output GitHub Markdown report
+  agy-tokens prune             Prune granular events into lifetime rollup
+  agy-tokens vacuum            Compact SQLite metrics database
   agy-tokens reset             Reset metrics database
 """
 
@@ -68,8 +72,39 @@ def main():
         run_proxy(port)
 
     elif command == "mcp":
-        from src.mcp_server import run_mcp_server
-        run_mcp_server()
+        subcmd = args[1] if len(args) > 1 else "serve"
+        if subcmd in ("disable", "off", "rm"):
+            if len(args) < 3:
+                print("Usage: agy-tokens mcp disable <server_name>")
+                sys.exit(1)
+            target = args[2].strip()
+            from src.environment_auditor import EnvironmentAuditor
+            res = EnvironmentAuditor.disable_mcp(target)
+            if res["success"]:
+                print(f"\n\033[32m✔ MCP server '{target}' disabled successfully. Removed from active turn overhead.\033[0m\n")
+            else:
+                print(f"\n\033[31m✖ Server '{target}' not found or already disabled.\033[0m\n")
+        elif subcmd in ("enable", "on", "add"):
+            if len(args) < 3:
+                print("Usage: agy-tokens mcp enable <server_name>")
+                sys.exit(1)
+            target = args[2].strip()
+            from src.environment_auditor import EnvironmentAuditor
+            res = EnvironmentAuditor.enable_mcp(target)
+            if res["success"]:
+                print(f"\n\033[32m✔ MCP server '{target}' re-enabled successfully.\033[0m\n")
+            else:
+                print(f"\n\033[31m✖ Server '{target}' not found in disabled servers.\033[0m\n")
+        elif subcmd in ("list", "ls", "status"):
+            from src.environment_auditor import EnvironmentAuditor
+            print(EnvironmentAuditor.format_cli_report())
+        else:
+            from src.mcp_server import run_mcp_server
+            run_mcp_server()
+
+    elif command in ("doctor", "audit", "tax"):
+        from src.environment_auditor import EnvironmentAuditor
+        print(EnvironmentAuditor.format_cli_report())
 
     elif command == "activate":
         from src.license_manager import LicenseManager
@@ -251,7 +286,7 @@ def main():
 
     else:
         print(f"Unknown command: {command}")
-        print("Available commands: stats, html, benchmark, setup, proxy, mcp, test, markdown, prune, vacuum, reset")
+        print("Available commands: stats, doctor, mcp, html, benchmark, setup, proxy, test, markdown, prune, vacuum, reset")
         sys.exit(1)
 
 if __name__ == "__main__":
