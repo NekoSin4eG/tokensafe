@@ -82,17 +82,29 @@ def main():
             transcript_path, invocation_num
         )
         if folded_text and stats.get("saved_tokens", 0) > 0:
-            tracker.record_event(
-                session_id=conversation_id,
-                event_type="HISTORY_FOLD",
-                original_tokens=orig_hist_tokens,
-                optimized_tokens=folded_tokens,
-                details={
-                    "turns": invocation_num,
-                    "read_files": stats.get("read_files_count", 0),
-                    "edited_files": stats.get("edited_files_count", 0)
-                }
-            )
+            # Prevent quadratic double-counting: only record incremental new history mass
+            prev_event = tracker.get_last_event(session_id=conversation_id, event_type="HISTORY_FOLD")
+            prev_orig = 0
+            if prev_event and isinstance(prev_event.get("details"), dict):
+                prev_orig = prev_event["details"].get("total_accum_orig", 0) or prev_event.get("original_tokens", 0)
+
+            delta_orig = max(0, orig_hist_tokens - prev_orig)
+            # Record first fold or incremental accumulation when delta >= 1500 tokens
+            if prev_event is None or delta_orig >= 1500:
+                inc_orig = orig_hist_tokens if prev_event is None else delta_orig
+                inc_saved = max(0, inc_orig - folded_tokens)
+                tracker.record_event(
+                    session_id=conversation_id,
+                    event_type="HISTORY_FOLD",
+                    original_tokens=inc_orig,
+                    optimized_tokens=folded_tokens,
+                    details={
+                        "turns": invocation_num,
+                        "total_accum_orig": orig_hist_tokens,
+                        "read_files": stats.get("read_files_count", 0),
+                        "edited_files": stats.get("edited_files_count", 0)
+                    }
+                )
 
             hist_badge = (
                 f"⚡ **History Compactor:** Stabilized {orig_hist_tokens:,} tokens of previous turns — "

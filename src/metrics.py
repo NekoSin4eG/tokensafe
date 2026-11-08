@@ -174,6 +174,51 @@ class MetricsTracker:
             events.append(ev)
         return events
 
+    def get_last_event(self, session_id: str, event_type: str) -> Optional[Dict[str, Any]]:
+        """Returns the most recent event of a given type for a session."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, session_id, timestamp, event_type, original_tokens,
+                       optimized_tokens, saved_tokens, reduction_pct, est_usd_saved, details
+                FROM events
+                WHERE session_id = ? AND event_type = ?
+                ORDER BY id DESC
+                LIMIT 1
+            """, (session_id, event_type))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            res = dict(row)
+            try:
+                res["details"] = json.loads(res["details"])
+            except Exception:
+                pass
+            return res
+
+    def recalculate_sessions(self):
+        """Recalculates sessions table aggregates directly from events table."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM sessions")
+            cursor.execute("""
+                INSERT INTO sessions (
+                    session_id, created_at, last_updated,
+                    total_original_tokens, total_optimized_tokens,
+                    total_saved_tokens, total_usd_saved
+                )
+                SELECT 
+                    session_id,
+                    MIN(timestamp) as created_at,
+                    MAX(timestamp) as last_updated,
+                    COALESCE(SUM(original_tokens), 0) as total_original_tokens,
+                    COALESCE(SUM(optimized_tokens), 0) as total_optimized_tokens,
+                    COALESCE(SUM(saved_tokens), 0) as total_saved_tokens,
+                    COALESCE(SUM(est_usd_saved), 0.0) as total_usd_saved
+                FROM events
+                GROUP BY session_id
+            """)
+
     def reset(self):
         """Resets all metrics data."""
         with self._get_connection() as conn:

@@ -206,7 +206,9 @@ def handle_tool_call(name: str, args: dict) -> dict:
             "total_symbols": len(graph.symbols),
             "god_nodes": god_nodes
         }
-        est_crawl_tokens = max(5000, len(graph.file_symbols) * 800)
+        # Cap estimated crawl tokens to max 50,000 to prevent runaway spikes on large/root dirs
+        capped_files = min(80, len(graph.file_symbols))
+        est_crawl_tokens = min(50000, max(5000, capped_files * 600))
         topo_tokens = 250
         tracker.record_event(
             session_id="mcp_session",
@@ -229,7 +231,9 @@ def handle_tool_call(name: str, args: dict) -> dict:
         graph = GraphEngine.get_instance(target_abs)
         surface_md = graph.generate_api_surface()
         surface_tokens = count_tokens(surface_md)
-        est_orig_tokens = max(10000, len(graph.file_symbols) * 1200)
+        # Cap estimated crawl tokens to max 60,000
+        capped_files = min(100, len(graph.file_symbols))
+        est_orig_tokens = min(60000, max(10000, capped_files * 600))
         tracker.record_event(
             session_id="mcp_session",
             event_type="GRAPH_TOPOLOGY",
