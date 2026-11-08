@@ -35,6 +35,8 @@ EVENT_NAMES = {
     "PROMPT": "Prompt Compactor (TOCP)",
     "TOOL_READ": "File Line Slicer (AST)",
     "AST_SKELETON": "AST Skeletonizer (Signatures)",
+    "GRAPH_SKELETON": "Graph-Guided Slicer (Call-Graph)",
+    "GRAPH_TOPOLOGY": "Architecture Graph (God Nodes)",
     "COMMAND_FILTER": "Command Sanitizer (CLI)",
     "OUTPUT_GUARD": "Output Token Guard (write_file)",
     "LOOP_GUARD": "Anti-Stuck Loop Guard",

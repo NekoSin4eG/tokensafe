@@ -110,8 +110,29 @@ def main():
             print(json.dumps(response))
             return
 
-        # Step 3B: If a specific symbol/function is targeted in user prompt, slice to it
+        # Step 3B: If a specific symbol/function is targeted in user prompt, check graph-guided skeleton first
         overwrite_args, metrics = ToolSlicer.optimize_read_file(args, context_hint=last_user_input)
+        target_sym = metrics.get("target_symbol")
+        if target_sym and path and os.path.exists(path):
+            skel_path, orig_t, skel_t = Skeletonizer.get_skeleton_file(path, target_symbol=target_sym)
+            if skel_path and orig_t > skel_t:
+                saved = orig_t - skel_t
+                response["overwrite"] = {"Path": skel_path}
+                response["reason"] = f"Token Optimizer: Graph-guided AST view for '{target_sym}' (Saved ~{saved} tokens)"
+                tracker.record_event(
+                    session_id=conversation_id,
+                    event_type="GRAPH_SKELETON",
+                    original_tokens=orig_t,
+                    optimized_tokens=skel_t,
+                    details={
+                        "target_file": os.path.basename(path),
+                        "symbol": target_sym,
+                        "saved_tokens": saved
+                    }
+                )
+                print(json.dumps(response))
+                return
+
         if overwrite_args and metrics.get("saved_tokens", 0) > 0:
             response["overwrite"] = overwrite_args
             response["reason"] = (

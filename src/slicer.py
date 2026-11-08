@@ -91,7 +91,8 @@ class ToolSlicer:
                 "original_tokens": total_tokens,
                 "optimized_tokens": sliced_tokens,
                 "lines_total": total_lines,
-                "lines_sliced": (new_end - new_start + 1)
+                "lines_sliced": (new_end - new_start + 1),
+                "target_symbol": target_symbol
             }
             return overwrite, metrics
 

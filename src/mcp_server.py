@@ -22,6 +22,7 @@ from src.loop_detector import LoopDetector
 from src.metrics import MetricsTracker
 from src.dashboard import Dashboard
 from src.graph_engine import GraphEngine
+from src.tokenizer import count_tokens
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
@@ -127,6 +128,18 @@ def handle_tool_call(name: str, args: dict) -> dict:
                 graph, rel_path = GraphEngine.for_file(path)
                 graph_skel = graph.graph_guided_skeletonize(path, target_symbol=symbol)
                 if graph_skel:
+                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                        raw_code = f.read()
+                    orig_t = count_tokens(raw_code)
+                    skel_t = count_tokens(graph_skel)
+                    saved = max(0, orig_t - skel_t)
+                    tracker.record_event(
+                        session_id="mcp_session",
+                        event_type="GRAPH_SKELETON",
+                        original_tokens=orig_t,
+                        optimized_tokens=skel_t,
+                        details={"file": os.path.basename(path), "symbol": symbol, "saved_tokens": saved}
+                    )
                     header = f"// [TokenSafe Graph-Guided Skeleton for '{symbol}' | Full body + 1-hop dependencies]\n"
                     return {"content": [{"type": "text", "text": (prefetch_block or "") + header + graph_skel}]}
             except Exception:
@@ -186,12 +199,30 @@ def handle_tool_call(name: str, args: dict) -> dict:
             "total_symbols": len(graph.symbols),
             "god_nodes": god_nodes
         }
+        est_crawl_tokens = max(5000, len(graph.file_symbols) * 800)
+        topo_tokens = 250
+        tracker.record_event(
+            session_id="mcp_session",
+            event_type="GRAPH_TOPOLOGY",
+            original_tokens=est_crawl_tokens,
+            optimized_tokens=topo_tokens,
+            details={"hubs_count": len(god_nodes), "indexed_files": len(graph.file_symbols)}
+        )
         return {"content": [{"type": "text", "text": json.dumps(payload, indent=2, ensure_ascii=False)}]}
 
     elif name == "get_api_surface":
         target = args.get("project_path") or os.getcwd()
         graph = GraphEngine.get_instance(target)
         surface_md = graph.generate_api_surface()
+        surface_tokens = count_tokens(surface_md)
+        est_orig_tokens = max(10000, len(graph.file_symbols) * 1200)
+        tracker.record_event(
+            session_id="mcp_session",
+            event_type="GRAPH_TOPOLOGY",
+            original_tokens=est_orig_tokens,
+            optimized_tokens=surface_tokens,
+            details={"type": "API_SURFACE", "symbols_count": len(graph.symbols)}
+        )
         return {"content": [{"type": "text", "text": surface_md}]}
 
     return {"isError": True, "content": [{"type": "text", "text": f"Unknown tool: {name}"}]}

@@ -77,9 +77,10 @@ class Skeletonizer:
         return "\n".join(out)
 
     @classmethod
-    def get_skeleton_file(cls, original_path: str) -> Tuple[Optional[str], int, int]:
+    def get_skeleton_file(cls, original_path: str, target_symbol: Optional[str] = None) -> Tuple[Optional[str], int, int]:
         """
         Reads original_path, checks mtime cache, generates skeleton if modified or absent.
+        If target_symbol is provided, applies Graph-Guided AST skeletonization retaining 1-hop dependencies.
         Returns: (skeleton_path_or_none, orig_tokens, skeleton_tokens)
         """
         if not original_path or not os.path.exists(original_path):
@@ -95,9 +96,10 @@ class Skeletonizer:
         os.makedirs(cls.CACHE_DIR, exist_ok=True)
         path_hash = hashlib.md5(original_path.encode("utf-8")).hexdigest()[:8]
         base_name = os.path.basename(original_path)
-        skeleton_filename = f"{path_hash}_{base_name}"
+        sym_suffix = f"_{target_symbol}" if target_symbol else ""
+        skeleton_filename = f"{path_hash}{sym_suffix}_{base_name}"
         skeleton_path = os.path.join(cls.CACHE_DIR, skeleton_filename)
-        meta_path = os.path.join(cls.CACHE_DIR, f"{path_hash}_{base_name}.meta.json")
+        meta_path = os.path.join(cls.CACHE_DIR, f"{path_hash}{sym_suffix}_{base_name}.meta.json")
 
         # 1. Check incremental mtime cache
         if os.path.exists(skeleton_path) and os.path.exists(meta_path):
@@ -122,7 +124,18 @@ class Skeletonizer:
             return None, 0, 0
 
         ext = os.path.splitext(original_path)[1]
-        skeleton_content = cls.skeletonize_code(code, ext)
+        
+        # If target symbol specified, use Graph-Guided skeletonization
+        if target_symbol:
+            try:
+                from src.graph_engine import GraphEngine
+                graph, rel_path = GraphEngine.for_file(original_path)
+                graph_content = graph.graph_guided_skeletonize(original_path, target_symbol=target_symbol)
+                skeleton_content = graph_content if graph_content else cls.skeletonize_code(code, ext)
+            except Exception:
+                skeleton_content = cls.skeletonize_code(code, ext)
+        else:
+            skeleton_content = cls.skeletonize_code(code, ext)
 
         # Prefetch local dependency signatures
         from src.dependency_prefetcher import DependencyPrefetcher
@@ -134,13 +147,20 @@ class Skeletonizer:
         if skel_tokens >= orig_tokens * 0.7:
             return None, 0, 0
 
-        header_comment = (
-            f"// [TOCP AST Skeleton: {lines_count} lines folded into API signatures]\n"
-            f"// [To inspect implementation of a specific method, call read_file with StartLine/EndLine]\n\n"
-        ) if ext != ".py" else (
-            f"# [TOCP AST Skeleton: {lines_count} lines folded into API signatures]\n"
-            f"# [To inspect implementation of a specific method, call read_file with StartLine/EndLine]\n\n"
-        )
+        if target_symbol:
+            header_comment = (
+                f"// [TokenSafe Graph-Guided Skeleton for '{target_symbol}': target & 1-hop dependencies kept full]\n\n"
+            ) if ext != ".py" else (
+                f"# [TokenSafe Graph-Guided Skeleton for '{target_symbol}': target & 1-hop dependencies kept full]\n\n"
+            )
+        else:
+            header_comment = (
+                f"// [TOCP AST Skeleton: {lines_count} lines folded into API signatures]\n"
+                f"// [To inspect implementation of a specific method, call read_file with StartLine/EndLine]\n\n"
+            ) if ext != ".py" else (
+                f"# [TOCP AST Skeleton: {lines_count} lines folded into API signatures]\n"
+                f"# [To inspect implementation of a specific method, call read_file with StartLine/EndLine]\n\n"
+            )
 
         full_content = header_comment + (prefetch_block + "\n" if prefetch_block else "") + skeleton_content
 
