@@ -54,6 +54,19 @@ def main():
         BenchmarkSuite.export_markdown_report(data, out_md)
         print(f"📊 Publication-ready markdown report saved to: {out_md}\n")
 
+    elif command in ("setup", "install"):
+        from src.installer import AgentInstaller
+        AgentInstaller.run_interactive()
+
+    elif command == "proxy":
+        from src.proxy import run_proxy
+        port = int(args[1]) if len(args) > 1 else 8765
+        run_proxy(port)
+
+    elif command == "mcp":
+        from src.mcp_server import run_mcp_server
+        run_mcp_server()
+
     elif command in ("markdown", "md", "export"):
         print(dashboard.render_markdown())
 
@@ -86,7 +99,7 @@ def main():
 
     else:
         print(f"Unknown command: {command}")
-        print("Available commands: stats, html, benchmark, test, markdown, reset")
+        print("Available commands: stats, html, benchmark, setup, proxy, mcp, test, markdown, reset")
         sys.exit(1)
 
 if __name__ == "__main__":
