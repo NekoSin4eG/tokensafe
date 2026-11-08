@@ -4,6 +4,8 @@ __pycache__/
 .DS_Store
 data/config.json
 data/metrics.db
+data/*.db
+data/cloud.db
 data/skeletons/
 data/loop_state.json
 data/dashboard.html
