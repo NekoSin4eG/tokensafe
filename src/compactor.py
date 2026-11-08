@@ -8,6 +8,7 @@ import re
 from typing import Dict, List, Optional
 from src.tokenizer import count_tokens
 from src.distiller import UniversalDistiller
+from src.secret_redactor import SecretRedactor
 
 class PromptCompactor:
     """Transforms verbose natural language requests into compact Intent IR."""
@@ -86,6 +87,11 @@ class PromptCompactor:
                 "traits": [],
                 "tier": "PASS_THROUGH"
             }
+
+        # Step 0: Local Secret Redaction (Stripe, AWS, JWT, DB URLs, Private Keys)
+        scrubbed_text, secrets_scrubbed, _ = SecretRedactor.redact_text(raw_text)
+        if secrets_scrubbed > 0:
+            raw_text = scrubbed_text
 
         original_tokens = count_tokens(raw_text)
 

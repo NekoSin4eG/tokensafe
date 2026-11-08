@@ -20,6 +20,7 @@ from src.compactor import PromptCompactor
 from src.metrics import MetricsTracker
 from src.dashboard import Dashboard
 from src.loop_detector import LoopDetector
+from src.secret_redactor import SecretRedactor
 
 DEFAULT_PORT = 8765
 DEFAULT_UPSTREAM = "https://api.deepseek.com/v1"
@@ -77,8 +78,14 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"error": f"Invalid JSON payload: {e}"}).encode("utf-8"))
             return
 
-        # 1. Ingress Optimization: Compact last user message
+        # 1. Local Secret Redaction: Scrub credentials across all messages before dispatch
         messages = payload.get("messages", [])
+        if messages:
+            messages, secrets_scrubbed = SecretRedactor.redact_messages(messages)
+            if secrets_scrubbed > 0:
+                print(f"[TokenSafe] Scrubbed {secrets_scrubbed} sensitive secret(s) from payload before transmission.")
+
+        # 2. Ingress Optimization: Compact last user message
         if messages:
             for idx in reversed(range(len(messages))):
                 msg = messages[idx]
@@ -89,7 +96,7 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                         msg["content"] = compaction["compact_text"]
                     break
 
-        # 2. Forward to Upstream
+        # 3. Forward to Upstream
         auth_header = self.headers.get("Authorization", "")
         # Check if local config has deepseek key
         config_path = os.path.join(BASE_DIR, "data", "config.json")
