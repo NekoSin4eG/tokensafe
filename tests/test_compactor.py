@@ -47,5 +47,47 @@ class TestPromptCompactor(unittest.TestCase):
             self.assertEqual(res["compact_text"], '(DEBUG auth.ts [jwt] "verify token")')
             mock_distill.assert_called_once()
 
+    def test_special_files_detection(self):
+        # Dotfiles and extensionless files must be recognized as target_file
+        res_docker = PromptCompactor.compact("Dockerfile не собирается, исправь ошибку сборки", enable_deepseek=False)
+        self.assertEqual(res_docker["target_file"], "Dockerfile")
+        self.assertEqual(res_docker["action"], "DEBUG")
+
+        res_env = PromptCompactor.compact("нужно настроить .env и docker для postgres базы данных", enable_deepseek=False)
+        self.assertEqual(res_env["target_file"], ".env")
+        self.assertEqual(res_env["action"], "CONFIG")
+        self.assertIn("postgres", res_env["traits"])
+        self.assertIn("docker", res_env["traits"])
+
+        res_docs = PromptCompactor.compact("обнови README.md и добавь документацию gemini", enable_deepseek=False)
+        self.assertEqual(res_docs["target_file"], "README.md")
+        self.assertEqual(res_docs["action"], "DOCS")
+        self.assertIn("gemini", res_docs["traits"])
+
+    def test_action_priorities(self):
+        # 'напиши юнит тесты' must prioritize TEST over CREATE
+        res_test = PromptCompactor.compact("напиши юнит тесты на docker compose и redis в service.ts", enable_deepseek=False)
+        self.assertEqual(res_test["action"], "TEST")
+        self.assertEqual(res_test["target_file"], "service.ts")
+        self.assertIn("unit_test", res_test["traits"])
+
+        # 'задеплой' must map to DEPLOY
+        res_deploy = PromptCompactor.compact("задеплой проект в bunny и проверь статус", enable_deepseek=False)
+        self.assertEqual(res_deploy["action"], "DEPLOY")
+        self.assertIn("bunny", res_deploy["traits"])
+
+    def test_symbol_backticks_and_cases(self):
+        # Russian case inflections ('в методе')
+        res_case = PromptCompactor.compact("в методе validateUser в auth.py добавь jwt проверку", enable_deepseek=False)
+        self.assertEqual(res_case["symbol"], "validateUser")
+        self.assertEqual(res_case["target_file"], "auth.py")
+        self.assertIn("jwt", res_case["traits"])
+
+        # Backticked identifiers
+        res_tick = PromptCompactor.compact("пожалуйста проверь безопасность jwt токена в `verifySession`", enable_deepseek=False)
+        self.assertEqual(res_tick["symbol"], "verifySession")
+        self.assertEqual(res_tick["action"], "AUDIT")
+        self.assertIn("jwt", res_tick["traits"])
+
 if __name__ == "__main__":
     unittest.main()
