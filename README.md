@@ -1,5 +1,7 @@
 # ⚡ TokenSafe (`tokensafe`)
 
+[![npm version](https://img.shields.io/npm/v/tokensafe.svg?color=CB3837)](https://www.npmjs.com/package/tokensafe)
+[![PyPI version](https://img.shields.io/pypi/v/tokensafe.svg?color=3775A9)](https://pypi.org/project/tokensafe/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](https://opensource.org/licenses/MIT)
 [![SWE-bench: Verified](https://img.shields.io/badge/SWE--bench-61.8%25_to_92.1%25_Savings-06B6D4.svg)](https://tokensafe.dev#benchmarks)
 [![Python: 3.10+](https://img.shields.io/badge/Python-3.10+-3B82F6.svg)](https://python.org)
@@ -14,17 +16,34 @@
 
 ## ⚡ 1-Click Universal Install
 
-Install and connect TokenSafe to all detected AI coding agents on your machine in 5 seconds:
+Connect TokenSafe to all detected AI coding agents on your machine in seconds:
 
 ```bash
+# Option 1: Zero-Install via npx (Recommended for Cursor & Claude Desktop)
+npx tokensafe
+
+# Option 2: Python / PyPI
+pip install tokensafe && tokensafe
+
+# Option 3: Direct Shell Script (macOS / Linux)
 curl -fsSL https://tokensafe.dev/install.sh | bash
 ```
 
-Or clone and run the interactive setup manually:
+---
 
-```bash
-git clone https://github.com/tokensafe-dev/tokensafe.git ~/.tokensafe
-python3 ~/.tokensafe/src/installer.py
+## 🔌 Universal MCP Server Configuration
+
+Connect TokenSafe directly to **Claude Desktop** (`claude_desktop_config.json`) or **Cursor** MCP Settings:
+
+```json
+{
+  "mcpServers": {
+    "tokensafe": {
+      "command": "npx",
+      "args": ["-y", "tokensafe", "mcp"]
+    }
+  }
+}
 ```
 
 ---
