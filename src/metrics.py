@@ -19,10 +19,12 @@ class MetricsTracker:
 
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            data_dir = os.path.join(base_dir, "data")
+            data_dir = os.environ.get("TOKENSAFE_DATA_DIR")
+            if not data_dir:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                data_dir = os.path.join(base_dir, "data")
             os.makedirs(data_dir, exist_ok=True)
-            db_path = os.path.join(data_dir, "metrics.db")
+            db_path = os.environ.get("TOKENSAFE_DB_PATH", os.path.join(data_dir, "metrics.db"))
 
         self.db_path = db_path
         self.retention_days = int(os.environ.get("TOKENSAFE_RETENTION_DAYS", "30"))

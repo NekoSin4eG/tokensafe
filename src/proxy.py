@@ -24,6 +24,7 @@ from src.secret_redactor import SecretRedactor
 from src.graph_engine import GraphEngine
 
 DEFAULT_PORT = 8765
+DEFAULT_HOST = os.environ.get("HOST", os.environ.get("TOKENSAFE_HOST", "0.0.0.0"))
 DEFAULT_UPSTREAM = "https://api.deepseek.com/v1"
 
 class TokenSafeProxyHandler(BaseHTTPRequestHandler):
@@ -37,7 +38,10 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
         """Protects against DNS rebinding and cross-origin attacks from arbitrary browser origins."""
         origin = self.headers.get("Origin", "")
         if origin:
-            allowed_prefixes = ("http://127.0.0.1", "http://localhost", "https://tokensafe.dev")
+            allowed_prefixes = ["http://127.0.0.1", "http://localhost", "http://0.0.0.0", "https://tokensafe.dev"]
+            custom_origins = os.environ.get("TOKENSAFE_ALLOWED_ORIGINS", "")
+            if custom_origins:
+                allowed_prefixes.extend([o.strip() for o in custom_origins.split(",") if o.strip()])
             if not any(origin.startswith(a) for a in allowed_prefixes):
                 self.send_response(403)
                 self.send_header("Content-Type", "application/json")
@@ -132,16 +136,18 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
 
         # 4. Forward to Upstream
         auth_header = self.headers.get("Authorization", "")
-        # Check if local config has deepseek key
-        config_path = os.path.join(BASE_DIR, "data", "config.json")
-        upstream_key = ""
-        if os.path.exists(config_path):
-            try:
-                with open(config_path) as f:
-                    conf = json.load(f)
-                    upstream_key = conf.get("deepseek_api_key", "")
-            except Exception:
-                pass
+        # Check environment variable first, then fallback to local config
+        upstream_key = os.environ.get("DEEPSEEK_API_KEY", "") or os.environ.get("TOKENSAFE_UPSTREAM_KEY", "")
+        if not upstream_key:
+            data_dir = os.environ.get("TOKENSAFE_DATA_DIR", os.path.join(BASE_DIR, "data"))
+            config_path = os.path.join(data_dir, "config.json")
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path) as f:
+                        conf = json.load(f)
+                        upstream_key = conf.get("deepseek_api_key", "")
+                except Exception:
+                    pass
 
         final_auth = auth_header or (f"Bearer {upstream_key}" if upstream_key else "")
         upstream_url = os.environ.get("TOKENSAFE_UPSTREAM_URL", "https://api.deepseek.com/chat/completions")
@@ -173,7 +179,7 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"error": f"Upstream proxy error: {str(e)}"}).encode("utf-8"))
 
-def run_proxy(port: int = DEFAULT_PORT):
+def run_proxy(port: int = DEFAULT_PORT, host: str = DEFAULT_HOST):
     # Auto-initialize Knowledge Graph & API Surface on startup
     hubs_summary = "active"
     try:
@@ -185,11 +191,12 @@ def run_proxy(port: int = DEFAULT_PORT):
     except Exception as e:
         hubs_summary = f"initialized ({e})"
 
-    server_address = ("127.0.0.1", port)
+    server_address = (host, port)
     httpd = HTTPServer(server_address, TokenSafeProxyHandler)
-    print(f"\n⚡ TokenSafe Local AI Proxy running on: http://127.0.0.1:{port}")
-    print(f"   Dashboard: http://127.0.0.1:{port}/dashboard")
-    print(f"   OpenAI-compatible URL: http://127.0.0.1:{port}/v1")
+    display_host = "localhost" if host in ("0.0.0.0", "", "127.0.0.1") else host
+    print(f"\n⚡ TokenSafe Local AI Proxy running on: http://{display_host}:{port} (bound to {host})")
+    print(f"   Dashboard: http://{display_host}:{port}/dashboard")
+    print(f"   OpenAI-compatible URL: http://{display_host}:{port}/v1")
     print(f"   Auto-Graph: {hubs_summary}")
     print(f"   API Surface: tokensafe-out/API_SURFACE.md")
     try:

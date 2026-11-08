@@ -23,6 +23,7 @@ COPY proto/ /build/proto/
 RUN python3 -m nuitka \
     --standalone \
     --onefile \
+    --include-package=src \
     --remove-output \
     --output-dir=/dist \
     --output-filename=tokensafe-proxy \
@@ -38,13 +39,21 @@ WORKDIR /app
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     curl \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd -r -u 1000 -d /app tokensafe \
+    && mkdir -p /app/data \
+    && chown -R tokensafe:tokensafe /app
 
 # Copy compiled native binary from builder stage
 COPY --from=builder /dist/tokensafe-proxy /app/tokensafe-proxy
+RUN chmod +x /app/tokensafe-proxy
 
+ENV HOST=0.0.0.0
 ENV PORT=8765
+ENV TOKENSAFE_DATA_DIR=/app/data
 ENV PYTHONUNBUFFERED=1
+
+USER tokensafe
 
 EXPOSE 8765
 

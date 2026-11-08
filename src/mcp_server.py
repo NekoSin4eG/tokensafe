@@ -26,7 +26,7 @@ from src.tokenizer import count_tokens
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
-    "version": "1.2.0"
+    "version": "1.3.0"
 }
 
 TOOLS = [
