@@ -41,6 +41,8 @@ Commands:
   npx tokensafe              Interactive setup for Cursor, Antigravity, Claude & Codex
   npx tokensafe mcp          Start Universal MCP Server (for Claude Desktop / Cursor)
   npx tokensafe proxy [port] Start Transparent Local AI Proxy (default: 8765)
+  npx tokensafe graph        Analyze repository God Nodes & dependency topology
+  npx tokensafe map          Generate tokensafe-out/API_SURFACE.md interface snapshot
   npx tokensafe stats        Show token economy savings & performance metrics
   npx tokensafe benchmark    Run zero-loss verification benchmark suite
   npx tokensafe activate     Activate commercial or team seat license key
@@ -70,6 +72,13 @@ switch (command) {
   case 'proxy':
     scriptPath = path.join(ROOT_DIR, 'src', 'proxy.py');
     scriptArgs = args.slice(1);
+    break;
+
+  case 'graph':
+  case 'map':
+  case 'skeleton':
+    scriptPath = path.join(ROOT_DIR, 'src', 'graph_engine.py');
+    scriptArgs = args;
     break;
 
   case 'stats':

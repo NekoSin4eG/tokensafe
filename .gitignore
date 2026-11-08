@@ -16,3 +16,4 @@ data/cloud.db
 data/skeletons/
 data/loop_state.json
 data/dashboard.html
+tokensafe-out/

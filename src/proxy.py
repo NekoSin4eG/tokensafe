@@ -21,6 +21,7 @@ from src.metrics import MetricsTracker
 from src.dashboard import Dashboard
 from src.loop_detector import LoopDetector
 from src.secret_redactor import SecretRedactor
+from src.graph_engine import GraphEngine
 
 DEFAULT_PORT = 8765
 DEFAULT_UPSTREAM = "https://api.deepseek.com/v1"
@@ -86,6 +87,7 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                 print(f"[TokenSafe] Scrubbed {secrets_scrubbed} sensitive secret(s) from payload before transmission.")
 
         # 2. Ingress Optimization: Compact last user message
+        target_symbol = None
         if messages:
             for idx in reversed(range(len(messages))):
                 msg = messages[idx]
@@ -94,9 +96,22 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                     compaction = PromptCompactor.compact(raw_user, enable_deepseek=False)
                     if compaction["saved_tokens"] > 5:
                         msg["content"] = compaction["compact_text"]
+                    target_symbol = compaction.get("symbol")
                     break
 
-        # 3. Forward to Upstream
+        # 3. Automatic Architecture Awareness (God Nodes Injection)
+        if messages:
+            try:
+                graph = GraphEngine.get_instance(os.getcwd())
+                banner = graph.format_topology_banner()
+                first_msg = messages[0]
+                if banner and isinstance(first_msg.get("content"), str) and "[TokenSafe Architecture" not in first_msg["content"]:
+                    if first_msg.get("role") == "system":
+                        first_msg["content"] = f"{banner}\n{first_msg['content']}"
+            except Exception:
+                pass
+
+        # 4. Forward to Upstream
         auth_header = self.headers.get("Authorization", "")
         # Check if local config has deepseek key
         config_path = os.path.join(BASE_DIR, "data", "config.json")
@@ -140,11 +155,24 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"error": f"Upstream proxy error: {str(e)}"}).encode("utf-8"))
 
 def run_proxy(port: int = DEFAULT_PORT):
+    # Auto-initialize Knowledge Graph & API Surface on startup
+    hubs_summary = "active"
+    try:
+        graph = GraphEngine.get_instance(os.getcwd())
+        graph.generate_api_surface()
+        god_nodes = graph.get_god_nodes(3)
+        if god_nodes:
+            hubs_summary = ", ".join([f"{g['file']} ({g['dependents']} deps)" for g in god_nodes])
+    except Exception as e:
+        hubs_summary = f"initialized ({e})"
+
     server_address = ("127.0.0.1", port)
     httpd = HTTPServer(server_address, TokenSafeProxyHandler)
     print(f"\n⚡ TokenSafe Local AI Proxy running on: http://127.0.0.1:{port}")
     print(f"   Dashboard: http://127.0.0.1:{port}/dashboard")
     print(f"   OpenAI-compatible URL: http://127.0.0.1:{port}/v1")
+    print(f"   Auto-Graph: {hubs_summary}")
+    print(f"   API Surface: tokensafe-out/API_SURFACE.md")
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
