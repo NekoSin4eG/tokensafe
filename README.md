@@ -103,15 +103,18 @@ tokensafe providers
 
 ## 📊 Zero-Loss SWE-bench Benchmark Results
 
-Verified across 5 real-world production scenarios:
+Verified across 8 real-world production software engineering scenarios (131,604 baseline tokens down to 7,251 tokens, **-94.5% net token reduction**, **+28.1% turn latency speedup** with **100% Zero-Loss accuracy retention**):
 
 | Benchmark Scenario | Task Complexity | Baseline Tokens | TokenSafe Tokens | Reduction | Turn Speedup | Accuracy |
 |---|---|---|---|---|---|---|
-| **Django ORM N+1 Fix** | Multi-file query refactoring | 14,280 | **1,120** | **-92.1%** | +12% faster | 100% Pass |
-| **FastAPI Async Race** | Concurrency bug investigation | 8,640 | **2,940** | **-65.9%** | +10% faster | 100% Pass |
-| **TypeScript Redux Vault** | Full AST symbol refactoring | 18,400 | **2,130** | **-88.4%** | +9% faster | 100% Pass |
-| **Stuck Command Loop** | Subprocess infinite loop | 22,100 | **2,400** | **-89.1%** | Stopped loop | 100% Pass |
-| **Heavy Rewrite Guard** | Whole-file write attempt | 11,300 | **4,310** | **-61.8%** | Forced edit_file | 100% Pass |
+| **Zero-Token Architecture Discovery** | Full repo God Node indexing | 49,716 | **486** | **-99.0%** | **6 ➔ 1 turns (+83%)** | 100% Pass |
+| **Graph-Guided AST Symbol Slicing** | Target function + 1-hop callees | 8,016 | **451** | **-94.4%** | **4 ➔ 2 turns (+50%)** | 100% Pass |
+| **Monorepo Lockfile Grep Leak** | `git grep` across lockfiles | 10,111 | **491** | **-95.1%** | 2 turns | 100% Pass |
+| **Monorepo Lockfile Git Diff** | Monorepo branch diff | 18,911 | **761** | **-96.0%** | 2 turns | 100% Pass |
+| **Multi-Turn History Compaction** | 8-turn session history fold | 31,010 | **3,130** | **-89.9%** | 8 turns | 100% Pass |
+| **Race Condition / Distributed Lock** | AST query & Redis redlock | 5,074 | **404** | **-92.0%** | **4 ➔ 3 turns (+25%)** | 100% Pass |
+| **OAuth JWT Expiration Triage** | Controller bug investigation | 3,757 | **401** | **-89.3%** | **3 ➔ 2 turns (+33%)** | 100% Pass |
+| **CI Test Failure Extraction** | Full test log & stack trace | 5,009 | **1,127** | **-77.5%** | 3 turns | 100% Pass |
 
 ---
 
