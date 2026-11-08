@@ -60,7 +60,19 @@ def main():
 
     elif command in ("setup", "install"):
         from src.installer import AgentInstaller
-        AgentInstaller.run_interactive()
+        if "--all" in args or "-a" in args or "-y" in args or "--auto" in args:
+            print("\n\033[1m\033[36m⚡ TOKENSAFE UNIVERSAL MULTI-AGENT INSTALLER (--all) ⚡\033[0m\n")
+            res = AgentInstaller.install_all(force=True)
+            print("Configured AI agent environments:")
+            for k, r in res["agents"].items():
+                status = "\033[32m✔\033[0m" if r["success"] else "\033[31m✖\033[0m"
+                print(f"  {status} \033[1m{r['name']:<28}\033[0m: {r['message']}")
+            print(f"\n\033[32m✔ Universal project rules injected into: {', '.join(res['project_rules'])}\033[0m\n")
+        elif "--project" in args:
+            res = AgentInstaller.install_project(os.getcwd())
+            print(f"\n\033[32m✔ TokenSafe rules injected into project: {', '.join(res['created_rules'])}\033[0m\n")
+        else:
+            AgentInstaller.run_interactive()
 
     elif command in ("update", "upgrade"):
         from src.installer import AgentInstaller

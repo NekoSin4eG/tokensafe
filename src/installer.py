@@ -352,15 +352,7 @@ class AgentInstaller:
                 cls._symlink_dir(PROJECT_ROOT, info["plugin_path"])
 
             if "agents_md_path" in info:
-                zcode_rule = (
-                    "## TOKENSAFE GRAPH-FIRST OPTIMIZATION PROTOCOL\n"
-                    "Always prioritize `tokensafe` MCP tools over default raw file reads or high-output terminal executions to prevent context window exhaustion.\n"
-                    "1. **Architecture Discovery**: Always call `tokensafe:get_architecture_graph` before grep or multi-file reading. Returns project God Nodes and key dependency hubs in < 250 tokens without file crawling.\n"
-                    "2. **Graph-Guided Symbol Inspection**: When inspecting code implementations, prioritize `tokensafe:smart_read_file` with the targeted `symbol`. Returns full executable bodies for the symbol and 1-hop dependencies while folding inert code into signatures (-85% to -92% tokens).\n"
-                    "3. **No Unconstrained Shell Grep/Find**: Strictly avoid running raw recursive grep/find across projects. Use `get_architecture_graph` or `get_api_surface`.\n"
-                    "4. **Command Sanitization**: Use `sanitize_command` on high-output terminal commands (`git diff`, `pytest`, `find`, `grep`) to prevent lockfile or test log context contamination.\n"
-                )
-                cls._inject_global_rule(info["agents_md_path"], zcode_rule)
+                cls._inject_global_rule(info["agents_md_path"], UNIFIED_TOKENSAFE_RULE)
 
             return True, f"Configured MCP, Plugin, Skill & AGENTS.md in {config_file}"
 
@@ -419,6 +411,87 @@ class AgentInstaller:
         """Symlinks the TokenSafe skill into the target agent's skills directory."""
         skill_src = os.path.join(PROJECT_ROOT, "skills", "token-optimizer")
         cls._symlink_dir(skill_src, target_path)
+
+    @classmethod
+    def install_project(cls, project_dir: Optional[str] = None) -> Dict[str, Any]:
+        """Injects TokenSafe rules and MCP configs directly into a target project workspace."""
+        if not project_dir:
+            project_dir = os.getcwd()
+        project_dir = os.path.abspath(project_dir)
+
+        rule_files = [
+            os.path.join(project_dir, "AGENTS.md"),
+            os.path.join(project_dir, "CLAUDE.md"),
+            os.path.join(project_dir, ".cursorrules"),
+            os.path.join(project_dir, ".windsurfrules"),
+            os.path.join(project_dir, ".clinerules"),
+            os.path.join(project_dir, ".github", "copilot-instructions.md"),
+            os.path.join(project_dir, ".cursor", "rules", "tokensafe.mdc"),
+        ]
+
+        cursor_mdc_header = (
+            "---\n"
+            "description: TokenSafe token economy, graph-first navigation and context optimization protocol\n"
+            "globs: *\n"
+            "alwaysApply: true\n"
+            "---\n\n"
+        )
+
+        created = []
+        for rf in rule_files:
+            try:
+                if rf.endswith(".mdc"):
+                    cls._write_file_safely(rf, cursor_mdc_header + UNIFIED_TOKENSAFE_RULE)
+                else:
+                    cls._inject_global_rule(rf, UNIFIED_TOKENSAFE_RULE)
+                created.append(os.path.relpath(rf, project_dir))
+            except Exception:
+                pass
+
+        # Also inject project-local .cursor/mcp.json
+        cursor_mcp = os.path.join(project_dir, ".cursor", "mcp.json")
+        try:
+            os.makedirs(os.path.dirname(cursor_mcp), exist_ok=True)
+            data = {}
+            if os.path.exists(cursor_mcp):
+                try:
+                    with open(cursor_mcp, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+            if "mcpServers" not in data or not isinstance(data["mcpServers"], dict):
+                data["mcpServers"] = {}
+            data["mcpServers"]["tokensafe"] = {
+                "command": PYTHON_BIN,
+                "args": [MCP_SERVER_PATH]
+            }
+            with open(cursor_mcp, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+            created.append(".cursor/mcp.json")
+        except Exception:
+            pass
+
+        return {
+            "success": True,
+            "project_dir": project_dir,
+            "created_rules": created
+        }
+
+    @classmethod
+    def install_all(cls, force: bool = False) -> Dict[str, Any]:
+        """Automatically installs TokenSafe to all detected (or all registered) AI agents."""
+        agents = cls.detect_available_agents()
+        results = {}
+        for key, info in agents.items():
+            if info["installed"] or force:
+                ok, msg = cls.install_mcp_config(key)
+                results[key] = {"name": info["name"], "success": ok, "message": msg}
+        # Also configure project rules
+        proj_res = cls.install_project(os.getcwd())
+        return {
+            "agents": results,
+            "project_rules": proj_res.get("created_rules", [])
+        }
 
     @classmethod
     def run_interactive(cls):
