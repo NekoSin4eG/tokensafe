@@ -65,6 +65,7 @@ Traditional AI code interactions suffer from massive context bloat:
 - **TOCP Prompt Distillation:** Intercepts prompts and distills intent into lean S-Expressions via **Google Gemini (Flash-Lite / 2.0 Flash), DeepSeek, OpenAI ChatGPT (gpt-4o-mini), or Anthropic Claude** (`-40% to -70%`). Automatically prioritizes ultra-cheap / free Google Gemini (`gemini-flash-lite-latest`, $0.075/M input, 1,500 req/day free tier in Google AI Studio).
 - **Token Arbitrage Guard & Output Ceiling:** Eliminates LLM compiler arbitrage loss with a dual defense: inputs $< 100$ tokens route to instant zero-cost local regex heuristics ($0$ LLM tokens), while inputs $\ge 100$ tokens are clamped to a strict $60$-token max output ceiling.
 - **Two-Tier Distillation Cache:** Two-tier In-Memory LRU + Persistent SQLite cache (`metrics.db`) with normalized SHA-256 hashing guarantees sub-millisecond zero-cost replays for recurring developer commands.
+- **Shared Team Cache (L3 Cloud Monorepo Cache):** Synchronizes compiled prompt intents and AST skeletons across all developers and CI agents on an engineering team. Teammates querying the same files or command patterns get instant 0ms warm cache hits with zero LLM API calls.
 - **API Surface Map Generator:** Generates high-density `tokensafe-out/API_SURFACE.md` (~1.5k tokens) for instant agent codebase onboarding.
 - **Predictive Dependency Prefetcher:** Attaches imported symbol signatures to eliminate downstream exploratory `read_file` roundtrips.
 - **Live SSE Streaming Dashboard:** Real-time reactive Web UI streaming token reductions, live event logs, and USD savings via Server-Sent Events (`/api/events`).
@@ -408,7 +409,7 @@ TokenSafe is built on an **Open-Core** model designed to give every developer im
 | :--- | :---: | :---: | :--- |
 | **Community (Free)** | **$0** forever | **500,000 tokens / mo** | Multilingual Local Regex Compactor, AST Slicer, Output Guard, Loop Guard, Local SQLite & HTML Dashboard |
 | **Solo Developer** | **$9 / mo** | **Unlimited** | Multi-Provider Distillation (Gemini Flash-Lite, DeepSeek), Subagent Swarm Firewall, Cascading Governor, Multi-turn History Fold |
-| **Engineering Team** | **$29 / seat / mo** | **Unlimited** | Everything in Solo + Friday Team ROI Digest, Cloud Organization Console, Seat Quota Management, Self-Hosted Docker Proxy |
+| **Engineering Team** | **$29 / seat / mo** | **Unlimited** | Everything in Solo + **Shared Team Cache (Cloud Prompt & AST Cache)**, Friday Team ROI Digest, Cloud Organization Console, Seat Quota Management, Self-Hosted Docker Proxy |
 
 > [!TIP]
 > **500,000 free tokens / month** are included out of the box with zero registration. When your monthly community limit is reached, basic regex compaction continues safely, and you can unlock unlimited Solo optimization anytime at [tokensafe.dev](https://tokensafe.dev/#pricing) or activate via `tokensafe activate <key>`.

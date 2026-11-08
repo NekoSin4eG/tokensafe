@@ -110,13 +110,25 @@ class DistillationCache:
                 except Exception:
                     pass
 
+        # 3. Check L3 Shared Team Cache (TokenSafe Team tier)
+        try:
+            from src.team_cache import TeamCache
+            team_val = TeamCache.get("PROMPT", prompt_text)
+            if team_val:
+                cls.set(prompt_text, team_val, provider="team_cache", sync_remote=False)
+                with cls._lock:
+                    cls._hits += 1
+                return team_val
+        except Exception:
+            pass
+
         with cls._lock:
             cls._misses += 1
         return None
 
     @classmethod
-    def set(cls, prompt_text: str, distilled_text: str, provider: str = "deepseek") -> None:
-        """Stores a distillation result into memory LRU and SQLite cache."""
+    def set(cls, prompt_text: str, distilled_text: str, provider: str = "deepseek", sync_remote: bool = True) -> None:
+        """Stores a distillation result into memory LRU, SQLite cache, and Team Cache if applicable."""
         if not prompt_text or not distilled_text or not distilled_text.strip():
             return
 
@@ -151,6 +163,14 @@ class DistillationCache:
                     conn.close()
                 except Exception:
                     pass
+
+        # 4. Broadcast to L3 Shared Team Cache (Asynchronous)
+        if sync_remote:
+            try:
+                from src.team_cache import TeamCache
+                TeamCache.put("PROMPT", prompt_text, distilled_text.strip(), tokens_saved=45)
+            except Exception:
+                pass
 
     @classmethod
     def clear(cls) -> None:
