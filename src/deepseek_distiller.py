@@ -79,6 +79,11 @@ Rules:
         if tier == "free":
             return None
 
+        # In standard SaaS mode, delegate to UniversalDistiller's Managed Cloud Distillation
+        if os.environ.get("TOKENSAFE_SELF_HOSTED", "").lower() not in ("1", "true", "yes"):
+            from src.distiller import UniversalDistiller
+            return UniversalDistiller.distill(raw_text)
+
         conf = cls._get_config()
         if not conf["enabled"] or not conf["api_key"] or not raw_text or len(raw_text.strip()) < 10:
             return None

@@ -64,11 +64,50 @@ Rules:
     }
 
     @classmethod
+    def is_self_hosted(cls) -> bool:
+        """Determines if running in Docker self-hosted mode with custom BYOK keys."""
+        return os.environ.get("TOKENSAFE_SELF_HOSTED", "").lower() in ("1", "true", "yes")
+
+    @classmethod
+    def _call_cloud_distill(cls, raw_text: str, lic_key: str) -> Optional[str]:
+        cloud_url = os.environ.get("TOKENSAFE_CLOUD_URL", "https://api.tokensafe.dev").rstrip("/")
+        endpoint = f"{cloud_url}/api/distill"
+        payload = {"prompt": raw_text.strip()}
+        req = urllib.request.Request(
+            endpoint,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {lic_key}",
+                "Content-Type": "application/json",
+                "User-Agent": "TokenSafe/1.3.7"
+            }
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=cls.DEFAULT_TIMEOUT) as resp:
+                if resp.status == 200:
+                    data = json.loads(resp.read().decode("utf-8"))
+                    if data.get("success") and data.get("distilled"):
+                        return data["distilled"].strip()
+        except Exception:
+            return None
+        return None
+
+    @classmethod
     def get_configured_providers(cls) -> Dict[str, Dict[str, Any]]:
         """Scans environment and data/config.json for configured LLM distillation keys."""
         tier, _ = LicenseManager.get_active_license()
         if tier == "free":
             return {}
+
+        if not cls.is_self_hosted():
+            return {
+                "cloud": {
+                    "provider": "cloud",
+                    "name": "TokenSafe Cloud Distiller",
+                    "model": "gemini-flash-lite-latest",
+                    "status": "managed"
+                }
+            }
 
         config_file_data = {}
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -127,6 +166,29 @@ Rules:
         if not providers:
             return None
 
+        # 1. Managed Cloud Distillation (Default for Solo/Team SaaS)
+        if "cloud" in providers:
+            lic_key = os.environ.get("TOKENSAFE_LICENSE_KEY", "").strip()
+            if not lic_key:
+                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+                lic_file = os.path.join(base_dir, "data", "license.json")
+                if os.path.exists(lic_file):
+                    try:
+                        with open(lic_file, "r", encoding="utf-8") as f:
+                            lic_key = json.load(f).get("license_key", "").strip()
+                    except Exception:
+                        pass
+
+            if lic_key:
+                cloud_res = cls._call_cloud_distill(raw_text, lic_key)
+                if cloud_res:
+                    clean = cls._sanitize_s_expression(cloud_res)
+                    if clean:
+                        DistillationCache.set(raw_text, clean, provider="cloud-managed")
+                        return clean
+            return None
+
+        # 2. Self-Hosted Docker Mode (BYOK local providers)
         # Determine order
         pref = preferred_provider
         if not pref:

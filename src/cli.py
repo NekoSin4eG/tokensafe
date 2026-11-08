@@ -195,7 +195,13 @@ def main():
             print("  \033[1mTo unlock Neural LLM Distillation:\033[0m")
             print("  1. Start 7-day free trial or upgrade at: \033[36mhttps://tokensafe.dev\033[0m")
             print("  2. Activate your key: \033[32mtokensafe activate <KEY>\033[0m\n")
+        elif not UniversalDistiller.is_self_hosted():
+            print(f"  \033[32m✔\033[0m \033[1mTokenSafe Cloud Distiller\033[0m [Active: gemini-flash-lite-latest via Managed Cloud]")
+            print("    Zero API keys required — managed centrally by your TokenSafe subscription.")
+            print("    Shared Team Cache & sub-millisecond cloud cache active.\n")
+            print("  \033[2m💡 Tip: To run self-hosted with custom BYOK keys in Docker, export TOKENSAFE_SELF_HOSTED=1.\033[0m\n")
         else:
+            print("  \033[36mMode: Self-Hosted Docker (Custom BYOK Keys)\033[0m\n")
             configured = UniversalDistiller.get_configured_providers()
             all_p = UniversalDistiller.PROVIDERS
             for key, p in all_p.items():
