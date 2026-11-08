@@ -1,5 +1,5 @@
 """
-Terminal & Interactive HTML Dashboard for Antigravity Token Optimizer.
+Terminal & Interactive HTML Dashboard for TokenSafe Context & Token Optimizer.
 Provides colorful CLI reports, Markdown exports, and rich modern HTML widgets.
 """
 
@@ -68,7 +68,7 @@ class Dashboard:
 
         out = []
         out.append(f"\n{BOLD}{CYAN}╔════════════════════════════════════════════════════════════════════╗{RESET}")
-        out.append(f"{BOLD}{CYAN}║           ⚡ ANTIGRAVITY TOKEN OPTIMIZER DASHBOARD ⚡            ║{RESET}")
+        out.append(f"{BOLD}{CYAN}║           ⚡ TOKENSAFE CONTEXT OPTIMIZER DASHBOARD ⚡            ║{RESET}")
         out.append(f"{BOLD}{CYAN}╚════════════════════════════════════════════════════════════════════╝{RESET}\n")
 
         # Top summary cards
@@ -105,8 +105,8 @@ class Dashboard:
 
                 out.append(f"  [{DIM}{t_str}{RESET}] {CYAN}{ev_type:<15}{RESET} {detail_desc:<20} ➔ {GREEN}+{saved:,} saved{RESET} ({pct_ev:.1f}%)")
 
-        out.append(f"\n{DIM}Run `agy-tokens test \"<prompt>\"` to test compression on custom input.{RESET}")
-        out.append(f"{DIM}Run `agy-tokens html` to view interactive browser dashboard.{RESET}")
+        out.append(f"\n{DIM}Run `tokensafe test \"<prompt>\"` (or `agy-tokens`) to test compression on custom input.{RESET}")
+        out.append(f"{DIM}Run `tokensafe html` (or `agy-tokens html`) to view interactive browser dashboard.{RESET}")
 
         if VersionChecker:
             banner = VersionChecker.get_banner()
@@ -129,7 +129,7 @@ class Dashboard:
         opt = summary["total_optimized_tokens"]
 
         md = []
-        md.append("# ⚡ Antigravity Token Optimizer Report\n")
+        md.append("# ⚡ TokenSafe Context & Token Optimizer Report\n")
         md.append(f"> **Cumulative Resource Efficiency:** **{pct:.1f}% Reduction** across {summary['total_events']} events.\n")
         md.append("| Metric | Value |")
         md.append("| :--- | :--- |")
@@ -208,7 +208,7 @@ class Dashboard:
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>⚡ Antigravity Token Optimizer Dashboard</title>
+  <title>⚡ TokenSafe Context Optimizer Dashboard</title>
   <style>
     :root {{
       --bg: #090a0f;
@@ -259,8 +259,8 @@ class Dashboard:
   <div class="container">
     <div class="header">
       <div>
-        <h1 class="title">⚡ Antigravity Token Optimizer</h1>
-        <p class="subtitle">Next-gen Autonomous Token Economy & Context Preservation</p>
+        <h1 class="title">⚡ TokenSafe</h1>
+        <p class="subtitle">Autonomous Zero-Loss Token Economy & Context Preservation</p>
       </div>
       <div id="live-pill" class="subtitle" style="display: flex; align-items: center; gap: 6px;">
         <span style="color: #10b981;">●</span> Live SQLite Tracking
