@@ -62,7 +62,7 @@ Traditional AI code interactions suffer from massive context bloat:
 - **Subagent Deduplication Firewall:** Detects repeated file reads across subagents and agent swarms, serving cached AST slices directly from SQLite session memory (`SUBAGENT_DEDUP`) with zero redundant overhead.
 - **AST Diff Slicer & Lockfile Stripper:** Compresses code review diffs by stripping noisy lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`) and minified assets, condensing diffs to 2 lines of context (`git diff -U2`) for up to 96% token savings.
 - **God Nodes & Architectural Hub Detection:** Calculates Degree Centrality to identify structural project hubs and injects topology awareness into agent sessions without expensive file crawling.
-- **TOCP Prompt Distillation:** Intercepts prompts and distills intent into lean S-Expressions (`-40% to -70%`). Solo & Team tiers include **Managed Cloud Distillation** out of the box via TokenSafe Cloud (`gemini-flash-lite-latest`) with **zero API keys required**. Free tier includes a zero-overhead 9-language Local Regex Compactor. Enterprise on-premise Docker deployments support custom BYOK keys (`TOKENSAFE_SELF_HOSTED=1`).
+- **TOCP Prompt Distillation:** Intercepts prompts and distills intent into lean S-Expressions (`-40% to -70%`). Solo & Team tiers include **Managed Cloud Distillation** out of the box via TokenSafe Cloud (`gemini-flash-lite-latest`) with **zero API keys required**. Free tier includes a zero-overhead 9-language Local Regex Compactor. Enterprise on-premise Docker deployments support custom private BYOK keys.
 - **Token Arbitrage Guard & Output Ceiling:** Eliminates LLM compiler arbitrage loss with a dual defense: inputs $< 100$ tokens route to instant zero-cost local regex heuristics ($0$ LLM tokens), while inputs $\ge 100$ tokens are clamped to a strict $60$-token max output ceiling.
 - **Three-Tier Distillation Cache:** Three-tier L1 In-Memory LRU + L2 Persistent SQLite cache (`metrics.db`) + L3 Shared Team Cloud Cache with normalized SHA-256 hashing guarantees sub-millisecond zero-cost replays for recurring developer commands.
 - **Shared Team Cache (L3 Cloud Monorepo Cache):** Synchronizes compiled prompt intents and AST skeletons across all developers and CI agents on an engineering team. Teammates querying the same files or command patterns get instant 0ms warm cache hits with zero LLM API calls.
@@ -143,7 +143,7 @@ TokenSafe features an intelligent prompt compiler that distills verbose develope
 |---|---|---|---|---|
 | **TokenSafe Cloud (SaaS)** ⚡ | **Solo Developer & Team** | **Google Gemini Flash-Lite** (`gemini-flash-lite-latest`) | **None (Zero Keys Required)** | **Included in subscription** (0ms config, unlimited neural distillation) |
 | **Local Regex Compactor** | **Community (Free)** | **Deterministic Multilingual Regex** (9 languages) | **None** | **100% Free** (0ms latency, 0 external tokens, 500k tokens/mo) |
-| **Self-Hosted Docker** 🐳 | **Enterprise / Team** | **BYOK Multi-Provider** (Gemini, DeepSeek, OpenAI, Claude) | `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, etc. | Requires `TOKENSAFE_SELF_HOSTED=1` in private VPC container |
+| **Self-Hosted Docker** 🐳 | **Enterprise / Team** | **BYOK Multi-Provider** (Gemini, DeepSeek, OpenAI, Claude) | `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, etc. | Private VPC on-premise container deployment |
 
 > **Zero Configuration for Solo & Team**: You do not need to register for Google AI Studio, OpenAI, or DeepSeek API accounts. TokenSafe Cloud handles high-throughput neural distillation automatically with enterprise-grade sub-second turnaround.
 
@@ -207,7 +207,7 @@ Verified across 8 real-world production software engineering scenarios (131,604 
 | **Community (Free)** | **$0** (Free Forever) | **500,000 tokens / mo** | 9-Language Local Regex Compactor, Local AST Skeletonizer CLI, Secret Redactor, Local HTML & SQLite Dashboard |
 | **Solo Developer** | **$9 / month** | **Unlimited** | **7-Day Free Trial**, **Managed Cloud Distillation (Gemini Flash-Lite, Zero Keys Required)**, Subagent Swarm Firewall, Cascading Window Governor, Prompt Cache Normalizer |
 | **Engineering Team** | **$29 / seat / mo** | **Unlimited** | **7-Day Free Trial**, Everything in Solo + **Shared Team Cache (L3 Monorepo Cloud Cache)**, Friday Team ROI Digest & Leaderboards, Team Seat Quota Console, Self-Hosted Docker Proxy |
-| **Enterprise** | Custom | **Unlimited** | On-Premise Nuitka C-compiled Docker Proxy (`TOKENSAFE_SELF_HOSTED=1` BYOK), Custom Compliance, SAML SSO |
+| **Enterprise** | Custom | **Unlimited** | On-Premise Nuitka C-compiled Docker Proxy (Private BYOK), Custom Compliance, SAML SSO |
 
 👉 **[Start your 7-Day Free Trial on our website](https://tokensafe.dev#pricing)**
 
