@@ -49,7 +49,7 @@ Documentation = "https://tokensafe.dev"
 Issues = "https://github.com/tokensafe-dev/tokensafe/issues"
 
 [project.scripts]
-tokensafe = "src.installer:main"
+tokensafe = "src.cli:main"
 tokensafe-proxy = "src.proxy:main"
 tokensafe-mcp = "src.mcp_server:main"
 tokensafe-stats = "src.dashboard:main"

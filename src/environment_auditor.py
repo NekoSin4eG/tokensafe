@@ -133,7 +133,7 @@ class EnvironmentAuditor:
         return (
             f"⚠️ **TokenSafe Bloat Alert**: Обнаружен тяжелый MCP сервер: {names}. "
             f"Суммарный налог на каждый запрос: **~{report['total_static_tokens_per_turn']:,} токенов**. "
-            f"Отключите неиспользуемые серверы через `./bin/agy-tokens mcp disable <name>`."
+            f"Отключите неиспользуемые серверы через `tokensafe mcp disable <name>`."
         )
 
     @classmethod
@@ -251,7 +251,7 @@ class EnvironmentAuditor:
         if report["has_critical_bloat"]:
             lines.append("\n  \033[33m\033[1mDiagnostic Recommendation:\033[0m")
             for b in report["bloated_servers"]:
-                lines.append(f"    ➜ Run: \033[36m./bin/agy-tokens mcp disable {b['name']}\033[0m to save ~{b['est_tokens_per_turn']:,} tokens per turn!")
+                lines.append(f"    ➜ Run: \033[36mtokensafe mcp disable {b['name']}\033[0m to save ~{b['est_tokens_per_turn']:,} tokens per turn!")
         else:
             lines.append("\n  \033[32m✔ Environment healthy: No critical MCP bloat detected.\033[0m")
 

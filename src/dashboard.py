@@ -105,8 +105,8 @@ class Dashboard:
 
                 out.append(f"  [{DIM}{t_str}{RESET}] {CYAN}{ev_type:<15}{RESET} {detail_desc:<20} ➔ {GREEN}+{saved:,} saved{RESET} ({pct_ev:.1f}%)")
 
-        out.append(f"\n{DIM}Run `tokensafe test \"<prompt>\"` (or `agy-tokens`) to test compression on custom input.{RESET}")
-        out.append(f"{DIM}Run `tokensafe html` (or `agy-tokens html`) to view interactive browser dashboard.{RESET}")
+        out.append(f"\n{DIM}Run `tokensafe test \"<prompt>\"` to test compression on custom input.{RESET}")
+        out.append(f"{DIM}Run `tokensafe html` to view interactive browser dashboard.{RESET}")
 
         if VersionChecker:
             banner = VersionChecker.get_banner()

@@ -2,7 +2,7 @@
 
 /**
  * TokenSafe - Universal Node.js CLI & MCP Launcher
- * Works with `npx tokensafe [mcp|proxy|stats|benchmark|install]`
+ * Works with `npx tokensafe [command]` or global `tokensafe [command]`
  */
 
 const { spawn, spawnSync } = require('child_process');
@@ -27,27 +27,35 @@ function findPython() {
   return null;
 }
 
-const command = args[0] || 'install';
+const firstArg = args[0] || '';
 
-if (command === 'help' || command === '--help' || command === '-h') {
+if (firstArg === 'help' || firstArg === '--help' || firstArg === '-h') {
   console.log(`
 ⚡ TokenSafe - Autonomous Zero-Loss Token Optimizer for AI Coding Agents
 Website: https://tokensafe.dev
 
 Usage:
-  npx tokensafe [command]
+  tokensafe [command] [options]
 
 Commands:
-  npx tokensafe              Interactive setup for Cursor, Antigravity, Claude & Codex
-  npx tokensafe mcp          Start Universal MCP Server (for Claude Desktop / Cursor)
-  npx tokensafe proxy [port] Start Transparent Local AI Proxy (default: 8765)
-  npx tokensafe graph        Analyze repository God Nodes & dependency topology
-  npx tokensafe map          Generate tokensafe-out/API_SURFACE.md interface snapshot
-  npx tokensafe stats        Show token economy savings & performance metrics
-  npx tokensafe benchmark    Run zero-loss verification benchmark suite
-  npx tokensafe update       One-click self-update for npm, pip & all AI agent rules
-  npx tokensafe activate     Activate commercial or team seat license key
-  npx tokensafe --help       Show this help screen
+  tokensafe stats              Show token economy savings & performance metrics
+  tokensafe html               Generate and open interactive browser dashboard
+  tokensafe test "<prompt>"    Test prompt compression on custom input
+  tokensafe doctor             Audit MCP servers & skills context token tax
+  tokensafe providers          List active LLM distillation models & keys
+  tokensafe benchmark          Run zero-loss verification benchmark suite
+  tokensafe mcp                Manage MCP servers (list, disable <name>, enable <name>)
+  tokensafe proxy [port]       Start Transparent Local AI Proxy (default: 8765)
+  tokensafe graph              Analyze repository God Nodes & dependency topology
+  tokensafe map                Generate tokensafe-out/API_SURFACE.md interface snapshot
+  tokensafe vacuum             Compact SQLite metrics database storage
+  tokensafe prune              Prune granular telemetry events into lifetime rollup
+  tokensafe digest             Preview or send weekly team ROI digest email
+  tokensafe activate <key>     Activate commercial Solo or Team seat license key
+  tokensafe license            Show current license status and active tier
+  tokensafe update             One-click self-update for npm, pip & all AI agent rules
+  tokensafe install            Interactive installer for Cursor, Antigravity, Claude, etc.
+  tokensafe --help             Show this help screen
 `);
   process.exit(0);
 }
@@ -61,65 +69,13 @@ if (!python) {
   process.exit(1);
 }
 
-let scriptPath = '';
-let scriptArgs = [];
-
-switch (command) {
-  case 'mcp':
-    scriptPath = path.join(ROOT_DIR, 'src', 'mcp_server.py');
-    scriptArgs = args.slice(1);
-    break;
-
-  case 'proxy':
-    scriptPath = path.join(ROOT_DIR, 'src', 'proxy.py');
-    scriptArgs = args.slice(1);
-    break;
-
-  case 'graph':
-  case 'map':
-  case 'skeleton':
-    scriptPath = path.join(ROOT_DIR, 'src', 'graph_engine.py');
-    scriptArgs = args;
-    break;
-
-  case 'stats':
-  case 'dashboard':
-    scriptPath = path.join(ROOT_DIR, 'src', 'dashboard.py');
-    scriptArgs = ['--cli', ...args.slice(1)];
-    break;
-
-  case 'benchmark':
-    scriptPath = path.join(ROOT_DIR, 'src', 'benchmark.py');
-    scriptArgs = args.slice(1);
-    break;
-
-  case 'activate':
-    scriptPath = path.join(ROOT_DIR, 'src', 'license_manager.py');
-    scriptArgs = args.slice(1);
-    break;
-
-  case 'update':
-  case 'upgrade':
-    scriptPath = path.join(ROOT_DIR, 'src', 'installer.py');
-    scriptArgs = ['update', ...args.slice(1)];
-    break;
-
-  case 'install':
-  case 'init':
-    scriptPath = path.join(ROOT_DIR, 'src', 'installer.py');
-    scriptArgs = args.slice(1);
-    break;
-
-  default:
-    scriptPath = path.join(ROOT_DIR, 'src', 'installer.py');
-    scriptArgs = args;
-    break;
-}
-
+const scriptPath = path.join(ROOT_DIR, 'bin', 'agy-tokens');
 if (!fs.existsSync(scriptPath)) {
   console.error(`Error: TokenSafe script not found at ${scriptPath}`);
   process.exit(1);
 }
+
+const scriptArgs = args.length === 0 ? ['install'] : args;
 
 const child = spawn(python, [scriptPath, ...scriptArgs], {
   stdio: 'inherit',
