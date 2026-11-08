@@ -14,7 +14,7 @@ slices bulky tool calls (such as full-file reads), and provides real-time SQLite
 - `src/metrics.py`: SQLite metrics persistence engine (`data/metrics.db`).
 - `src/dashboard.py`: Visual terminal & Markdown analytics visualizer.
 - `hooks/`: Lifecycle hook implementations (`PreInvocation`, `PreToolUse`, `PostToolUse`).
-- `bin/agy-tokens`: Standalone executable CLI for developers.
+- `bin/tokensafe`: Standalone executable CLI for developers.
 
 ## Testing & Quality
 Run unit tests with:

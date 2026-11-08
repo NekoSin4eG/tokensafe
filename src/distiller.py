@@ -18,17 +18,20 @@ class UniversalDistiller:
 
     DEFAULT_TIMEOUT = 3.5
 
-    SYSTEM_PROMPT = """You are a semantic code intent compiler for the Token-Optimized Communication Protocol (TOCP). Your task is to compress verbose, conversational developer requests into an ultra-dense S-Expression with this exact syntax:
+    SYSTEM_PROMPT = """You are a multilingual semantic code intent compiler for the Token-Optimized Communication Protocol (TOCP). Your task is to compress verbose, conversational developer requests into an ultra-dense S-Expression with this exact syntax:
 (ACTION [filepath] [symbol] [[traits...]] ["minimal_intent"])
 
 Available ACTIONS: REFACTOR, DEBUG, CREATE, OPTIMIZE, EXPLAIN, AUDIT, TEST, RUN.
 
 Examples:
-Input: "Слушай, перепиши пожалуйста функцию get_balance в файле wallet.ts, добавь туда redis cache и сделай её асинхронной"
+Input: "Could you please rewrite the get_balance function in wallet.ts, add redis caching to it and make it async?"
 Output: (REFACTOR wallet.ts get_balance [async redis] "add caching and async")
 
-Input: "У меня в auth.controller.ts при логине через гугл если нет аватарки промис зависает на 30 сек и падает 504"
+Input: "In auth.controller.ts during Google login, if user has no avatar the promise hangs for 30s and throws 504"
 Output: (DEBUG auth.controller.ts [oauth google timeout_504 missing_avatar] "fix 30s hang on no avatar")
+
+Input: "Por favor arregla la función validate_token en auth.py para que verifique jwt y devuelva boolean"
+Output: (DEBUG auth.py validate_token [jwt] "verify jwt and return boolean")
 
 Rules:
 1. Output ONLY the S-Expression starting with ( and ending with ).

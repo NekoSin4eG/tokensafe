@@ -8,6 +8,7 @@
   },
   "files": [
     "bin/tokensafe.js",
+    "bin/tokensafe",
     "bin/agy-tokens",
     "src/*.py",
     "!src/cloud_backend.py",

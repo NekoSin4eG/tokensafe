@@ -212,15 +212,6 @@ Verified across 8 real-world production software engineering scenarios (131,604 
 ## 🛠️ CLI Quickstart
 
 ```bash
-# Analyze repository God Nodes and dependency topology
-tokensafe graph
-
-# Generate compact tokensafe-out/API_SURFACE.md interface snapshot
-tokensafe map
-
-# Run environment health check and audit MCP/skill context token tax
-tokensafe doctor
-
 # View live savings dashboard in your terminal
 tokensafe stats
 ```
@@ -245,23 +236,43 @@ Context Traffic:      4,889,255 raw ➔ 370,574 optimized (2132 events)
 • Output Token Guard (write_file)     :  42,466 tokens saved (84 events)
 • Prompt Compactor (TOCP + Cache)     :  43,502 tokens saved (1255 events)
 • File Line Slicer (AST)              :   3,006 tokens saved (1 events)
+
+Run `tokensafe test "<prompt>"` to test compression on custom input.
+Run `tokensafe html` to view interactive browser dashboard.
 ```
 
 ```bash
-# Open interactive Apple dark-mode HTML dashboard
+# Open interactive local Apple dark-mode browser dashboard
 tokensafe html
 
-# Generate or preview Friday team ROI digest email
-tokensafe digest
+# Test prompt compression on custom input in real time
+tokensafe test "please fix the validate_token method in src/auth.py so that it checks jwt expiration and returns boolean"
+
+# Audit environment and context token tax (MCP & skills)
+tokensafe doctor
+
+# List configured LLM distillation providers and models
+tokensafe providers
+
+# Analyze repository God Nodes and dependency topology
+tokensafe graph
+
+# Generate compact tokensafe-out/API_SURFACE.md interface snapshot
+tokensafe map
 
 # Manage or disable high-overhead MCP tools
 tokensafe mcp list
 tokensafe mcp disable <server>
+tokensafe mcp enable <server>
 
 # Optimize SQLite metrics storage
 tokensafe vacuum
+tokensafe prune
 
-# Run the 5-scenario benchmark suite
+# Generate or preview Friday team ROI digest email
+tokensafe digest
+
+# Run the SWE-bench zero-loss verification suite
 tokensafe benchmark
 
 # Run the local transparent AI proxy (0.0.0.0:8765/v1)
@@ -394,7 +405,7 @@ MIT License. Commercial enterprise licenses available for on-premise B2B deploym
 
 ### Export Markdown Report
 ```bash
-./bin/agy-tokens markdown
+tokensafe markdown
 ```
 
 ---
@@ -415,16 +426,18 @@ agy-token-optimizer/
 ├── proto/
 │   └── tocp.proto              # Protocol Buffers contract
 ├── src/
+│   ├── cli.py                  # Unified CLI dispatcher (npm, pip, standalone)
 │   ├── cache_normalizer.py     # Prompt Cache Prefix Normalizer (Anthropic & DeepSeek)
 │   ├── governor.py             # Context Window Governor & Token Ceiling (Cascading reduction)
 │   ├── agent_firewall.py       # Cross-Agent Deduplication Cache (Subagent Firewall)
 │   ├── diff_slicer.py          # AST Diff Slicer & Lockfile Stripper (`git diff -U2`)
 │   ├── weekly_digest.py        # Friday Team ROI Digest & Engineer Leaderboard
 │   ├── environment_auditor.py  # MCP Server & Skill context token tax auditor
+│   ├── command_sanitizer.py    # High-output terminal command sanitizer
 │   ├── proxy.py                # Multi-provider transparent AI proxy & SSE broadcaster
 │   ├── graph_engine.py         # Sub-30ms AST parser, call graphs & God Node centrality
 │   ├── tokenizer.py            # Zero-dependency calibrated BPE token counter
-│   ├── compactor.py            # Semantic compactor (Natural Language -> TOCP S-Expr)
+│   ├── compactor.py            # Enhanced semantic compactor (Local Regex + Distillation -> TOCP S-Expr)
 │   ├── distiller.py            # Multi-provider LLM distillation engine (Gemini, DeepSeek, OpenAI)
 │   ├── distiller_cache.py      # Two-tier LRU + SQLite prompt distillation cache
 │   ├── deepseek_distiller.py   # DeepSeek-Flash semantic compiler with token arbitrage guard
@@ -433,6 +446,8 @@ agy-token-optimizer/
 │   ├── dashboard.py            # Visual ANSI terminal, Markdown & reactive SSE web dashboard
 │   ├── license_manager.py      # Ed25519 cryptographic license verification
 │   ├── mailer.py               # Transactional email & Friday ROI digest dispatcher
+│   ├── mcp_server.py           # Native Model Context Protocol (MCP) server
+│   ├── installer.py            # Multi-IDE agent auto-installer & config wizard
 │   └── cloud_backend.py        # Cloud REST backend, telemetry sync & Stripe webhooks
 ├── hooks/
 │   ├── pre_invocation.py       # PreInvocation hook entry point
@@ -440,7 +455,8 @@ agy-token-optimizer/
 │   └── post_tool_use.py        # PostToolUse hook entry point
 ├── frontend/                   # Modern React / Vite / Tailwind Web App & Dashboard
 ├── bin/
-│   └── agy-tokens              # Executable CLI (`tokensafe`)
+│   ├── tokensafe.js            # Node.js npm launcher (npx tokensafe)
+│   └── tokensafe               # Python CLI launcher (pip / standalone)
 ├── tests/                      # Unit test suite (100% passing)
 ├── install.sh                  # One-click installer for Antigravity
 └── README.md

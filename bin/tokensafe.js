@@ -69,7 +69,9 @@ if (!python) {
   process.exit(1);
 }
 
-const scriptPath = path.join(ROOT_DIR, 'bin', 'agy-tokens');
+const candidateTokensafe = path.join(ROOT_DIR, 'bin', 'tokensafe');
+const candidateAgy = path.join(ROOT_DIR, 'bin', 'agy-tokens');
+const scriptPath = fs.existsSync(candidateTokensafe) ? candidateTokensafe : candidateAgy;
 if (!fs.existsSync(scriptPath)) {
   console.error(`Error: TokenSafe script not found at ${scriptPath}`);
   process.exit(1);

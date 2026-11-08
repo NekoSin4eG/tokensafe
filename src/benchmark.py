@@ -29,7 +29,7 @@ BENCHMARK_TASKS = [
     {
         "id": "SWE-01",
         "name": "Race Condition / Distributed Lock (order_service.py)",
-        "prompt": "Привет! В файле order_service.py функция checkout иногда зависает при повторной оплате картой, потому что нет транзакционной блокировки через mutex. Добавь туда распределенную блокировку через Redis redlock и сделай метод идемпотентным.",
+        "prompt": "Hello! In order_service.py the checkout function occasionally hangs during duplicate card payments because there is no transaction mutex lock. Please add a distributed lock using Redis redlock and make the method idempotent.",
         "file_lines": 350,
         "is_edit": True,
         "raw_tool_tokens": 2800,
@@ -40,7 +40,7 @@ BENCHMARK_TASKS = [
     {
         "id": "SWE-02",
         "name": "OAuth JWT Expiration Triage (auth.controller.ts)",
-        "prompt": "Слушай, у меня в сервисе auth.controller.ts при логине через Google, если у юзера нет аватарки, промис зависает на 30 секунд и падает 504. Почини эту ерунду пожалуйста.",
+        "prompt": "In auth.controller.ts during Google login, if the user has no avatar the promise hangs for 30 seconds and fails with 504. Please fix this bug.",
         "file_lines": 280,
         "is_edit": True,
         "raw_tool_tokens": 2100,

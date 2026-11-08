@@ -89,5 +89,46 @@ class TestPromptCompactor(unittest.TestCase):
         self.assertEqual(res_tick["action"], "AUDIT")
         self.assertIn("jwt", res_tick["traits"])
 
+    def test_multilingual_spanish(self):
+        prompt = "Por favor arregla la función validate_token en auth.py para que verifique jwt y devuelva boolean"
+        res = PromptCompactor.compact(prompt, enable_deepseek=False)
+        self.assertEqual(res["action"], "DEBUG")
+        self.assertEqual(res["target_file"], "auth.py")
+        self.assertEqual(res["symbol"], "validate_token")
+        self.assertIn("jwt", res["traits"])
+        self.assertGreater(res["saved_tokens"], 0)
+
+    def test_multilingual_german(self):
+        prompt = "Bitte repariere die Funktion validate_token in auth.py damit es jwt überprüft"
+        res = PromptCompactor.compact(prompt, enable_deepseek=False)
+        self.assertEqual(res["action"], "DEBUG")
+        self.assertEqual(res["target_file"], "auth.py")
+        self.assertEqual(res["symbol"], "validate_token")
+        self.assertIn("jwt", res["traits"])
+
+    def test_multilingual_french(self):
+        prompt = "S'il vous plaît corriger la fonction validate_token dans auth.py pour vérifier le token jwt"
+        res = PromptCompactor.compact(prompt, enable_deepseek=False)
+        self.assertEqual(res["action"], "DEBUG")
+        self.assertEqual(res["target_file"], "auth.py")
+        self.assertEqual(res["symbol"], "validate_token")
+        self.assertIn("jwt", res["traits"])
+
+    def test_multilingual_chinese(self):
+        prompt = "请修复 auth.py 中的 validate_token 函数并添加 jwt 验证"
+        res = PromptCompactor.compact(prompt, enable_deepseek=False)
+        self.assertEqual(res["action"], "DEBUG")
+        self.assertEqual(res["target_file"], "auth.py")
+        self.assertEqual(res["symbol"], "validate_token")
+        self.assertIn("jwt", res["traits"])
+
+    def test_multilingual_japanese(self):
+        prompt = "auth.py の validate_token 関数を修正して jwt トークンを検証してください"
+        res = PromptCompactor.compact(prompt, enable_deepseek=False)
+        self.assertEqual(res["action"], "DEBUG")
+        self.assertEqual(res["target_file"], "auth.py")
+        self.assertEqual(res["symbol"], "validate_token")
+        self.assertIn("jwt", res["traits"])
+
 if __name__ == "__main__":
     unittest.main()

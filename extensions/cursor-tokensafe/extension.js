@@ -12,7 +12,8 @@ function activate(context) {
     context.subscriptions.push(statusBarItem);
 
     const projectRoot = path.dirname(path.dirname(__dirname));
-    const cliPath = path.join(projectRoot, "bin", "agy-tokens");
+    const candidateTokensafe = path.join(projectRoot, "bin", "tokensafe");
+    const cliPath = fs.existsSync(candidateTokensafe) ? candidateTokensafe : path.join(projectRoot, "bin", "agy-tokens");
     const dashboardHtml = path.join(projectRoot, "data", "dashboard.html");
 
     const disposableStats = vscode.commands.registerCommand('tokensafe.showStats', () => {

@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Installation script for Antigravity Token Optimizer Plugin
+# Installation script for TokenSafe Plugin
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TARGET_DIR="${HOME}/.gemini/config/plugins/agy-token-optimizer"
 
-echo "⚡ Installing Antigravity Token Optimizer Plugin..."
+echo "⚡ Installing TokenSafe Plugin..."
 
 mkdir -p "${HOME}/.gemini/config/plugins"
 
@@ -17,14 +17,15 @@ fi
 echo "  Creating symlink: ${TARGET_DIR} -> ${SCRIPT_DIR}"
 ln -s "${SCRIPT_DIR}" "${TARGET_DIR}"
 
-echo "  Making agy-tokens executable..."
+echo "  Making CLI executable..."
+chmod +x "${SCRIPT_DIR}/bin/tokensafe"
 chmod +x "${SCRIPT_DIR}/bin/agy-tokens"
 
 echo ""
-echo "✅ Antigravity Token Optimizer successfully installed!"
+echo "✅ TokenSafe successfully installed!"
 echo "   Plugin location: ${TARGET_DIR}"
-echo "   CLI tool: ${SCRIPT_DIR}/bin/agy-tokens"
+echo "   CLI tool: tokensafe (or ${SCRIPT_DIR}/bin/tokensafe)"
 echo ""
 echo "Try running:"
-echo "   ${SCRIPT_DIR}/bin/agy-tokens stats"
-echo "   ${SCRIPT_DIR}/bin/agy-tokens test \"Слушай, перепиши функцию get_balance в wallet.ts\""
+echo "   tokensafe stats"
+echo "   tokensafe test \"Please rewrite the get_balance function in wallet.ts\""

@@ -54,7 +54,7 @@ class TestEnvironmentAuditor(unittest.TestCase):
             warning = EnvironmentAuditor.get_bloat_warning()
             self.assertIsNotNone(warning)
             self.assertIn("bloated_server", warning)
-            self.assertIn("50 инструментов", warning)
+            self.assertIn("50 tools", warning)
 
     def test_disable_and_enable_mcp(self):
         with patch.object(EnvironmentAuditor, "get_config_paths", return_value=[self.config_path]), \

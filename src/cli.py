@@ -3,7 +3,7 @@
 TokenSafe Unified CLI Dispatcher.
 Used by:
 - npm CLI (`bin/tokensafe.js`)
-- standalone executable (`bin/agy-tokens`)
+- standalone executable (`bin/tokensafe`)
 - PyPI console script entrypoint (`tokensafe` via `pyproject.toml`)
 """
 

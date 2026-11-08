@@ -70,7 +70,7 @@ Before executing potentially verbose terminal commands (`git diff`, `git grep`, 
 
 ## CLI Usage
 
-Developers and agents can run `tokensafe` (or `./bin/agy-tokens`) directly from the terminal:
+Developers and agents can run `tokensafe` directly from the terminal:
 
 ```bash
 # View terminal breakdown & recent optimizations

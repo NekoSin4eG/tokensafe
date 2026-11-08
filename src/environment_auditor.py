@@ -129,11 +129,11 @@ class EnvironmentAuditor:
             return None
 
         bloated = report["bloated_servers"]
-        names = ", ".join([f"`{b['name']}` ({b['tool_count']} инструментов, ~{b['est_tokens_per_turn']:,} токенов/шаг)" for b in bloated])
+        names = ", ".join([f"`{b['name']}` ({b['tool_count']} tools, ~{b['est_tokens_per_turn']:,} tokens/turn)" for b in bloated])
         return (
-            f"⚠️ **TokenSafe Bloat Alert**: Обнаружен тяжелый MCP сервер: {names}. "
-            f"Суммарный налог на каждый запрос: **~{report['total_static_tokens_per_turn']:,} токенов**. "
-            f"Отключите неиспользуемые серверы через `tokensafe mcp disable <name>`."
+            f"⚠️ **TokenSafe Bloat Alert**: Heavy MCP server detected: {names}. "
+            f"Static context overhead per turn: **~{report['total_static_tokens_per_turn']:,} tokens**. "
+            f"Disable unused servers via `tokensafe mcp disable <name>`."
         )
 
     @classmethod
@@ -228,7 +228,7 @@ class EnvironmentAuditor:
 
     @classmethod
     def format_cli_report(cls) -> str:
-        """Formats visual CLI report for agy-tokens doctor."""
+        """Formats visual CLI report for tokensafe doctor."""
         report = cls.audit()
         lines = [
             "\n\033[1m\033[36m⚡ TOKENSAFE ENVIRONMENT AUDIT (CONTEXT TAX DOCTOR) ⚡\033[0m\n",
