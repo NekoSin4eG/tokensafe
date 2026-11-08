@@ -2,5 +2,5 @@
 TokenSafe: Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents.
 """
 
-__version__ = "1.0.1"
+__version__ = "1.1.0"
 __author__ = "TokenSafe Team"
