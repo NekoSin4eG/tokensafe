@@ -8,14 +8,14 @@ import os
 import json
 import sqlite3
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Generator
 
 USD_PER_TOKEN = 1.50 / 1_000_000.0
 
 
 class MetricsTracker:
-    """Manages persistent token savings metrics in SQLite."""
+    """Manages persistent token savings metrics in SQLite with lifetime rollups and retention."""
 
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
@@ -25,6 +25,9 @@ class MetricsTracker:
             db_path = os.path.join(data_dir, "metrics.db")
 
         self.db_path = db_path
+        self.retention_days = int(os.environ.get("TOKENSAFE_RETENTION_DAYS", "30"))
+        self.max_events = int(os.environ.get("TOKENSAFE_MAX_EVENTS", "5000"))
+        self._event_counter = 0
         self._init_db()
 
     @contextmanager
@@ -65,6 +68,25 @@ class MetricsTracker:
                     details TEXT
                 )
             """)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS lifetime_aggregates (
+                    id INTEGER PRIMARY KEY CHECK (id = 1),
+                    total_events INTEGER DEFAULT 0,
+                    total_original_tokens INTEGER DEFAULT 0,
+                    total_optimized_tokens INTEGER DEFAULT 0,
+                    total_saved_tokens INTEGER DEFAULT 0,
+                    total_usd_saved REAL DEFAULT 0.0,
+                    breakdown TEXT DEFAULT '{}'
+                )
+            """)
+            cursor.execute("""
+                INSERT OR IGNORE INTO lifetime_aggregates (
+                    id, total_events, total_original_tokens, total_optimized_tokens,
+                    total_saved_tokens, total_usd_saved, breakdown
+                ) VALUES (1, 0, 0, 0, 0, 0.0, '{}')
+            """)
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)")
+            cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id)")
 
     def record_event(
         self,
@@ -107,6 +129,15 @@ class MetricsTracker:
             """, (session_id, now_iso, now_iso, original_tokens,
                   optimized_tokens, saved_tokens, est_usd))
 
+        # Periodic amortized auto-retention check (every 100 events)
+        self._event_counter += 1
+        if self._event_counter >= 100:
+            self._event_counter = 0
+            try:
+                self.prune(days=self.retention_days, max_events=self.max_events, vacuum=False)
+            except Exception:
+                pass
+
         return {
             "saved_tokens": saved_tokens,
             "reduction_pct": round(reduction_pct, 1),
@@ -114,41 +145,68 @@ class MetricsTracker:
         }
 
     def get_summary(self) -> Dict[str, Any]:
-        """Returns cumulative statistics across all sessions."""
+        """Returns cumulative statistics across all sessions, including lifetime rollups."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
+
+            # 1. Lifetime aggregates
+            cursor.execute("SELECT * FROM lifetime_aggregates WHERE id = 1")
+            life_row = cursor.fetchone()
+            life_events = life_row["total_events"] if life_row else 0
+            life_orig = life_row["total_original_tokens"] if life_row else 0
+            life_opt = life_row["total_optimized_tokens"] if life_row else 0
+            life_saved = life_row["total_saved_tokens"] if life_row else 0
+            life_usd = life_row["total_usd_saved"] if life_row else 0.0
+            life_breakdown = json.loads(life_row["breakdown"] or "{}") if life_row else {}
+
+            # 2. Active events
             cursor.execute("""
                 SELECT 
-                    COUNT(DISTINCT session_id) as session_count,
-                    COUNT(*) as total_events,
-                    COALESCE(SUM(original_tokens), 0) as total_orig,
-                    COALESCE(SUM(optimized_tokens), 0) as total_opt,
-                    COALESCE(SUM(saved_tokens), 0) as total_saved,
-                    COALESCE(SUM(est_usd_saved), 0.0) as total_usd
+                    COUNT(*) as active_events,
+                    COALESCE(SUM(original_tokens), 0) as active_orig,
+                    COALESCE(SUM(optimized_tokens), 0) as active_opt,
+                    COALESCE(SUM(saved_tokens), 0) as active_saved,
+                    COALESCE(SUM(est_usd_saved), 0.0) as active_usd
                 FROM events
             """)
-            row = cursor.fetchone()
+            ev_row = cursor.fetchone()
 
+            cursor.execute("SELECT COUNT(DISTINCT session_id) as session_count FROM sessions")
+            sess_row = cursor.fetchone()
+            session_count = sess_row["session_count"] if sess_row else 0
+
+            # 3. Breakdown of active events
             cursor.execute("""
                 SELECT event_type, COUNT(*) as count, COALESCE(SUM(saved_tokens), 0) as saved
                 FROM events
                 GROUP BY event_type
             """)
-            breakdown = {r["event_type"]: {"count": r["count"], "saved": r["saved"]} for r in cursor.fetchall()}
+            combined_breakdown = dict(life_breakdown)
+            for r in cursor.fetchall():
+                ev_type = r["event_type"]
+                if ev_type not in combined_breakdown:
+                    combined_breakdown[ev_type] = {"count": 0, "saved": 0}
+                else:
+                    combined_breakdown[ev_type] = dict(combined_breakdown[ev_type])
+                combined_breakdown[ev_type]["count"] += r["count"]
+                combined_breakdown[ev_type]["saved"] += r["saved"]
 
-        total_orig = row["total_orig"]
-        total_saved = row["total_saved"]
+        total_events = life_events + (ev_row["active_events"] if ev_row else 0)
+        total_orig = life_orig + (ev_row["active_orig"] if ev_row else 0)
+        total_opt = life_opt + (ev_row["active_opt"] if ev_row else 0)
+        total_saved = life_saved + (ev_row["active_saved"] if ev_row else 0)
+        total_usd = life_usd + (ev_row["active_usd"] if ev_row else 0.0)
         overall_reduction = (total_saved / total_orig * 100.0) if total_orig > 0 else 0.0
 
         return {
-            "session_count": row["session_count"],
-            "total_events": row["total_events"],
+            "session_count": max(session_count, 1 if total_events > 0 else 0),
+            "total_events": total_events,
             "total_original_tokens": total_orig,
-            "total_optimized_tokens": row["total_opt"],
+            "total_optimized_tokens": total_opt,
             "total_saved_tokens": total_saved,
             "overall_reduction_pct": round(overall_reduction, 1),
-            "total_usd_saved": round(row["total_usd"], 4),
-            "breakdown": breakdown
+            "total_usd_saved": round(total_usd, 4),
+            "breakdown": combined_breakdown
         }
 
     def get_recent_events(self, limit: int = 10) -> List[Dict[str, Any]]:
@@ -219,9 +277,144 @@ class MetricsTracker:
                 GROUP BY session_id
             """)
 
+    def prune(
+        self,
+        days: Optional[int] = None,
+        max_events: Optional[int] = None,
+        vacuum: bool = True
+    ) -> Dict[str, Any]:
+        """
+        Prunes raw events older than `days` or exceeding `max_events`.
+        Preserves cumulative metrics by rolling pruned data into `lifetime_aggregates`.
+        """
+        db_size_before = os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
+
+        where_clauses = []
+        params = []
+
+        if days is not None and days > 0:
+            cutoff_time = (datetime.now() - timedelta(days=days)).isoformat()
+            where_clauses.append("timestamp < ?")
+            params.append(cutoff_time)
+
+        if max_events is not None and max_events > 0:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id FROM events ORDER BY id DESC LIMIT 1 OFFSET ?",
+                    (max_events,)
+                )
+                row = cursor.fetchone()
+                if row:
+                    cutoff_id = row[0]
+                    where_clauses.append("id <= ?")
+                    params.append(cutoff_id)
+
+        if not where_clauses:
+            return {
+                "pruned_events": 0,
+                "db_size_before": db_size_before,
+                "db_size_after": db_size_before
+            }
+
+        combined_where = " OR ".join(where_clauses)
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+
+            # 1. Calculate aggregates for events to be pruned
+            cursor.execute(f"""
+                SELECT 
+                    COUNT(*) as cnt,
+                    COALESCE(SUM(original_tokens), 0) as orig,
+                    COALESCE(SUM(optimized_tokens), 0) as opt,
+                    COALESCE(SUM(saved_tokens), 0) as saved,
+                    COALESCE(SUM(est_usd_saved), 0.0) as usd
+                FROM events
+                WHERE {combined_where}
+            """, params)
+            agg_row = cursor.fetchone()
+            prune_count = agg_row["cnt"] if agg_row else 0
+
+            if prune_count > 0:
+                # 2. Breakdown of pruned events
+                cursor.execute(f"""
+                    SELECT event_type, COUNT(*) as cnt, COALESCE(SUM(saved_tokens), 0) as saved
+                    FROM events
+                    WHERE {combined_where}
+                    GROUP BY event_type
+                """, params)
+                pruned_breakdown = {
+                    r["event_type"]: {"count": r["cnt"], "saved": r["saved"]}
+                    for r in cursor.fetchall()
+                }
+
+                # 3. Fetch existing lifetime aggregates
+                cursor.execute("SELECT * FROM lifetime_aggregates WHERE id = 1")
+                life_row = cursor.fetchone()
+                current_breakdown = json.loads(life_row["breakdown"] or "{}") if life_row else {}
+
+                for ev_type, vals in pruned_breakdown.items():
+                    if ev_type not in current_breakdown:
+                        current_breakdown[ev_type] = {"count": 0, "saved": 0}
+                    else:
+                        current_breakdown[ev_type] = dict(current_breakdown[ev_type])
+                    current_breakdown[ev_type]["count"] += vals["count"]
+                    current_breakdown[ev_type]["saved"] += vals["saved"]
+
+                # 4. Update lifetime_aggregates
+                cursor.execute("""
+                    UPDATE lifetime_aggregates SET
+                        total_events = total_events + ?,
+                        total_original_tokens = total_original_tokens + ?,
+                        total_optimized_tokens = total_optimized_tokens + ?,
+                        total_saved_tokens = total_saved_tokens + ?,
+                        total_usd_saved = total_usd_saved + ?,
+                        breakdown = ?
+                    WHERE id = 1
+                """, (
+                    agg_row["cnt"], agg_row["orig"], agg_row["opt"],
+                    agg_row["saved"], agg_row["usd"],
+                    json.dumps(current_breakdown, ensure_ascii=False)
+                ))
+
+                # 5. Delete pruned events
+                cursor.execute(f"DELETE FROM events WHERE {combined_where}", params)
+
+        if vacuum and prune_count > 0:
+            self.vacuum()
+
+        db_size_after = os.path.getsize(self.db_path) if os.path.exists(self.db_path) else 0
+
+        return {
+            "pruned_events": prune_count,
+            "db_size_before": db_size_before,
+            "db_size_after": db_size_after
+        }
+
+    def vacuum(self):
+        """Reclaims unused disk space by running VACUUM on SQLite."""
+        try:
+            conn = sqlite3.connect(self.db_path, isolation_level=None)
+            conn.execute("VACUUM")
+            conn.close()
+        except Exception:
+            pass
+
     def reset(self):
         """Resets all metrics data."""
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("DELETE FROM events")
             cursor.execute("DELETE FROM sessions")
+            cursor.execute("""
+                UPDATE lifetime_aggregates SET
+                    total_events = 0,
+                    total_original_tokens = 0,
+                    total_optimized_tokens = 0,
+                    total_saved_tokens = 0,
+                    total_usd_saved = 0.0,
+                    breakdown = '{}'
+                WHERE id = 1
+            """)
+        self.vacuum()

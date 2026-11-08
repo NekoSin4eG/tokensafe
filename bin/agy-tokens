@@ -140,6 +140,45 @@ def main():
         print(f"\033[1mCompacted Tokens:\033[0m {res['compact_tokens']}")
         print(f"\033[1mTokens Saved:\033[0m     \033[32m\033[1m+{res['saved_tokens']} tokens\033[0m ({render_bar(res['reduction_pct'])})\n")
 
+    elif command in ("prune", "cleanup"):
+        days = None
+        max_events = None
+        i = 1
+        while i < len(args):
+            if args[i] == "--days" and i + 1 < len(args):
+                try:
+                    days = int(args[i + 1])
+                except ValueError:
+                    pass
+                i += 2
+            elif args[i] in ("--max", "--max-events") and i + 1 < len(args):
+                try:
+                    max_events = int(args[i + 1])
+                except ValueError:
+                    pass
+                i += 2
+            else:
+                i += 1
+
+        if days is None and max_events is None:
+            days = 30
+            max_events = 5000
+
+        print(f"\n\033[1m\033[36m⚡ DATA RETENTION PRUNE ⚡\033[0m")
+        print(f"Policy: retain events < {days or 'any'} days old, max {max_events or 'unlimited'} entries.")
+        res = tracker.prune(days=days, max_events=max_events, vacuum=True)
+        b_before = res.get("db_size_before", 0) / 1024.0
+        b_after = res.get("db_size_after", 0) / 1024.0
+        print(f"\033[32m✔ Pruned {res['pruned_events']} granular events into lifetime rollup table.\033[0m")
+        print(f"  DB Size: {b_before:.1f} KB ➔ {b_after:.1f} KB\n")
+
+    elif command == "vacuum":
+        print("\n\033[1m\033[36m⚡ VACUUMING METRICS DATABASE ⚡\033[0m")
+        b_before = (os.path.getsize(tracker.db_path) if os.path.exists(tracker.db_path) else 0) / 1024.0
+        tracker.vacuum()
+        b_after = (os.path.getsize(tracker.db_path) if os.path.exists(tracker.db_path) else 0) / 1024.0
+        print(f"\033[32m✔ Database compacted. Size: {b_before:.1f} KB ➔ {b_after:.1f} KB\033[0m\n")
+
     elif command == "reset":
         confirm = input("Are you sure you want to reset all token metrics? [y/N]: ").strip().lower()
         if confirm == "y":
@@ -150,7 +189,7 @@ def main():
 
     else:
         print(f"Unknown command: {command}")
-        print("Available commands: stats, html, benchmark, setup, proxy, mcp, test, markdown, reset")
+        print("Available commands: stats, html, benchmark, setup, proxy, mcp, test, markdown, prune, vacuum, reset")
         sys.exit(1)
 
 if __name__ == "__main__":
