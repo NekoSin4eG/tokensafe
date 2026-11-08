@@ -377,5 +377,8 @@ class AgentInstaller:
         print(f"\n\033[32m\033[1m✅ TokenSafe successfully connected to {installed_count} agent(s)!\033[0m")
         print("   Restart your IDE / Agent to start saving tokens automatically.\n")
 
-if __name__ == "__main__":
+def main():
     AgentInstaller.run_interactive()
+
+if __name__ == "__main__":
+    main()

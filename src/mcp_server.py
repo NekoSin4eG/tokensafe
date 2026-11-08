@@ -194,5 +194,8 @@ def run_mcp_server():
         sys.stdout.write(json.dumps(response) + "\n")
         sys.stdout.flush()
 
-if __name__ == "__main__":
+def main():
     run_mcp_server()
+
+if __name__ == "__main__":
+    main()

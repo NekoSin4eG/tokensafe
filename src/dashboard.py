@@ -8,6 +8,11 @@ import os
 import json
 from datetime import datetime
 from typing import Dict, Any, List
+
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
 from src.metrics import MetricsTracker
 
 RESET = "\033[0m"
@@ -292,3 +297,16 @@ class Dashboard:
 </html>
 """
         return html
+
+def main():
+    tracker = MetricsTracker()
+    dash = Dashboard(tracker)
+    if "--html" in sys.argv:
+        print(dash.render_html())
+    elif "--markdown" in sys.argv or "--md" in sys.argv:
+        print(dash.render_markdown())
+    else:
+        print(dash.render_terminal())
+
+if __name__ == "__main__":
+    main()

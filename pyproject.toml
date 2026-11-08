@@ -1,0 +1,56 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "tokensafe"
+version = "1.0.0"
+description = "Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents"
+readme = "README.md"
+authors = [
+    { name = "TokenSafe Team", email = "support@tokensafe.dev" }
+]
+license = "MIT"
+requires-python = ">=3.10"
+keywords = [
+    "ai",
+    "llm",
+    "tokens",
+    "token-optimization",
+    "context-window",
+    "cursor",
+    "claude",
+    "antigravity",
+    "codex",
+    "mcp",
+    "mcp-server",
+    "ast",
+    "proxy"
+]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Topic :: Software Development :: Build Tools",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13"
+]
+dependencies = []
+
+[project.urls]
+Homepage = "https://tokensafe.dev"
+Repository = "https://github.com/tokensafe-dev/tokensafe"
+Documentation = "https://tokensafe.dev"
+Issues = "https://github.com/tokensafe-dev/tokensafe/issues"
+
+[project.scripts]
+tokensafe = "src.installer:main"
+tokensafe-proxy = "src.proxy:main"
+tokensafe-mcp = "src.mcp_server:main"
+tokensafe-stats = "src.dashboard:main"
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+exclude = ["src.cloud_backend*"]

@@ -1,0 +1,52 @@
+{
+  "name": "tokensafe",
+  "version": "1.0.0",
+  "description": "Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents",
+  "main": "bin/tokensafe.js",
+  "bin": {
+    "tokensafe": "./bin/tokensafe.js"
+  },
+  "files": [
+    "bin/tokensafe.js",
+    "bin/agy-tokens",
+    "src/*.py",
+    "!src/cloud_backend.py",
+    "rules/",
+    "skills/",
+    "hooks/",
+    "hooks.json",
+    "proto/",
+    "extensions/",
+    "plugin.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "start": "node ./bin/tokensafe.js"
+  },
+  "keywords": [
+    "ai",
+    "llm",
+    "tokens",
+    "token-optimization",
+    "context-window",
+    "cursor",
+    "claude",
+    "antigravity",
+    "codex",
+    "mcp",
+    "mcp-server",
+    "ast",
+    "proxy"
+  ],
+  "author": "TokenSafe",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tokensafe-dev/tokensafe.git"
+  },
+  "bugs": {
+    "url": "https://github.com/tokensafe-dev/tokensafe/issues"
+  },
+  "homepage": "https://tokensafe.dev"
+}

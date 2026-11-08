@@ -150,6 +150,9 @@ def run_proxy(port: int = DEFAULT_PORT):
     except KeyboardInterrupt:
         print("\nProxy stopped.")
 
-if __name__ == "__main__":
+def main():
     port = int(sys.argv[1]) if len(sys.argv) > 1 else DEFAULT_PORT
     run_proxy(port)
+
+if __name__ == "__main__":
+    main()
