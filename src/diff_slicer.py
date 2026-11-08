@@ -14,8 +14,9 @@ from src.tokenizer import count_tokens
 class DiffSlicer:
     """Slices and compresses code diffs."""
 
-    IGNORED_DIFF_EXTENSIONS = (
-        ".lock", ".lockb", ".sum", ".min.js", ".min.css", ".bundle.js", ".map", ".svg", ".png", ".jpg"
+    IGNORED_DIFF_PATTERNS = (
+        "package-lock.json", "pnpm-lock.yaml", "yarn.lock", "bun.lock", "bun.lockb",
+        "Cargo.lock", "go.sum", "composer.lock", ".min.js", ".min.css", ".bundle.js", ".map"
     )
 
     HUNK_HEADER_RE = re.compile(r"^@@\s+-\d+(?:,\d+)?\s+\+\d+(?:,\d+)?\s+@@(.*)$")
@@ -63,8 +64,8 @@ class DiffSlicer:
                 flush_context(max_context_lines, is_trailing=True)
                 parts = line.split(" ")
                 current_file = parts[-1] if len(parts) > 2 else ""
-                # Check if ignored extension
-                skip_current_file = any(current_file.endswith(ext) for ext in cls.IGNORED_DIFF_EXTENSIONS)
+                # Check if ignored file pattern or extension
+                skip_current_file = any(pat in current_file for pat in cls.IGNORED_DIFF_PATTERNS) or current_file.endswith((".lock", ".lockb", ".sum", ".map", ".png", ".jpg", ".svg"))
                 if skip_current_file:
                     output_lines.append(f"[Diff Slicer: Omitted diff for lockfile/binary asset '{current_file}']")
                     continue

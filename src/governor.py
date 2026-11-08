@@ -104,9 +104,9 @@ class ContextGovernor:
                 msg = governed_messages[idx]
                 if msg.get("role") == "user" and isinstance(msg.get("content"), str):
                     raw_user = msg["content"]
-                    if len(raw_user.strip()) > 30 and "[TOCP Compressed Intent]" not in raw_user:
+                    if len(raw_user.strip()) > 15 and "[TOCP Intent]" not in raw_user:
                         comp = PromptCompactor.compact(raw_user, enable_deepseek=False)
-                        if comp["saved_tokens"] > 15:
+                        if comp["saved_tokens"] >= 5:
                             msg["content"] = f"[TOCP Intent]: {comp['compact_text']}"
             current_tokens = calculate_total_tokens(governed_messages)
             if "ast_fold_code_blocks" not in actions_taken or current_tokens < initial_tokens:
