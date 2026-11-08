@@ -124,6 +124,10 @@ class Skeletonizer:
         ext = os.path.splitext(original_path)[1]
         skeleton_content = cls.skeletonize_code(code, ext)
 
+        # Prefetch local dependency signatures
+        from src.dependency_prefetcher import DependencyPrefetcher
+        prefetch_block, saved_dep_tokens = DependencyPrefetcher.prefetch_for_file(original_path)
+
         orig_tokens = count_tokens(code)
         skel_tokens = count_tokens(skeleton_content)
 
@@ -138,8 +142,10 @@ class Skeletonizer:
             f"# [To inspect implementation of a specific method, call read_file with StartLine/EndLine]\n\n"
         )
 
+        full_content = header_comment + (prefetch_block + "\n" if prefetch_block else "") + skeleton_content
+
         with open(skeleton_path, "w", encoding="utf-8") as f:
-            f.write(header_comment + skeleton_content)
+            f.write(full_content)
 
         # Write metadata for mtime incremental caching
         with open(meta_path, "w", encoding="utf-8") as mf:

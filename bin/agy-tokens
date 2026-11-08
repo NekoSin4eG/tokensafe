@@ -45,6 +45,15 @@ def main():
         except Exception:
             pass
 
+    elif command in ("benchmark", "bench"):
+        from src.benchmark import BenchmarkSuite
+        print("\n⚡ Running Zero-Loss SWE-bench Benchmark Suite across 5 real-world scenarios...")
+        data = BenchmarkSuite.run_all()
+        print(BenchmarkSuite.render_report(data))
+        out_md = os.path.join(PROJECT_ROOT, "data", "BENCHMARK_REPORT.md")
+        BenchmarkSuite.export_markdown_report(data, out_md)
+        print(f"📊 Publication-ready markdown report saved to: {out_md}\n")
+
     elif command in ("markdown", "md", "export"):
         print(dashboard.render_markdown())
 
@@ -77,7 +86,7 @@ def main():
 
     else:
         print(f"Unknown command: {command}")
-        print("Available commands: stats, html, test, markdown, reset")
+        print("Available commands: stats, html, benchmark, test, markdown, reset")
         sys.exit(1)
 
 if __name__ == "__main__":
