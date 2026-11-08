@@ -62,7 +62,9 @@ Traditional AI code interactions suffer from massive context bloat:
 - **Subagent Deduplication Firewall:** Detects repeated file reads across subagents and agent swarms, serving cached AST slices directly from SQLite session memory (`SUBAGENT_DEDUP`) with zero redundant overhead.
 - **AST Diff Slicer & Lockfile Stripper:** Compresses code review diffs by stripping noisy lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`) and minified assets, condensing diffs to 2 lines of context (`git diff -U2`) for up to 96% token savings.
 - **God Nodes & Architectural Hub Detection:** Calculates Degree Centrality to identify structural project hubs and injects topology awareness into agent sessions without expensive file crawling.
-- **TOCP Prompt Distillation:** Intercepts prompts and distills intent into lean S-Expressions via **Google Gemini (2.0 Flash-Lite), OpenAI ChatGPT (gpt-4o-mini), Anthropic Claude, or DeepSeek-Flash** (`-40% to -70%`). Automatically detects `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `DEEPSEEK_API_KEY`.
+- **TOCP Prompt Distillation:** Intercepts prompts and distills intent into lean S-Expressions via **Google Gemini (Flash-Lite / 2.0 Flash), DeepSeek, OpenAI ChatGPT (gpt-4o-mini), or Anthropic Claude** (`-40% to -70%`). Automatically prioritizes ultra-cheap / free Google Gemini (`gemini-flash-lite-latest`, $0.075/M input, 1,500 req/day free tier in Google AI Studio).
+- **Token Arbitrage Guard & Output Ceiling:** Eliminates LLM compiler arbitrage loss with a dual defense: inputs $< 100$ tokens route to instant zero-cost local regex heuristics ($0$ LLM tokens), while inputs $\ge 100$ tokens are clamped to a strict $60$-token max output ceiling.
+- **Two-Tier Distillation Cache:** Two-tier In-Memory LRU + Persistent SQLite cache (`metrics.db`) with normalized SHA-256 hashing guarantees sub-millisecond zero-cost replays for recurring developer commands.
 - **API Surface Map Generator:** Generates high-density `tokensafe-out/API_SURFACE.md` (~1.5k tokens) for instant agent codebase onboarding.
 - **Predictive Dependency Prefetcher:** Attaches imported symbol signatures to eliminate downstream exploratory `read_file` roundtrips.
 - **Live SSE Streaming Dashboard:** Real-time reactive Web UI streaming token reductions, live event logs, and USD savings via Server-Sent Events (`/api/events`).
@@ -130,19 +132,47 @@ How TokenSafe complements or supersedes static graph tools like **Graphify** (`g
 
 ---
 
-## 🤖 Universal LLM Distillation Providers
+## 🤖 Universal LLM Distillation Providers & Unit Economics Defense
 
-TokenSafe supports any key you already have:
+TokenSafe features an intelligent multi-provider prompt compiler that distills verbose developer prompts into lean TOCP S-Expressions (`-40% to -70% tokens`).
 
-| Provider | Supported Model | Environment Variable | Config Key |
-|---|---|---|---|
-| **Google Gemini** | `gemini-2.0-flash-lite`, `gemini-2.0-flash` | `GEMINI_API_KEY` | `gemini_api_key` |
-| **OpenAI ChatGPT** | `gpt-4o-mini`, `gpt-4o` | `OPENAI_API_KEY` | `openai_api_key` |
-| **Anthropic Claude** | `claude-3-5-haiku`, `claude-3-7-sonnet` | `ANTHROPIC_API_KEY` | `anthropic_api_key` |
-| **DeepSeek** | `deepseek-flash`, `deepseek-chat` | `DEEPSEEK_API_KEY` | `deepseek_api_key` |
-| **Custom / Unified** | Any OpenAI/Anthropic compatible gateway | `TOKENSAFE_UPSTREAM_KEY` | `upstream_key` |
+### 1. Provider Priority & Economics Matrix
 
-Check active providers anytime with:
+| Provider | Recommended Model | Pricing (Input / Output) | Environment Variable | Priority |
+|---|---|---|---|---|
+| **Google Gemini** ⚡ | `gemini-flash-lite-latest` | **$0.075 / $0.30** / M (Free tier: 1,500 req/day) | `GEMINI_API_KEY` | **1 (Default / Lowest Cost)** |
+| **DeepSeek** | `deepseek-chat` / `deepseek-flash` | $0.14 / $0.60 / M | `DEEPSEEK_API_KEY` | 2 |
+| **OpenAI ChatGPT** | `gpt-4o-mini` | $0.15 / $0.60 / M | `OPENAI_API_KEY` | 3 |
+| **Anthropic Claude** | `claude-3-5-haiku-20241022` | $0.80 / $4.00 / M | `ANTHROPIC_API_KEY` | 4 |
+| **Custom / Unified** | Any OpenAI/Anthropic gateway | Custom | `TOKENSAFE_UPSTREAM_KEY` | 5 |
+
+> **Recommendation**: Set `GEMINI_API_KEY` from Google AI Studio. Gemini Flash-Lite provides 1,500 free requests per day, making prompt distillation 100% free for individual developers and small teams.
+
+### 2. Token Arbitrage Guard & Two-Tier Cache Architecture
+
+To prevent compiler cost overhead from exceeding token savings, TokenSafe applies a 3-stage defense:
+
+1. **Smart Gating Threshold (`llm_distill_min_tokens: 100`)**: Prompts under 100 tokens bypass LLM calls entirely and use instant zero-cost local regex heuristics ($0$ tokens, $< 1\text{ms}$).
+2. **Output Token Ceiling (`distill_max_tokens: 60`)**: Caps LLM output at 60 tokens, eliminating verbose chain-of-thought inflation and token arbitrage loss.
+3. **Two-Tier Distillation Cache**:
+   - **Tier 1 (In-Memory LRU)**: Sub-millisecond instant hit for active session loops.
+   - **Tier 2 (Persistent SQLite)**: Stores SHA-256 normalized prompt hashes in `data/metrics.db` across agent restarts. Recurring commands (`git commit`, `run tests`, `fix lint`) cost 0 tokens.
+
+### 3. Configuration (`data/config.json`)
+
+Configure your provider preferences and models directly:
+
+```json
+{
+  "preferred_provider": "gemini",
+  "gemini_api_key": "YOUR_GEMINI_API_KEY",
+  "gemini_model": "gemini-flash-lite-latest",
+  "llm_distill_min_tokens": 100,
+  "distill_max_tokens": 60
+}
+```
+
+Check active providers and cache stats anytime:
 ```bash
 tokensafe providers
 ```
@@ -193,7 +223,31 @@ tokensafe doctor
 
 # View live savings dashboard in your terminal
 tokensafe stats
+```
 
+```text
+┌────────────────────────────────────────────────────────────────────────┐
+│               ⚡ TOKENSAFE CONTEXT OPTIMIZER DASHBOARD ⚡               │
+└────────────────────────────────────────────────────────────────────────┘
+
+Total Tokens Saved:   4,524,156 tokens
+Efficiency Gain:      [████████████████████████████░░] 92.5%
+Estimated Savings:    $6.7865 USD
+Context Traffic:      4,889,255 raw ➔ 370,574 optimized (2132 events)
+
+── Breakdown by Source ──────────────────────────────────────────────────
+• AST Skeletonizer (Signatures)       :   3,509 tokens saved (2 events)
+• Command Sanitizer (CLI)             : 727,300 tokens saved (263 events)
+• Context Governor                    :   5,800 tokens saved (29 events)
+• Graph-Guided Slicer (Call-Graph)    :  42,420 tokens saved (14 events)
+• Architecture Graph (God Nodes)      : 758,256 tokens saved (13 events)
+• Multi-turn History Fold             : 2,897,897 tokens saved (471 events)
+• Output Token Guard (write_file)     :  42,466 tokens saved (84 events)
+• Prompt Compactor (TOCP + Cache)     :  43,502 tokens saved (1255 events)
+• File Line Slicer (AST)              :   3,006 tokens saved (1 events)
+```
+
+```bash
 # Open interactive Apple dark-mode HTML dashboard
 tokensafe html
 
@@ -229,10 +283,11 @@ You can configure any or all of your preferred LLM provider keys:
 
 | Environment Variable | Provider Supported | Default Model |
 |---|---|---|
+| `GEMINI_API_KEY` | Google Gemini (Fastest / Lowest Cost) | `gemini-flash-lite-latest` |
+| `PREFERRED_PROVIDER` | Explicit provider priority (`gemini`, `deepseek`, etc.) | `gemini` |
+| `DEEPSEEK_API_KEY` | DeepSeek API | `deepseek-chat` |
 | `OPENAI_API_KEY` | OpenAI API | `gpt-4o-mini` |
 | `ANTHROPIC_API_KEY` | Anthropic Claude | `claude-3-5-haiku-20241022` |
-| `GEMINI_API_KEY` | Google Gemini | `gemini-2.0-flash-lite` |
-| `DEEPSEEK_API_KEY` | DeepSeek API | `deepseek-chat` |
 | `TOKENSAFE_UPSTREAM_KEY` | Unified / Custom Gateway | Custom Upstream |
 
 ### 2. Docker Compose Quickstart
@@ -370,6 +425,9 @@ agy-token-optimizer/
 │   ├── graph_engine.py         # Sub-30ms AST parser, call graphs & God Node centrality
 │   ├── tokenizer.py            # Zero-dependency calibrated BPE token counter
 │   ├── compactor.py            # Semantic compactor (Natural Language -> TOCP S-Expr)
+│   ├── distiller.py            # Multi-provider LLM distillation engine (Gemini, DeepSeek, OpenAI)
+│   ├── distiller_cache.py      # Two-tier LRU + SQLite prompt distillation cache
+│   ├── deepseek_distiller.py   # DeepSeek-Flash semantic compiler with token arbitrage guard
 │   ├── slicer.py               # AST & Line windowing tool optimizer
 │   ├── metrics.py              # Persistent SQLite metrics engine
 │   ├── dashboard.py            # Visual ANSI terminal, Markdown & reactive SSE web dashboard
