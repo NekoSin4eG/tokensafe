@@ -57,6 +57,13 @@ AGENTS_REGISTRY = {
         "config_path": os.path.join(HOME, "Library", "Application Support", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
         "detect_path": os.path.join(HOME, "Library", "Application Support", "Code")
     },
+    "claude_code": {
+        "name": "Claude Code CLI",
+        "type": "claude_md",
+        "agents_md_path": os.path.join(HOME, ".claude", "CLAUDE.md"),
+        "skills_path": os.path.join(HOME, ".claude", "skills", "token-optimizer"),
+        "detect_path": os.path.join(HOME, ".claude")
+    },
     "codex": {
         "name": "OpenAI Codex",
         "type": "codex_toml",
@@ -144,15 +151,16 @@ class AgentInstaller:
             if "rules_path" in info:
                 rule_text = (
                     "---\n"
-                    "description: TokenSafe token economy and context optimization protocol\n"
+                    "description: TokenSafe token economy, graph-first navigation and context optimization protocol\n"
                     "globs: *\n"
                     "alwaysApply: true\n"
                     "---\n\n"
-                    "# TokenSafe Optimization Protocol\n"
-                    "Always prioritize `tokensafe` MCP tools (`smart_read_file`, `compress_prompt`, `sanitize_command`) "
-                    "over default raw file reads or high-output terminal executions to preserve context tokens and prevent context overflow.\n"
-                    "- When inspecting code files, use `smart_read_file` with `symbol` or line range.\n"
-                    "- Sanitize verbose commands (`git diff`, `pytest`, `find`, `grep`) via `sanitize_command`.\n"
+                    "# TokenSafe Graph-First Optimization Protocol\n"
+                    "Always prioritize `tokensafe` MCP tools over default raw file reads or high-output terminal executions to prevent context window exhaustion.\n\n"
+                    "1. **Architecture Discovery**: Always call `tokensafe:get_architecture_graph` before grep or multi-file reading. Returns project God Nodes and key dependency hubs in < 250 tokens without file crawling.\n"
+                    "2. **Graph-Guided Symbol Inspection**: When inspecting code implementations, prioritize `tokensafe:smart_read_file` with the targeted `symbol`. Returns full executable bodies for the symbol and 1-hop dependencies while folding inert code into signatures (-85% to -92% tokens).\n"
+                    "3. **No Unconstrained Shell Grep/Find**: Strictly avoid running raw recursive grep/find across projects. Use `get_architecture_graph` or `get_api_surface`.\n"
+                    "4. **Command Sanitization**: Use `sanitize_command` on high-output terminal commands (`git diff`, `pytest`, `find`, `grep`) to prevent lockfile or test log context contamination.\n"
                 )
                 cls._write_file_safely(info["rules_path"], rule_text)
 
@@ -229,15 +237,33 @@ class AgentInstaller:
 
             if "agents_md_path" in info:
                 codex_rule = (
-                    "## TOKENSAFE TOKEN OPTIMIZATION PROTOCOL\n"
-                    "Always prioritize `tokensafe` MCP tools (`smart_read_file`, `compress_prompt`, `sanitize_command`) "
-                    "over default raw file reads or high-token shell executions to preserve context tokens and prevent context overflow.\n"
-                    "- When inspecting code files, use `smart_read_file` with `symbol` or line range.\n"
-                    "- When running verbose commands (`git diff`, `pytest`, `find`, `grep`), sanitize them with `sanitize_command`.\n"
+                    "## TOKENSAFE GRAPH-FIRST OPTIMIZATION PROTOCOL\n"
+                    "Always prioritize `tokensafe` MCP tools over default raw file reads or high-output terminal executions to prevent context window exhaustion.\n"
+                    "1. **Architecture Discovery**: Always call `tokensafe:get_architecture_graph` before grep or multi-file reading. Returns project God Nodes and key dependency hubs in < 250 tokens without file crawling.\n"
+                    "2. **Graph-Guided Symbol Inspection**: When inspecting code implementations, prioritize `tokensafe:smart_read_file` with the targeted `symbol`. Returns full executable bodies for the symbol and 1-hop dependencies while folding inert code into signatures (-85% to -92% tokens).\n"
+                    "3. **No Unconstrained Shell Grep/Find**: Strictly avoid running raw recursive grep/find across projects. Use `get_architecture_graph` or `get_api_surface`.\n"
+                    "4. **Command Sanitization**: Use `sanitize_command` on high-output terminal commands (`git diff`, `pytest`, `find`, `grep`) to prevent lockfile or test log context contamination.\n"
                 )
                 cls._inject_global_rule(info["agents_md_path"], codex_rule)
 
             return True, f"Configured MCP, Plugin, Skill & AGENTS.md in {config_file}"
+
+        elif info["type"] == "claude_md":
+            if "agents_md_path" in info:
+                claude_rule = (
+                    "## TOKENSAFE GRAPH-FIRST OPTIMIZATION PROTOCOL\n"
+                    "Always prioritize `tokensafe` MCP tools over default raw file reads or recursive grep/find.\n"
+                    "1. **Architecture Discovery**: Always call `tokensafe:get_architecture_graph` before grep or multi-file reading. Returns project God Nodes and key dependency hubs in < 250 tokens without file crawling.\n"
+                    "2. **Graph-Guided Symbol Inspection**: When inspecting code implementations, prioritize `tokensafe:smart_read_file` with the targeted `symbol`. Returns full executable bodies for the symbol and 1-hop dependencies while folding inert code into signatures (-85% to -92% tokens).\n"
+                    "3. **No Unconstrained Shell Grep/Find**: Strictly avoid running raw recursive grep/find across projects. Use `get_architecture_graph` or `get_api_surface`.\n"
+                    "4. **Command Sanitization**: Use `sanitize_command` on high-output terminal commands (`git diff`, `pytest`, `find`, `grep`) to prevent lockfile or test log context contamination.\n"
+                )
+                cls._inject_global_rule(info["agents_md_path"], claude_rule)
+
+            if "skills_path" in info:
+                cls._symlink_skill(info["skills_path"])
+
+            return True, f"Configured Rule & Skill in {info.get('agents_md_path')}"
 
         elif info["type"] == "zcode_json":
             config_file = info["config_path"]

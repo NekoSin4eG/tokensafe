@@ -70,7 +70,8 @@ class TestAgentInstaller(unittest.TestCase):
                 self.assertTrue(os.path.exists(fake_rules))
                 with open(fake_rules, "r", encoding="utf-8") as f:
                     rule_content = f.read()
-                self.assertIn("TokenSafe Optimization Protocol", rule_content)
+                self.assertIn("TokenSafe", rule_content)
+                self.assertIn("get_architecture_graph", rule_content)
             finally:
                 AGENTS_REGISTRY["cursor"] = orig_entry
 
