@@ -15,12 +15,12 @@ from src.tokenizer import count_tokens
 class AgentFirewall:
     """Manages cross-agent shared file cache within active sessions."""
 
-    _TABLE_INITIALIZED = False
+    _INITIALIZED_DBS = set()
 
     @classmethod
     def _ensure_table(cls, tracker: MetricsTracker):
-        """Initializes the subagent cache table once per process."""
-        if cls._TABLE_INITIALIZED:
+        """Initializes the subagent cache table once per database path."""
+        if tracker.db_path in cls._INITIALIZED_DBS:
             return
         with tracker._get_connection() as conn:
             conn.execute("""
@@ -38,7 +38,7 @@ class AgentFirewall:
                 );
             """)
             conn.execute("CREATE INDEX IF NOT EXISTS idx_subagent_cache ON subagent_file_cache(session_id, file_path);")
-        cls._TABLE_INITIALIZED = True
+        cls._INITIALIZED_DBS.add(tracker.db_path)
 
     @classmethod
     def check_cache(
