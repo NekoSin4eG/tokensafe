@@ -4,7 +4,7 @@ from src.compactor import PromptCompactor
 class TestPromptCompactor(unittest.TestCase):
     def test_russian_compaction(self):
         prompt = "Слушай, перепиши пожалуйста функцию get_balance в файле wallet.ts, добавь туда redis cache и сделай её асинхронной"
-        res = PromptCompactor.compact(prompt)
+        res = PromptCompactor.compact(prompt, enable_deepseek=False)
         self.assertEqual(res["action"], "REFACTOR")
         self.assertEqual(res["target_file"], "wallet.ts")
         self.assertEqual(res["symbol"], "get_balance")
@@ -15,7 +15,7 @@ class TestPromptCompactor(unittest.TestCase):
 
     def test_english_compaction(self):
         prompt = "Please refactor the function calculate_tax in src/billing.py to be async and cache in redis"
-        res = PromptCompactor.compact(prompt)
+        res = PromptCompactor.compact(prompt, enable_deepseek=False)
         self.assertEqual(res["action"], "REFACTOR")
         self.assertEqual(res["target_file"], "src/billing.py")
         self.assertEqual(res["symbol"], "calculate_tax")

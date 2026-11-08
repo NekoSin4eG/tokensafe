@@ -47,6 +47,7 @@ def main():
         reduction_pct = compaction["reduction_pct"]
 
         if saved_tokens >= 5:
+            tier = compaction.get("tier", "REGEX")
             tracker.record_event(
                 session_id=conversation_id,
                 event_type="PROMPT",
@@ -56,12 +57,13 @@ def main():
                     "action": compaction["action"],
                     "target_file": compaction["target_file"],
                     "symbol": compaction["symbol"],
-                    "traits": compaction["traits"]
+                    "traits": compaction["traits"],
+                    "tier": tier
                 }
             )
 
             badge_markdown = (
-                f"⚡ **Token Optimizer:** Compaction active — saved **{saved_tokens} tokens** "
+                f"⚡ **Token Optimizer:** Compaction active ({tier}) — saved **{saved_tokens} tokens** "
                 f"(-{reduction_pct}%) on this prompt."
             )
 

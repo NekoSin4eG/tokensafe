@@ -1,12 +1,13 @@
 """
 Semantic Compactor: Converts verbose natural language prompts (Russian/English)
 into ultra-dense Token-Optimized Communication Protocol (TOCP) S-Expressions.
-Strips politeness fluff, extracts code targets, symbols, and constraints.
+Supports 3-Tier Routing: Pass-through -> Regex Compactor -> DeepSeek-V3 Distiller.
 """
 
 import re
 from typing import Dict, List, Optional
 from src.tokenizer import count_tokens
+from src.deepseek_distiller import DeepSeekDistiller
 
 class PromptCompactor:
     """Transforms verbose natural language requests into compact Intent IR."""
@@ -47,7 +48,6 @@ class PromptCompactor:
 
     FILE_REGEX = re.compile(r"[\w\-\./\\]+\.(?:ts|js|tsx|jsx|py|go|rs|java|c|cpp|h|json|yaml|yml|md|proto|toml|sql|html|css|sh)", re.I)
 
-    # Constraint patterns with multilingual mapping
     TRAIT_MAPPINGS = [
         (re.compile(r"\b(async|асинхронн\w*)\b", re.I), "async"),
         (re.compile(r"\b(sync|синхронн\w*)\b", re.I), "sync"),
@@ -65,9 +65,12 @@ class PromptCompactor:
     ]
 
     @classmethod
-    def compact(cls, raw_text: str) -> Dict[str, any]:
+    def compact(cls, raw_text: str, enable_deepseek: bool = True) -> Dict[str, any]:
         """
-        Compresses input prompt and returns structured details + metrics.
+        Compresses input prompt via 3-Tier Architecture:
+        - Tier 0: Pass-through for very short inputs (< 6 tokens)
+        - Tier 2: DeepSeek-V3 Distiller for complex/long inputs (> 15 tokens)
+        - Tier 1: Local Regex Compactor (fallback or structured commands)
         """
         if not raw_text or not raw_text.strip():
             return {
@@ -81,29 +84,86 @@ class PromptCompactor:
                 "target_file": "",
                 "symbol": "",
                 "traits": [],
+                "tier": "PASS_THROUGH"
             }
 
         original_tokens = count_tokens(raw_text)
 
-        # 1. Target file
+        # Tier 0: Short commands pass through
+        if original_tokens < 6:
+            return {
+                "original_text": raw_text,
+                "compact_text": raw_text.strip(),
+                "original_tokens": original_tokens,
+                "compact_tokens": original_tokens,
+                "saved_tokens": 0,
+                "reduction_pct": 0.0,
+                "action": "RAW",
+                "target_file": "",
+                "symbol": "",
+                "traits": [],
+                "tier": "PASS_THROUGH"
+            }
+
+        # Tier 2: DeepSeek-V3 Distiller for complex / unstructured prompts
+        if enable_deepseek and original_tokens >= 15:
+            distilled = DeepSeekDistiller.distill(raw_text)
+            if distilled:
+                dist_tokens = count_tokens(distilled)
+                if dist_tokens < original_tokens:
+                    saved = original_tokens - dist_tokens
+                    pct = (saved / original_tokens * 100.0)
+
+                    # Extract action from S-Expression: e.g. "(DEBUG ..."
+                    act_match = re.match(r"^\(([A-Z]+)", distilled)
+                    action = act_match.group(1) if act_match else "TASK"
+
+                    # Extract file if present
+                    files = cls.FILE_REGEX.findall(distilled)
+                    target_file = files[0] if files else ""
+
+                    # Extract symbol if present in raw_text
+                    sym_match = re.search(
+                        r"(?:функци[юяие]|function|method|метод|class|класс|handler|хэндлер|symbol|переменн[уюая]+)\s+[`'\"]?([a-zA-Z0-9_]+)[`'\"]?",
+                        raw_text,
+                        re.I
+                    )
+                    symbol = sym_match.group(1) if sym_match else ""
+
+                    # Extract traits if present in distilled S-Expression: e.g. [async redis ...]
+                    trait_match = re.search(r"\[(.*?)\]", distilled)
+                    traits = trait_match.group(1).split() if trait_match else []
+
+                    return {
+                        "original_text": raw_text,
+                        "compact_text": distilled,
+                        "original_tokens": original_tokens,
+                        "compact_tokens": dist_tokens,
+                        "saved_tokens": saved,
+                        "reduction_pct": round(pct, 1),
+                        "action": action,
+                        "target_file": target_file,
+                        "symbol": symbol,
+                        "traits": traits,
+                        "tier": "DEEPSEEK_V3"
+                    }
+
+        # Tier 1: Local Regex Compactor
         files = cls.FILE_REGEX.findall(raw_text)
         target_file = files[0] if files else ""
 
-        # 2. Action
         action = "TASK"
         for act_name, regex in cls.ACTION_PATTERNS:
             if regex.search(raw_text):
                 action = act_name
                 break
 
-        # 3. Traits
         traits = []
         for regex, tag in cls.TRAIT_MAPPINGS:
             if regex.search(raw_text):
                 if tag not in traits:
                     traits.append(tag)
 
-        # 4. Symbol
         symbol = ""
         symbol_match = re.search(
             r"(?:функци[юяие]|function|method|метод|class|класс|handler|хэндлер|symbol|переменн[уюая]+)\s+[`'\"]?([a-zA-Z0-9_]+)[`'\"]?",
@@ -113,30 +173,24 @@ class PromptCompactor:
         if symbol_match:
             symbol = symbol_match.group(1)
 
-        # 5. Distill residual delta
         delta = raw_text
         if target_file:
             delta = delta.replace(target_file, " ")
         if symbol:
             delta = re.sub(r"\b" + re.escape(symbol) + r"\b", " ", delta)
 
-        # Remove stop phrases
         for pattern in cls.STOP_PHRASES:
             delta = re.sub(pattern, " ", delta, flags=re.I)
 
-        # Remove action words from delta
         for _, regex in cls.ACTION_PATTERNS:
             delta = regex.sub(" ", delta)
 
-        # Remove traits matched words from delta
         for regex, _ in cls.TRAIT_MAPPINGS:
             delta = regex.sub(" ", delta)
 
-        # Clean punctuation and whitespace
         delta = re.sub(r"[,\.:;\"'\(\)\[\]\{\}]", " ", delta)
         delta = re.sub(r"\s+", " ", delta).strip()
 
-        # 6. Build Lean S-Expression
         parts = [f"({action}"]
         if target_file:
             parts.append(target_file)
@@ -151,8 +205,7 @@ class PromptCompactor:
         compact_expr = " ".join(parts)
         compact_tokens = count_tokens(compact_expr)
 
-        # Safety check: if prompt was already super short (< 6 tokens) or compact is not shorter
-        if original_tokens < 6 or compact_tokens >= original_tokens:
+        if compact_tokens >= original_tokens:
             compact_expr = raw_text.strip()
             compact_tokens = original_tokens
 
@@ -170,4 +223,5 @@ class PromptCompactor:
             "target_file": target_file,
             "symbol": symbol,
             "traits": traits,
+            "tier": "REGEX"
         }
