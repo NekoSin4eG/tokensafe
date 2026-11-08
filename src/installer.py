@@ -6,12 +6,15 @@ Scans and automatically configures MCP integration for:
 - Cursor
 - Windsurf
 - Cline / Roo Code (VS Code)
+- OpenAI Codex
+- Z.ai Code
 """
 
 import os
 import sys
 import json
 import shutil
+import re
 from typing import Dict, List, Any, Optional, Tuple
 
 HOME = os.path.expanduser("~")
@@ -49,6 +52,20 @@ AGENTS_REGISTRY = {
         "type": "mcp_json",
         "config_path": os.path.join(HOME, "Library", "Application Support", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
         "detect_path": os.path.join(HOME, "Library", "Application Support", "Code")
+    },
+    "codex": {
+        "name": "OpenAI Codex",
+        "type": "codex_toml",
+        "config_path": os.path.join(HOME, ".codex", "config.toml"),
+        "skills_path": os.path.join(HOME, ".codex", "skills", "token-optimizer"),
+        "detect_path": os.path.join(HOME, ".codex")
+    },
+    "zcode": {
+        "name": "Z.ai Code",
+        "type": "zcode_json",
+        "config_path": os.path.join(HOME, ".zcode", "cli", "config.json"),
+        "skills_path": os.path.join(HOME, ".zcode", "skills", "token-optimizer"),
+        "detect_path": os.path.join(HOME, ".zcode")
     }
 }
 
@@ -124,7 +141,91 @@ class AgentInstaller:
 
             return True, f"Updated MCP configuration at {config_file}"
 
+        elif info["type"] == "codex_toml":
+            config_file = info["config_path"]
+            os.makedirs(os.path.dirname(config_file), exist_ok=True)
+
+            content = ""
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    shutil.copy2(config_file, f"{config_file}.backup")
+                except Exception:
+                    pass
+
+            server_snippet = (
+                f'\n[mcp_servers.tokensafe]\n'
+                f'command = "{PYTHON_BIN}"\n'
+                f'args = ["{MCP_SERVER_PATH}"]\n'
+            )
+
+            if '[mcp_servers.tokensafe]' in content:
+                pattern = r'\[mcp_servers\.tokensafe\][^\[]*'
+                content = re.sub(pattern, f'[mcp_servers.tokensafe]\ncommand = "{PYTHON_BIN}"\nargs = ["{MCP_SERVER_PATH}"]\n\n', content)
+            else:
+                content = content.rstrip() + "\n" + server_snippet
+
+            with open(config_file, "w", encoding="utf-8") as f:
+                f.write(content)
+
+            if "skills_path" in info:
+                cls._symlink_skill(info["skills_path"])
+
+            return True, f"Configured MCP & Skill in {config_file}"
+
+        elif info["type"] == "zcode_json":
+            config_file = info["config_path"]
+            os.makedirs(os.path.dirname(config_file), exist_ok=True)
+
+            data = {}
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    shutil.copy2(config_file, f"{config_file}.backup")
+                except Exception:
+                    data = {}
+
+            if "mcp" not in data or not isinstance(data["mcp"], dict):
+                data["mcp"] = {}
+            if "servers" not in data["mcp"] or not isinstance(data["mcp"]["servers"], dict):
+                data["mcp"]["servers"] = {}
+
+            data["mcp"]["servers"]["tokensafe"] = {
+                "command": PYTHON_BIN,
+                "args": [MCP_SERVER_PATH]
+            }
+
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+
+            if "skills_path" in info:
+                cls._symlink_skill(info["skills_path"])
+
+            return True, f"Configured MCP & Skill in {config_file}"
+
         return False, "Unsupported type"
+
+    @classmethod
+    def _symlink_skill(cls, target_path: str):
+        """Symlinks the TokenSafe skill into the target agent's skills directory."""
+        skill_src = os.path.join(PROJECT_ROOT, "skills", "token-optimizer")
+        if not os.path.exists(skill_src):
+            return
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        if os.path.islink(target_path) or os.path.exists(target_path):
+            try:
+                if os.path.islink(target_path) or os.path.isfile(target_path):
+                    os.unlink(target_path)
+                else:
+                    shutil.rmtree(target_path)
+            except Exception:
+                pass
+        try:
+            os.symlink(skill_src, target_path)
+        except Exception:
+            pass
 
     @classmethod
     def run_interactive(cls):

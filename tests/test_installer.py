@@ -1,4 +1,8 @@
 import unittest
+import os
+import json
+import tempfile
+import shutil
 from src.installer import AgentInstaller, AGENTS_REGISTRY
 
 class TestAgentInstaller(unittest.TestCase):
@@ -9,6 +13,61 @@ class TestAgentInstaller(unittest.TestCase):
         self.assertIn("cursor", detected)
         self.assertIn("windsurf", detected)
         self.assertIn("cline", detected)
+        self.assertIn("codex", detected)
+        self.assertIn("zcode", detected)
+
+    def test_codex_toml_installation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_config = os.path.join(tmpdir, "config.toml")
+            fake_skills = os.path.join(tmpdir, "skills", "token-optimizer")
+            with open(fake_config, "w", encoding="utf-8") as f:
+                f.write('model = "gpt-5.6-luna"\n\n[features]\nmulti_agent = true\n')
+
+            orig_entry = AGENTS_REGISTRY["codex"]
+            AGENTS_REGISTRY["codex"] = {
+                "name": "OpenAI Codex",
+                "type": "codex_toml",
+                "config_path": fake_config,
+                "skills_path": fake_skills,
+                "detect_path": tmpdir
+            }
+            try:
+                ok, msg = AgentInstaller.install_mcp_config("codex")
+                self.assertTrue(ok)
+                with open(fake_config, "r", encoding="utf-8") as f:
+                    content = f.read()
+                self.assertIn("[mcp_servers.tokensafe]", content)
+                self.assertIn("mcp_server.py", content)
+                self.assertTrue(os.path.exists(fake_skills))
+            finally:
+                AGENTS_REGISTRY["codex"] = orig_entry
+
+    def test_zcode_json_installation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_config = os.path.join(tmpdir, "cli", "config.json")
+            fake_skills = os.path.join(tmpdir, "skills", "token-optimizer")
+            os.makedirs(os.path.dirname(fake_config), exist_ok=True)
+            with open(fake_config, "w", encoding="utf-8") as f:
+                json.dump({"mcp": {"servers": {"context7": {"type": "http"}}}}, f)
+
+            orig_entry = AGENTS_REGISTRY["zcode"]
+            AGENTS_REGISTRY["zcode"] = {
+                "name": "Z.ai Code",
+                "type": "zcode_json",
+                "config_path": fake_config,
+                "skills_path": fake_skills,
+                "detect_path": tmpdir
+            }
+            try:
+                ok, msg = AgentInstaller.install_mcp_config("zcode")
+                self.assertTrue(ok)
+                with open(fake_config, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self.assertIn("tokensafe", data["mcp"]["servers"])
+                self.assertIn("mcp_server.py", data["mcp"]["servers"]["tokensafe"]["args"][0])
+                self.assertTrue(os.path.exists(fake_skills))
+            finally:
+                AGENTS_REGISTRY["zcode"] = orig_entry
 
 if __name__ == "__main__":
     unittest.main()
