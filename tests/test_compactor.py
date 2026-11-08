@@ -29,5 +29,23 @@ class TestPromptCompactor(unittest.TestCase):
         self.assertEqual(res["compact_text"], "git status")
         self.assertEqual(res["saved_tokens"], 0)
 
+    def test_threshold_below_100_uses_regex(self):
+        # Prompts below 100 tokens must use local zero-cost REGEX even if enable_deepseek=True
+        prompt = "Пожалуйста, исправь функцию authenticate в auth.ts, чтобы она проверяла jwt токен"
+        res = PromptCompactor.compact(prompt, enable_deepseek=True)
+        self.assertEqual(res["tier"], "REGEX")
+        self.assertEqual(res["action"], "DEBUG")
+        self.assertEqual(res["target_file"], "auth.ts")
+
+    def test_threshold_custom_min_distill_tokens(self):
+        from unittest.mock import patch
+        prompt = "Пожалуйста, поправь функцию authenticate в auth.ts, чтобы она проверяла jwt токен"
+        with patch("src.distiller.UniversalDistiller.distill") as mock_distill:
+            mock_distill.return_value = '(DEBUG auth.ts [jwt] "verify token")'
+            res = PromptCompactor.compact(prompt, enable_deepseek=True, min_distill_tokens=10)
+            self.assertEqual(res["tier"], "DEEPSEEK_V3")
+            self.assertEqual(res["compact_text"], '(DEBUG auth.ts [jwt] "verify token")')
+            mock_distill.assert_called_once()
+
 if __name__ == "__main__":
     unittest.main()

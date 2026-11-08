@@ -10,6 +10,7 @@ import re
 import urllib.request
 import urllib.error
 from typing import Optional, Dict, Any
+from src.distiller_cache import DistillationCache
 
 class DeepSeekDistiller:
     """Uses DeepSeek-Flash as a high-density semantic compiler for prompts."""
@@ -33,7 +34,7 @@ Output: (DEBUG auth.controller.ts [oauth google timeout_504 missing_avatar] "fix
 Rules:
 1. Output ONLY the S-Expression starting with ( and ending with ).
 2. No markdown code blocks, no preamble, no explanations.
-3. Keep minimal_intent ultra-compact (under 10 words, English preferred for BPE token economy)."""
+3. Keep minimal_intent ultra-compact (under 10 words, English preferred for BPE token economy). Total response MUST be under 50 tokens."""
 
     @classmethod
     def _get_config(cls) -> Dict[str, Any]:
@@ -56,6 +57,7 @@ Rules:
                         config["api_key"] = file_conf["deepseek_api_key"]
                     config["model"] = file_conf.get("deepseek_model", config["model"])
                     config["timeout"] = file_conf.get("deepseek_timeout", config["timeout"])
+                    config["max_tokens"] = int(file_conf.get("distill_max_tokens", 60))
                     config["enabled"] = file_conf.get("enable_deepseek_tier", True)
             except Exception:
                 pass
@@ -72,6 +74,11 @@ Rules:
         if not conf["enabled"] or not conf["api_key"] or not raw_text or len(raw_text.strip()) < 10:
             return None
 
+        # Check distillation cache before remote roundtrips
+        cached = DistillationCache.get(raw_text)
+        if cached:
+            return cached
+
         payload = {
             "model": conf["model"],
             "messages": [
@@ -79,7 +86,7 @@ Rules:
                 {"role": "user", "content": raw_text.strip()}
             ],
             "temperature": 0.0,
-            "max_tokens": 300,
+            "max_tokens": conf.get("max_tokens", 60),
             "effort": "low"
         }
 
@@ -102,6 +109,7 @@ Rules:
                         # Clean backticks if any
                         content = re.sub(r"^```[a-zA-Z]*\n?|```$", "", content).strip()
                         if content.startswith("(") and content.endswith(")"):
+                            DistillationCache.set(raw_text, content, provider="deepseek")
                             return content
         except Exception:
             # Network issue, timeout, or rate limit: fallback gracefully

@@ -4,8 +4,10 @@ into ultra-dense Token-Optimized Communication Protocol (TOCP) S-Expressions.
 Supports 3-Tier Routing: Pass-through -> Regex Compactor -> DeepSeek-V3 Distiller.
 """
 
+import os
+import json
 import re
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 from src.tokenizer import count_tokens
 from src.distiller import UniversalDistiller
 from src.secret_redactor import SecretRedactor
@@ -65,13 +67,35 @@ class PromptCompactor:
         (re.compile(r"\b(unit_test|юнит\w*)\b", re.I), "unit_test"),
     ]
 
+    DEFAULT_MIN_DISTILL_TOKENS = 100
+
     @classmethod
-    def compact(cls, raw_text: str, enable_deepseek: bool = True) -> Dict[str, any]:
+    def _get_min_distill_tokens(cls) -> int:
+        """Loads minimum token threshold for LLM distillation from config or returns 100."""
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        config_path = os.path.join(base_dir, "data", "config.json")
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    conf = json.load(f)
+                    if "llm_distill_min_tokens" in conf:
+                        return int(conf["llm_distill_min_tokens"])
+            except Exception:
+                pass
+        return cls.DEFAULT_MIN_DISTILL_TOKENS
+
+    @classmethod
+    def compact(
+        cls,
+        raw_text: str,
+        enable_deepseek: bool = True,
+        min_distill_tokens: Optional[int] = None
+    ) -> Dict[str, Any]:
         """
         Compresses input prompt via 3-Tier Architecture:
         - Tier 0: Pass-through for very short inputs (< 6 tokens)
-        - Tier 2: DeepSeek-V3 Distiller for complex/long inputs (> 15 tokens)
-        - Tier 1: Local Regex Compactor (fallback or structured commands)
+        - Tier 1: Local Regex Compactor (0ms, 0 external tokens) for inputs < 100 tokens
+        - Tier 2: LLM Distiller (DeepSeek / Gemini / OpenAI) for long/complex prompts (>= 100 tokens)
         """
         if not raw_text or not raw_text.strip():
             return {
@@ -112,7 +136,8 @@ class PromptCompactor:
             }
 
         # Tier 2: LLM Intent Distiller (Gemini / OpenAI / DeepSeek)
-        if enable_deepseek and original_tokens >= 15:
+        min_distill = min_distill_tokens if min_distill_tokens is not None else cls._get_min_distill_tokens()
+        if enable_deepseek and original_tokens >= min_distill:
             distilled = UniversalDistiller.distill(raw_text)
             if distilled:
                 dist_tokens = count_tokens(distilled)

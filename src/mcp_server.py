@@ -28,7 +28,7 @@ from src.diff_slicer import DiffSlicer
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
-    "version": "1.3.1"
+    "version": "1.3.2"
 }
 
 TOOLS = [

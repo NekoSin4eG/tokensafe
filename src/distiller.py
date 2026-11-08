@@ -11,6 +11,7 @@ import re
 import urllib.request
 import urllib.error
 from typing import Optional, Dict, Any, Tuple
+from src.distiller_cache import DistillationCache
 
 class UniversalDistiller:
     """Multi-provider semantic intent compiler supporting DeepSeek, OpenAI, and Google Gemini."""
@@ -32,7 +33,7 @@ Output: (DEBUG auth.controller.ts [oauth google timeout_504 missing_avatar] "fix
 Rules:
 1. Output ONLY the S-Expression starting with ( and ending with ).
 2. No markdown code blocks, no preamble, no explanations.
-3. Keep minimal_intent ultra-compact (under 10 words, English preferred for BPE token economy)."""
+3. Keep minimal_intent ultra-compact (under 10 words, English preferred for BPE token economy). Total response MUST be under 50 tokens."""
 
     PROVIDERS = {
         "deepseek": {
@@ -82,12 +83,14 @@ Rules:
             if api_key:
                 model = config_file_data.get(f"{key}_model", p_info["default_model"])
                 timeout = float(config_file_data.get(f"{key}_timeout", cls.DEFAULT_TIMEOUT))
+                max_tokens = int(config_file_data.get("distill_max_tokens", 60))
                 available[key] = {
                     "provider": key,
                     "name": p_info["name"],
                     "api_key": api_key,
                     "model": model,
                     "timeout": timeout,
+                    "max_tokens": max_tokens,
                     "endpoint": p_info["endpoint"]
                 }
 
@@ -101,6 +104,11 @@ Rules:
         """
         if not raw_text or len(raw_text.strip()) < 10:
             return None
+
+        # Check distillation cache before remote API roundtrips
+        cached = DistillationCache.get(raw_text)
+        if cached:
+            return cached
 
         providers = cls.get_configured_providers()
         if not providers:
@@ -127,6 +135,7 @@ Rules:
                 if result:
                     clean = cls._sanitize_s_expression(result)
                     if clean:
+                        DistillationCache.set(raw_text, clean, provider=p_key)
                         return clean
             except Exception:
                 continue
@@ -142,7 +151,7 @@ Rules:
                 {"role": "user", "content": raw_text.strip()}
             ],
             "temperature": 0.0,
-            "max_tokens": 300
+            "max_tokens": conf.get("max_tokens", 60)
         }
         if conf.get("provider") == "deepseek" or "deepseek" in str(conf.get("endpoint", "")).lower():
             payload["effort"] = "low"
@@ -177,7 +186,7 @@ Rules:
             ],
             "generationConfig": {
                 "temperature": 0.0,
-                "maxOutputTokens": 100
+                "maxOutputTokens": conf.get("max_tokens", 60)
             }
         }
 
