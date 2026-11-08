@@ -39,6 +39,7 @@ AGENTS_REGISTRY = {
         "name": "Cursor",
         "type": "mcp_json",
         "config_path": os.path.join(HOME, ".cursor", "mcp.json"),
+        "skills_path": os.path.join(HOME, ".cursor", "skills", "token-optimizer"),
         "detect_path": os.path.join(HOME, ".cursor")
     },
     "windsurf": {
@@ -138,6 +139,9 @@ class AgentInstaller:
 
             with open(config_file, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
+
+            if "skills_path" in info:
+                cls._symlink_skill(info["skills_path"])
 
             return True, f"Updated MCP configuration at {config_file}"
 

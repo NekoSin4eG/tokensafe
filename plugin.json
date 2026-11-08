@@ -1,14 +1,16 @@
 {
   "name": "agy-token-optimizer",
+  "displayName": "TokenSafe",
   "version": "1.0.0",
-  "description": "Next-generation token economy plugin for Google Antigravity. Features TOCP intent compaction, smart tool call slicing, and real-time SQLite savings tracking.",
+  "description": "Zero-Loss Token Economy & Context Optimizer for AI Agents. Compresses prompts, slices AST/tool outputs, and prevents stuck loops.",
+  "logo": "assets/logo.svg",
   "author": {
     "name": "Oleg Savelev",
-    "url": "https://github.com/olegsavelev"
+    "url": "https://github.com/NekoSin4eG"
   },
-  "homepage": "https://github.com/olegsavelev/agy-token-optimizer",
+  "homepage": "https://github.com/tokensafe-dev/tokensafe-cloud",
   "repository": {
     "type": "git",
-    "url": "https://github.com/olegsavelev/agy-token-optimizer"
+    "url": "https://github.com/tokensafe-dev/tokensafe-cloud"
   }
 }
