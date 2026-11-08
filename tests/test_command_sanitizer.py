@@ -48,5 +48,12 @@ class TestCommandSanitizer(unittest.TestCase):
         self.assertIn("':!*.lock'", new_cmd)
         self.assertIn("head -n 30", new_cmd)
 
+    def test_piped_grep_places_excludes_before_pipe(self):
+        cmd = "grep -rn 'func' . | head -n 30"
+        new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
+        self.assertIsNotNone(new_cmd)
+        self.assertTrue(new_cmd.endswith("| head -n 30"))
+        self.assertIn("--exclude='*.lock'", new_cmd)
+
 if __name__ == "__main__":
     unittest.main()

@@ -87,19 +87,32 @@ class CommandSanitizer:
         if re.search(r"\bgit\b.*?\bgrep\b", cmd):
             if ":!*.lock" not in cmd and ":!bun.lock" not in cmd:
                 git_excludes = "':!*.lock' ':!bun.lock' ':!bun.lockb' ':!package-lock.json' ':!dist' ':!build' ':!node_modules'"
-                new_cmd = f"{cmd} -- . {git_excludes}"
-                has_real_pipe = bool(re.search(r'(?<!\|)\|(?!\|)', new_cmd))
-                if not has_real_pipe:
+                stages = [s.strip() for s in re.split(r'(?<!\|)\|(?!\|)', cmd)]
+                for i, stage in enumerate(stages):
+                    if re.search(r"\bgit\b.*?\bgrep\b", stage):
+                        if " -- " in stage:
+                            stages[i] = f"{stage} {git_excludes}"
+                        else:
+                            stages[i] = f"{stage} -- . {git_excludes}"
+                new_cmd = " | ".join(stages)
+                has_limiter = any(re.search(r'\b(head|tail|less)\b', s) for s in stages)
+                if not has_limiter:
                     new_cmd = f"{new_cmd} | head -n 30"
                 est_saved = 3500
                 return new_cmd, est_saved, "Excluded lockfiles from git grep and capped output"
 
-        # 6. grep / ripgrep unbounded search
+        # 6. grep / ripgrep unbounded search (only when recursive or scanning directory)
         if re.search(r"\b(grep|egrep)\b", cmd) and not re.search(r"\bgit\b.*?\bgrep\b", cmd):
-            if "--exclude-dir" not in cmd and "node_modules" not in cmd:
-                new_cmd = f"{cmd} --exclude='*.lock' --exclude='*.lockb' --exclude-dir={{dist,build,node_modules,.git,coverage,__pycache__,.next,data}}"
-                has_real_pipe = bool(re.search(r'(?<!\|)\|(?!\|)', new_cmd))
-                if not has_real_pipe:
+            is_recursive = bool(re.search(r"\b(grep|egrep)\b.*?\s-[a-zA-Z]*[rR]", cmd))
+            if is_recursive and "--exclude-dir" not in cmd and "node_modules" not in cmd:
+                excludes = "--exclude='*.lock' --exclude='*.lockb' --exclude-dir={dist,build,node_modules,.git,coverage,__pycache__,.next,data}"
+                stages = [s.strip() for s in re.split(r'(?<!\|)\|(?!\|)', cmd)]
+                for i, stage in enumerate(stages):
+                    if re.search(r"\b(grep|egrep)\b", stage):
+                        stages[i] = f"{stage} {excludes}"
+                new_cmd = " | ".join(stages)
+                has_limiter = any(re.search(r'\b(head|tail|less)\b', s) for s in stages)
+                if not has_limiter:
                     new_cmd = f"{new_cmd} | head -n 30"
                 est_saved = 2500
                 return new_cmd, est_saved, "Sanitized grep directories and capped output to 30 matches"
