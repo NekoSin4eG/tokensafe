@@ -4,7 +4,7 @@
   "description": "Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents",
   "main": "bin/tokensafe.js",
   "bin": {
-    "tokensafe": "./bin/tokensafe.js"
+    "tokensafe": "bin/tokensafe.js"
   },
   "files": [
     "bin/tokensafe.js",
