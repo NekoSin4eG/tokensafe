@@ -37,10 +37,27 @@ Traditional AI code interactions suffer from massive context bloat:
 3. **Stuck Loops & Bloated Diffs:** Terminal `git diff` and repetitive failed commands spiral context into overflow.
 
 ### TokenSafe Solves All Three Autonomously:
-- **TOCP Prompt Distillation:** Intercepts prompts and distills intent into lean S-Expressions via DeepSeek-V3 / Regex (`-40% to -70%`).
+- **TOCP Prompt Distillation:** Intercepts prompts and distills intent into lean S-Expressions via **Google Gemini (2.0 Flash), OpenAI ChatGPT (gpt-4o-mini), or DeepSeek-V3** (`-40% to -70%`). Automatically detects `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `DEEPSEEK_API_KEY`.
 - **AST Skeletonization & Slicing:** Folds inactive function bodies into signatures and windows targeted symbols (`-80% to -92%`).
 - **Predictive Dependency Prefetcher:** Attaches imported symbol signatures to eliminate downstream exploratory `read_file` roundtrips.
 - **Output Guard & Loop Guard:** Blocks destructive full-file rewrites on files $\ge 40$ lines and halts command loops.
+
+---
+
+## 🤖 Universal LLM Distillation Providers
+
+TokenSafe supports any key you already have:
+
+| Provider | Supported Model | Environment Variable | Config Key |
+|---|---|---|---|
+| **Google Gemini** | `gemini-2.0-flash`, `gemini-1.5-flash` | `GEMINI_API_KEY` | `gemini_api_key` |
+| **OpenAI ChatGPT** | `gpt-4o-mini`, `gpt-4o` | `OPENAI_API_KEY` | `openai_api_key` |
+| **DeepSeek** | `deepseek-chat` (DeepSeek-V3) | `DEEPSEEK_API_KEY` | `deepseek_api_key` |
+
+Check active providers anytime with:
+```bash
+tokensafe providers
+```
 
 ---
 

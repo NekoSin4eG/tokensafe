@@ -101,6 +101,19 @@ def main():
             print("  Upgrade:    https://tokensafe.dev ($9/mo Solo with 7-Day Free Trial)\n")
         print()
 
+    elif command in ("providers", "models", "keys"):
+        from src.distiller import UniversalDistiller
+        configured = UniversalDistiller.get_configured_providers()
+        print("\n\033[1m\033[36m⚡ TOKENSAFE LLM DISTILLATION PROVIDERS ⚡\033[0m\n")
+        all_p = UniversalDistiller.PROVIDERS
+        for key, p in all_p.items():
+            if key in configured:
+                c = configured[key]
+                print(f"  \033[32m✔\033[0m \033[1m{p['name']:<18}\033[0m [Active: {c['model']}]")
+            else:
+                print(f"  \033[2m○ {p['name']:<18} [Set {p['env_key']} to activate]\033[0m")
+        print("\nSet environment variable or add to data/config.json to activate.\n")
+
     elif command in ("markdown", "md", "export"):
         print(dashboard.render_markdown())
 

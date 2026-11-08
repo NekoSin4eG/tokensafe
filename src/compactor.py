@@ -7,7 +7,7 @@ Supports 3-Tier Routing: Pass-through -> Regex Compactor -> DeepSeek-V3 Distille
 import re
 from typing import Dict, List, Optional
 from src.tokenizer import count_tokens
-from src.deepseek_distiller import DeepSeekDistiller
+from src.distiller import UniversalDistiller
 
 class PromptCompactor:
     """Transforms verbose natural language requests into compact Intent IR."""
@@ -105,9 +105,9 @@ class PromptCompactor:
                 "tier": "PASS_THROUGH"
             }
 
-        # Tier 2: DeepSeek-V3 Distiller for complex / unstructured prompts
+        # Tier 2: LLM Intent Distiller (Gemini / OpenAI / DeepSeek)
         if enable_deepseek and original_tokens >= 15:
-            distilled = DeepSeekDistiller.distill(raw_text)
+            distilled = UniversalDistiller.distill(raw_text)
             if distilled:
                 dist_tokens = count_tokens(distilled)
                 if dist_tokens < original_tokens:
