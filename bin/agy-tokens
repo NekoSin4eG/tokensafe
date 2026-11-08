@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+"""
+CLI entry point for Antigravity Token Optimizer.
+Usage:
+  agy-tokens [stats]           Show visual metrics dashboard
+  agy-tokens html              Generate and open interactive browser dashboard
+  agy-tokens test "<prompt>"   Test prompt compression and view savings
+  agy-tokens markdown          Output GitHub Markdown report
+  agy-tokens reset             Reset metrics database
+"""
+
+import sys
+import os
+import subprocess
+
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
+sys.path.insert(0, PROJECT_ROOT)
+
+from src.metrics import MetricsTracker
+from src.dashboard import Dashboard, render_bar
+from src.compactor import PromptCompactor
+from src.tokenizer import count_tokens
+
+def main():
+    tracker = MetricsTracker()
+    dashboard = Dashboard(tracker)
+
+    args = sys.argv[1:]
+    command = args[0] if args else "stats"
+
+    if command in ("stats", "dashboard"):
+        print(dashboard.render_terminal())
+
+    elif command in ("html", "web"):
+        html_content = dashboard.render_html()
+        out_path = os.path.join(PROJECT_ROOT, "data", "dashboard.html")
+        os.makedirs(os.path.dirname(out_path), exist_ok=True)
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(html_content)
+        print(f"\n⚡ Interactive HTML Dashboard generated at: {out_path}")
+        try:
+            subprocess.run(["open", out_path])
+            print("   Opened in default browser.")
+        except Exception:
+            pass
+
+    elif command in ("benchmark", "bench"):
+        from src.benchmark import BenchmarkSuite
+        print("\n⚡ Running Zero-Loss SWE-bench Benchmark Suite across 5 real-world scenarios...")
+        data = BenchmarkSuite.run_all()
+        print(BenchmarkSuite.render_report(data))
+        out_md = os.path.join(PROJECT_ROOT, "data", "BENCHMARK_REPORT.md")
+        BenchmarkSuite.export_markdown_report(data, out_md)
+        print(f"📊 Publication-ready markdown report saved to: {out_md}\n")
+
+    elif command in ("setup", "install"):
+        from src.installer import AgentInstaller
+        AgentInstaller.run_interactive()
+
+    elif command == "proxy":
+        from src.proxy import run_proxy
+        port = int(args[1]) if len(args) > 1 else 8765
+        run_proxy(port)
+
+    elif command == "mcp":
+        from src.mcp_server import run_mcp_server
+        run_mcp_server()
+
+    elif command == "activate":
+        from src.license_manager import LicenseManager
+        if len(args) < 2:
+            print("Usage: agy-tokens activate <LICENSE_KEY>")
+            sys.exit(1)
+        key = args[1].strip()
+        ok, msg = LicenseManager.save_license(key)
+        if ok:
+            print(f"\n\033[32m\033[1m✔ {msg}\033[0m\n")
+        else:
+            print(f"\n\033[31m\033[1m✖ {msg}\033[0m\n")
+            sys.exit(1)
+
+    elif command in ("license", "tier"):
+        from src.license_manager import LicenseManager
+        tier, payload = LicenseManager.get_active_license()
+        print("\n\033[1m\033[36m⚡ TOKENSAFE LICENSE STATUS ⚡\033[0m\n")
+        print(f"  Tier:       \033[32m\033[1m{tier.upper()}\033[0m")
+        if tier != "free":
+            print(f"  Email:      {payload.get('email', 'N/A')}")
+            if payload.get("trial"):
+                print(f"  Mode:       \033[33m7-Day Free Trial\033[0m")
+            exp = payload.get("expires_at", 0)
+            if exp > 0:
+                import datetime
+                dt = datetime.datetime.fromtimestamp(exp).strftime('%Y-%m-%d %H:%M:%S')
+                print(f"  Expires:    {dt}")
+            else:
+                print(f"  Expires:    Never (Lifetime)")
+        else:
+            print("  Status:     Free Tier (up to 100,000 tokens/mo)")
+            print("  Upgrade:    https://tokensafe.dev ($9/mo Solo with 7-Day Free Trial)\n")
+        print()
+
+    elif command in ("providers", "models", "keys"):
+        from src.distiller import UniversalDistiller
+        configured = UniversalDistiller.get_configured_providers()
+        print("\n\033[1m\033[36m⚡ TOKENSAFE LLM DISTILLATION PROVIDERS ⚡\033[0m\n")
+        all_p = UniversalDistiller.PROVIDERS
+        for key, p in all_p.items():
+            if key in configured:
+                c = configured[key]
+                print(f"  \033[32m✔\033[0m \033[1m{p['name']:<18}\033[0m [Active: {c['model']}]")
+            else:
+                print(f"  \033[2m○ {p['name']:<18} [Set {p['env_key']} to activate]\033[0m")
+        print("\nSet environment variable or add to data/config.json to activate.\n")
+
+    elif command in ("markdown", "md", "export"):
+        print(dashboard.render_markdown())
+
+    elif command == "test":
+        if len(args) < 2:
+            print("Usage: agy-tokens test \"<prompt text>\"")
+            sys.exit(1)
+        raw_prompt = " ".join(args[1:])
+        res = PromptCompactor.compact(raw_prompt)
+
+        print("\n\033[1m\033[36m⚡ TOKEN COMPRESSION TEST ⚡\033[0m\n")
+        print(f"\033[1mOriginal Input:\033[0m  {res['original_text']}")
+        print(f"\033[1mCompacted DSL:\033[0m   \033[32m\033[1m{res['compact_text']}\033[0m\n")
+        print(f"\033[1mRouting Tier:\033[0m   \033[33m{res.get('tier', 'REGEX')}\033[0m")
+        print(f"\033[1mExtracted Action:\033[0m {res['action']}")
+        print(f"\033[1mTarget File:\033[0m      {res['target_file'] or 'None'}")
+        print(f"\033[1mScope Symbol:\033[0m     {res['symbol'] or 'None'}")
+        print(f"\033[1mTraits / Tags:\033[0m    {res['traits']}\n")
+        print(f"\033[1mOriginal Tokens:\033[0m  {res['original_tokens']}")
+        print(f"\033[1mCompacted Tokens:\033[0m {res['compact_tokens']}")
+        print(f"\033[1mTokens Saved:\033[0m     \033[32m\033[1m+{res['saved_tokens']} tokens\033[0m ({render_bar(res['reduction_pct'])})\n")
+
+    elif command == "reset":
+        confirm = input("Are you sure you want to reset all token metrics? [y/N]: ").strip().lower()
+        if confirm == "y":
+            tracker.reset()
+            print("Metrics database reset successfully.")
+        else:
+            print("Reset cancelled.")
+
+    else:
+        print(f"Unknown command: {command}")
+        print("Available commands: stats, html, benchmark, setup, proxy, mcp, test, markdown, reset")
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
