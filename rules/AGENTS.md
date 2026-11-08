@@ -29,3 +29,9 @@ Execute the specified action directly based on these extracted parameters.
 1. **Never Crawl with Raw Grep/Find**: Before executing exploratory searches or answering architecture questions, inspect `tokensafe:get_architecture_graph` or `tokensafe-out/API_SURFACE.md`. It provides project God Nodes and dependencies in < 250 tokens without file crawling.
 2. **Graph-Guided File Reading**: When inspecting code implementations, call `tokensafe:smart_read_file` with the targeted `symbol`. It preserves full executable bodies for the target function and its 1-hop callees while folding inert code into signatures (-85% to -92% tokens).
 3. **Bounded Reads**: Never call `read_file` without `StartLine`/`EndLine` on files > 100 lines unless inspecting a skeleton.
+
+### 4. Turn Token Savings Footer (Proof-of-Savings)
+At the end of your response for any turn where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer:
+`⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens`
+Example:
+`⚡ **TokenSafe Turn Savings**: +3,520 tokens (~88%) | Cumulative Total: 3.04M tokens ($4.56)`

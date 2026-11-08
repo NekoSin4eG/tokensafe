@@ -27,3 +27,7 @@ Before submitting changes, ensure zero external runtime dependencies are introdu
 - **Architecture Navigation**: Always call `tokensafe:get_architecture_graph` before grep or multi-file reading.
 - **Symbol Inspection**: Always call `tokensafe:smart_read_file` with `symbol` specified to retrieve graph-guided slices with 1-hop dependencies.
 - **Raw Grep**: Strictly prohibited for architectural surveys. Use `tokensafe-out/API_SURFACE.md` or `get_architecture_graph`.
+
+## Response Formatting Directive (Proof-of-Savings Footer)
+At the end of your response for any turn where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer:
+`⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens`
