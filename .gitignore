@@ -15,5 +15,6 @@ data/*.db
 data/cloud.db
 data/skeletons/
 data/loop_state.json
+data/version_cache.json
 data/dashboard.html
 tokensafe-out/
