@@ -53,7 +53,7 @@ Rules:
             "name": "Google Gemini",
             "env_key": "GEMINI_API_KEY",
             "config_key": "gemini_api_key",
-            "default_model": "gemini-2.0-flash",
+            "default_model": "gemini-2.0-flash-lite",
             "endpoint": "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={key}"
         }
     }

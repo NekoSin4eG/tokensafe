@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tokensafe"
-version = "1.0.0"
+version = "1.0.1"
 description = "Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents"
 readme = "README.md"
 authors = [

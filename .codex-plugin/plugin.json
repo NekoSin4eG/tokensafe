@@ -1,5 +1,5 @@
 {
-  "version": "1.0.0",
+  "version": "1.0.1",
   "name": "tokensafe",
   "description": "Zero-Loss Token Economy & Context Optimizer for AI Agents. Compresses prompts, slices AST/tool outputs, and prevents stuck loops.",
   "author": {
