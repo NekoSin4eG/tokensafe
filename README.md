@@ -57,10 +57,17 @@ Traditional AI code interactions suffer from massive context bloat:
 
 ### TokenSafe Solves All Three Autonomously:
 - **Graph-Guided AST Skeletonization:** Folds inactive function bodies into signatures, keeping target functions and 1-hop dependencies full while collapsing unrelated code (`-85% to -92%`).
+- **Prompt Cache Prefix Normalizer:** Strips volatile timestamps and aligns system prompts to 64-token boundaries. Injects Anthropic ephemeral breakpoints (`cache_control: {"type": "ephemeral"}`) and DeepSeek chunking for 100% provider cache hits and 90% cost discounts.
+- **Context Window Governor & Token Ceiling:** Enforces deterministic token budgets via 3-stage cascading autothrottling (AST skeletonization ➔ TOCP user message history compaction ➔ sliding state ledger) to prevent catastrophic context overflows.
+- **Subagent Deduplication Firewall:** Detects repeated file reads across subagents and agent swarms, serving cached AST slices directly from SQLite session memory (`SUBAGENT_DEDUP`) with zero redundant overhead.
+- **AST Diff Slicer & Lockfile Stripper:** Compresses code review diffs by stripping noisy lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`) and minified assets, condensing diffs to 2 lines of context (`git diff -U2`) for up to 96% token savings.
 - **God Nodes & Architectural Hub Detection:** Calculates Degree Centrality to identify structural project hubs and injects topology awareness into agent sessions without expensive file crawling.
-- **TOCP Prompt Distillation:** Intercepts prompts and distills intent into lean S-Expressions via **Google Gemini (2.0 Flash-Lite), OpenAI ChatGPT (gpt-4o-mini), or DeepSeek-Flash** (`-40% to -70%`). Automatically detects `GEMINI_API_KEY`, `OPENAI_API_KEY`, or `DEEPSEEK_API_KEY`.
+- **TOCP Prompt Distillation:** Intercepts prompts and distills intent into lean S-Expressions via **Google Gemini (2.0 Flash-Lite), OpenAI ChatGPT (gpt-4o-mini), Anthropic Claude, or DeepSeek-Flash** (`-40% to -70%`). Automatically detects `GEMINI_API_KEY`, `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `DEEPSEEK_API_KEY`.
 - **API Surface Map Generator:** Generates high-density `tokensafe-out/API_SURFACE.md` (~1.5k tokens) for instant agent codebase onboarding.
 - **Predictive Dependency Prefetcher:** Attaches imported symbol signatures to eliminate downstream exploratory `read_file` roundtrips.
+- **Live SSE Streaming Dashboard:** Real-time reactive Web UI streaming token reductions, live event logs, and USD savings via Server-Sent Events (`/api/events`).
+- **Friday Team ROI Digest:** Automatically aggregates 7-day token economics every Friday and emails team leads an executive HTML report with engineer savings leaderboards.
+- **Environment Overhead Auditor (`tokensafe doctor`):** Inspects active MCP servers and Antigravity skills, measuring system prompt token tax and pruning redundant tool schemas.
 - **Local Secret Redactor:** Sanitizes Stripe, AWS, JWT, and database credentials before network transmission.
 - **Output Guard & Loop Guard:** Blocks destructive full-file rewrites on files $\ge 40$ lines and halts command loops.
 
@@ -92,7 +99,9 @@ TokenSafe supports any key you already have:
 |---|---|---|---|
 | **Google Gemini** | `gemini-2.0-flash-lite`, `gemini-2.0-flash` | `GEMINI_API_KEY` | `gemini_api_key` |
 | **OpenAI ChatGPT** | `gpt-4o-mini`, `gpt-4o` | `OPENAI_API_KEY` | `openai_api_key` |
+| **Anthropic Claude** | `claude-3-5-haiku`, `claude-3-7-sonnet` | `ANTHROPIC_API_KEY` | `anthropic_api_key` |
 | **DeepSeek** | `deepseek-flash`, `deepseek-chat` | `DEEPSEEK_API_KEY` | `deepseek_api_key` |
+| **Custom / Unified** | Any OpenAI/Anthropic compatible gateway | `TOKENSAFE_UPSTREAM_KEY` | `upstream_key` |
 
 Check active providers anytime with:
 ```bash
@@ -140,21 +149,98 @@ tokensafe graph
 # Generate compact tokensafe-out/API_SURFACE.md interface snapshot
 tokensafe map
 
+# Run environment health check and audit MCP/skill context token tax
+tokensafe doctor
+
 # View live savings dashboard in your terminal
 tokensafe stats
 
 # Open interactive Apple dark-mode HTML dashboard
 tokensafe html
 
+# Generate or preview Friday team ROI digest email
+tokensafe digest
+
+# Manage or disable high-overhead MCP tools
+tokensafe mcp list
+tokensafe mcp disable <server>
+
+# Optimize SQLite metrics storage
+tokensafe vacuum
+
 # Run the 5-scenario benchmark suite
 tokensafe benchmark
 
-# Run the local transparent AI proxy (127.0.0.1:8765/v1)
+# Run the local transparent AI proxy (0.0.0.0:8765/v1)
 tokensafe proxy
 
 # Activate your Pro License key (TS2 Asymmetric Ed25519 Key)
 tokensafe activate TS2.eyJlbWFpbCI6...
 ```
+
+---
+
+## 🐳 Docker Deployment (Multi-Provider Support)
+
+TokenSafe is fully containerized with a hardened multi-stage production Docker image, non-root security (`uid: 1000`), and native multi-provider LLM routing.
+
+### 1. Multi-Provider Environment Keys
+
+You can configure any or all of your preferred LLM provider keys:
+
+| Environment Variable | Provider Supported | Default Model |
+|---|---|---|
+| `OPENAI_API_KEY` | OpenAI API | `gpt-4o-mini` |
+| `ANTHROPIC_API_KEY` | Anthropic Claude | `claude-3-5-haiku-20241022` |
+| `GEMINI_API_KEY` | Google Gemini | `gemini-2.0-flash-lite` |
+| `DEEPSEEK_API_KEY` | DeepSeek API | `deepseek-chat` |
+| `TOKENSAFE_UPSTREAM_KEY` | Unified / Custom Gateway | Custom Upstream |
+
+### 2. Docker Compose Quickstart
+
+Run TokenSafe as a centralized microservice or team gateway:
+
+```yaml
+version: '3.8'
+
+services:
+  tokensafe:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: tokensafe
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      - TOKENSAFE_HOST=0.0.0.0
+      - TOKENSAFE_PORT=8765
+      - TOKENSAFE_DATA_DIR=/app/data
+      # Choose your provider(s):
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - TOKENSAFE_LICENSE_KEY=${TOKENSAFE_LICENSE_KEY:-}
+    volumes:
+      - ./data:/app/data
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+```
+
+Start the container in detached mode:
+```bash
+docker compose up -d
+```
+
+### 3. Verification & Live SSE Streaming
+
+- **Health check**: `curl http://localhost:8765/api/health`
+- **Live SSE Event Stream**: `curl -N http://localhost:8765/api/events`
+- **Point your AI Agents**: Configure your IDE or Agent to use `http://localhost:8765/v1` as the upstream base URL.
 
 ---
 
@@ -173,12 +259,15 @@ TokenSafe Cloud Backend enforces enterprise zero-trust security across all commu
 | Method | Endpoint | Auth Required | Headers / Parameters | Description |
 |---|---|---|---|---|
 | `GET` | `/api/health` | Public | None | Healthcheck and service version status. |
+| `GET` | `/api/events` | Public | SSE `text/event-stream` | Real-time Server-Sent Events stream for live dashboard telemetry. |
 | `GET` | `/api/dashboard` | **Bearer Auth** | `Authorization: Bearer <jwt\|key>` or `?license=<key>` | Authenticated user metrics, token savings, and license status. |
+| `GET` | `/api/digest/preview` | **Bearer Auth** | `Authorization: Bearer <jwt\|key>` or `?team_id=<id>` | Previews current weekly team ROI digest (HTML / JSON). |
 | `POST` | `/api/team/seat/create` | **Bearer Auth** | `Authorization: Bearer <jwt\|key>`, JSON `{ owner_email, member_email }` | Generates a cryptographically signed seat license for a team member. |
 | `POST` | `/api/team/seat/revoke` | **Bearer Auth** | `Authorization: Bearer <jwt\|key>`, JSON `{ owner_email, license_key }` | Revokes an active team seat license key. |
 | `POST` | `/api/telemetry/sync` | **License Auth** | JSON `{ license_key, email, events: [...] }` | Syncs batch telemetry events (enforces max 50 events/batch). |
 | `POST` | `/webhook/stripe` | **HMAC Sig** | `Stripe-Signature: t=...,v1=...` | Verifies Stripe webhook payload against `STRIPE_WEBHOOK_SECRET`. |
 | `GET` | `/api/admin/overview` | **Admin Only** | `X-Admin-Secret` or Admin JWT | Global overview of MRR, seats, active licenses, and system health. |
+| `POST` | `/api/admin/digest/send` | **Admin Only** | `X-Admin-Secret` or Admin JWT | Dispatches scheduled Friday weekly ROI digest emails to team leads. |
 | `POST` | `/api/admin/license/issue`| **Admin Only** | `X-Admin-Secret` or Admin JWT | Manually issues or provisions a custom tier license. |
 | `POST` | `/api/admin/license/revoke`| **Admin Only**| `X-Admin-Secret` or Admin JWT | Immediately revokes a license. |
 | `POST` | `/api/admin/license/extend`| **Admin Only**| `X-Admin-Secret` or Admin JWT | Extends an active license duration. |
@@ -222,6 +311,8 @@ MIT License. Commercial enterprise licenses available for on-premise B2B deploym
 agy-token-optimizer/
 ├── plugin.json                 # Antigravity plugin manifest
 ├── hooks.json                  # Lifecycle hook declarations (PreInvocation, PreToolUse, PostToolUse)
+├── Dockerfile                  # Hardened multi-stage container deployment
+├── docker-compose.yml          # Production Docker compose with multi-provider routing
 ├── rules/
 │   └── AGENTS.md               # TOCP Protocol directives for LLM (prompt-cached)
 ├── skills/
@@ -230,17 +321,29 @@ agy-token-optimizer/
 ├── proto/
 │   └── tocp.proto              # Protocol Buffers contract
 ├── src/
+│   ├── cache_normalizer.py     # Prompt Cache Prefix Normalizer (Anthropic & DeepSeek)
+│   ├── governor.py             # Context Window Governor & Token Ceiling (Cascading reduction)
+│   ├── agent_firewall.py       # Cross-Agent Deduplication Cache (Subagent Firewall)
+│   ├── diff_slicer.py          # AST Diff Slicer & Lockfile Stripper (`git diff -U2`)
+│   ├── weekly_digest.py        # Friday Team ROI Digest & Engineer Leaderboard
+│   ├── environment_auditor.py  # MCP Server & Skill context token tax auditor
+│   ├── proxy.py                # Multi-provider transparent AI proxy & SSE broadcaster
+│   ├── graph_engine.py         # Sub-30ms AST parser, call graphs & God Node centrality
 │   ├── tokenizer.py            # Zero-dependency calibrated BPE token counter
 │   ├── compactor.py            # Semantic compactor (Natural Language -> TOCP S-Expr)
 │   ├── slicer.py               # AST & Line windowing tool optimizer
 │   ├── metrics.py              # Persistent SQLite metrics engine
-│   └── dashboard.py            # Visual ANSI terminal & Markdown generator
+│   ├── dashboard.py            # Visual ANSI terminal, Markdown & reactive SSE web dashboard
+│   ├── license_manager.py      # Ed25519 cryptographic license verification
+│   ├── mailer.py               # Transactional email & Friday ROI digest dispatcher
+│   └── cloud_backend.py        # Cloud REST backend, telemetry sync & Stripe webhooks
 ├── hooks/
 │   ├── pre_invocation.py       # PreInvocation hook entry point
 │   ├── pre_tool_use.py         # PreToolUse hook entry point
 │   └── post_tool_use.py        # PostToolUse hook entry point
+├── frontend/                   # Modern React / Vite / Tailwind Web App & Dashboard
 ├── bin/
-│   └── agy-tokens              # Executable CLI
+│   └── agy-tokens              # Executable CLI (`tokensafe`)
 ├── tests/                      # Unit test suite (100% passing)
 ├── install.sh                  # One-click installer for Antigravity
 └── README.md
