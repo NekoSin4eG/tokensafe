@@ -42,6 +42,38 @@ class TestAgentInstaller(unittest.TestCase):
             finally:
                 AGENTS_REGISTRY["codex"] = orig_entry
 
+    def test_cursor_env_installation(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fake_config = os.path.join(tmpdir, "mcp.json")
+            fake_skills = os.path.join(tmpdir, "skills", "token-optimizer")
+            fake_rules = os.path.join(tmpdir, "rules", "tokensafe.mdc")
+            fake_ext = os.path.join(tmpdir, "extensions", "tokensafe-1.0.0")
+
+            orig_entry = AGENTS_REGISTRY["cursor"]
+            AGENTS_REGISTRY["cursor"] = {
+                "name": "Cursor",
+                "type": "cursor_env",
+                "config_path": fake_config,
+                "skills_path": fake_skills,
+                "rules_path": fake_rules,
+                "extension_path": fake_ext,
+                "detect_path": tmpdir
+            }
+            try:
+                ok, msg = AgentInstaller.install_mcp_config("cursor")
+                self.assertTrue(ok)
+                with open(fake_config, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                self.assertIn("tokensafe", data["mcpServers"])
+                self.assertTrue(os.path.exists(fake_skills))
+                self.assertTrue(os.path.exists(fake_ext))
+                self.assertTrue(os.path.exists(fake_rules))
+                with open(fake_rules, "r", encoding="utf-8") as f:
+                    rule_content = f.read()
+                self.assertIn("TokenSafe Optimization Protocol", rule_content)
+            finally:
+                AGENTS_REGISTRY["cursor"] = orig_entry
+
     def test_zcode_json_installation(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             fake_config = os.path.join(tmpdir, "cli", "config.json")

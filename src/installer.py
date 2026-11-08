@@ -26,7 +26,8 @@ AGENTS_REGISTRY = {
     "antigravity": {
         "name": "Google Antigravity",
         "type": "plugin",
-        "target_path": os.path.join(HOME, ".gemini", "config", "plugins", "agy-token-optimizer"),
+        "target_path": os.path.join(HOME, ".gemini", "config", "plugins", "tokensafe"),
+        "legacy_path": os.path.join(HOME, ".gemini", "config", "plugins", "agy-token-optimizer"),
         "detect_path": os.path.join(HOME, ".gemini")
     },
     "claude_desktop": {
@@ -37,9 +38,11 @@ AGENTS_REGISTRY = {
     },
     "cursor": {
         "name": "Cursor",
-        "type": "mcp_json",
+        "type": "cursor_env",
         "config_path": os.path.join(HOME, ".cursor", "mcp.json"),
         "skills_path": os.path.join(HOME, ".cursor", "skills", "token-optimizer"),
+        "rules_path": os.path.join(HOME, ".cursor", "rules", "tokensafe.mdc"),
+        "extension_path": os.path.join(HOME, ".cursor", "extensions", "tokensafe-1.0.0"),
         "detect_path": os.path.join(HOME, ".cursor")
     },
     "windsurf": {
@@ -59,6 +62,8 @@ AGENTS_REGISTRY = {
         "type": "codex_toml",
         "config_path": os.path.join(HOME, ".codex", "config.toml"),
         "skills_path": os.path.join(HOME, ".codex", "skills", "token-optimizer"),
+        "agents_md_path": os.path.join(HOME, ".codex", "AGENTS.md"),
+        "plugin_path": os.path.join(HOME, ".codex", "plugins", "tokensafe"),
         "detect_path": os.path.join(HOME, ".codex")
     },
     "zcode": {
@@ -66,6 +71,7 @@ AGENTS_REGISTRY = {
         "type": "zcode_json",
         "config_path": os.path.join(HOME, ".zcode", "cli", "config.json"),
         "skills_path": os.path.join(HOME, ".zcode", "skills", "token-optimizer"),
+        "plugin_path": os.path.join(HOME, ".zcode", "cli", "plugins", "tokensafe"),
         "detect_path": os.path.join(HOME, ".zcode")
     }
 }
@@ -98,17 +104,59 @@ class AgentInstaller:
         if info["type"] == "plugin":
             # Symlink plugin directory
             target = info["target_path"]
-            os.makedirs(os.path.dirname(target), exist_ok=True)
-            if os.path.islink(target) or os.path.exists(target):
-                try:
-                    if os.path.islink(target) or os.path.isfile(target):
-                        os.unlink(target)
-                    else:
-                        shutil.rmtree(target)
-                except Exception:
-                    pass
-            os.symlink(PROJECT_ROOT, target)
+            cls._symlink_dir(PROJECT_ROOT, target)
+            if "legacy_path" in info:
+                cls._symlink_dir(PROJECT_ROOT, info["legacy_path"])
             return True, f"Symlinked plugin into {target}"
+
+        elif info["type"] == "cursor_env":
+            config_file = info["config_path"]
+            os.makedirs(os.path.dirname(config_file), exist_ok=True)
+
+            data = {}
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    shutil.copy2(config_file, f"{config_file}.backup")
+                except Exception:
+                    data = {}
+
+            if "mcpServers" not in data or not isinstance(data["mcpServers"], dict):
+                data["mcpServers"] = {}
+
+            data["mcpServers"]["tokensafe"] = {
+                "command": PYTHON_BIN,
+                "args": [MCP_SERVER_PATH]
+            }
+
+            with open(config_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, indent=2)
+
+            if "skills_path" in info:
+                cls._symlink_skill(info["skills_path"])
+
+            if "extension_path" in info:
+                ext_src = os.path.join(PROJECT_ROOT, "extensions", "cursor-tokensafe")
+                if os.path.exists(ext_src):
+                    cls._symlink_dir(ext_src, info["extension_path"])
+
+            if "rules_path" in info:
+                rule_text = (
+                    "---\n"
+                    "description: TokenSafe token economy and context optimization protocol\n"
+                    "globs: *\n"
+                    "alwaysApply: true\n"
+                    "---\n\n"
+                    "# TokenSafe Optimization Protocol\n"
+                    "Always prioritize `tokensafe` MCP tools (`smart_read_file`, `compress_prompt`, `sanitize_command`) "
+                    "over default raw file reads or high-output terminal executions to preserve context tokens and prevent context overflow.\n"
+                    "- When inspecting code files, use `smart_read_file` with `symbol` or line range.\n"
+                    "- Sanitize verbose commands (`git diff`, `pytest`, `find`, `grep`) via `sanitize_command`.\n"
+                )
+                cls._write_file_safely(info["rules_path"], rule_text)
+
+            return True, f"Configured MCP, Extension & Rule for Cursor"
 
         elif info["type"] == "mcp_json":
             config_file = info["config_path"]
@@ -176,7 +224,20 @@ class AgentInstaller:
             if "skills_path" in info:
                 cls._symlink_skill(info["skills_path"])
 
-            return True, f"Configured MCP & Skill in {config_file}"
+            if "plugin_path" in info:
+                cls._symlink_dir(PROJECT_ROOT, info["plugin_path"])
+
+            if "agents_md_path" in info:
+                codex_rule = (
+                    "## TOKENSAFE TOKEN OPTIMIZATION PROTOCOL\n"
+                    "Always prioritize `tokensafe` MCP tools (`smart_read_file`, `compress_prompt`, `sanitize_command`) "
+                    "over default raw file reads or high-token shell executions to preserve context tokens and prevent context overflow.\n"
+                    "- When inspecting code files, use `smart_read_file` with `symbol` or line range.\n"
+                    "- When running verbose commands (`git diff`, `pytest`, `find`, `grep`), sanitize them with `sanitize_command`.\n"
+                )
+                cls._inject_global_rule(info["agents_md_path"], codex_rule)
+
+            return True, f"Configured MCP, Plugin, Skill & AGENTS.md in {config_file}"
 
         elif info["type"] == "zcode_json":
             config_file = info["config_path"]
@@ -207,15 +268,17 @@ class AgentInstaller:
             if "skills_path" in info:
                 cls._symlink_skill(info["skills_path"])
 
-            return True, f"Configured MCP & Skill in {config_file}"
+            if "plugin_path" in info:
+                cls._symlink_dir(PROJECT_ROOT, info["plugin_path"])
+
+            return True, f"Configured MCP, Plugin & Skill in {config_file}"
 
         return False, "Unsupported type"
 
     @classmethod
-    def _symlink_skill(cls, target_path: str):
-        """Symlinks the TokenSafe skill into the target agent's skills directory."""
-        skill_src = os.path.join(PROJECT_ROOT, "skills", "token-optimizer")
-        if not os.path.exists(skill_src):
+    def _symlink_dir(cls, source_path: str, target_path: str):
+        """Safely creates or replaces a symlink to a directory."""
+        if not os.path.exists(source_path):
             return
         os.makedirs(os.path.dirname(target_path), exist_ok=True)
         if os.path.islink(target_path) or os.path.exists(target_path):
@@ -227,9 +290,44 @@ class AgentInstaller:
             except Exception:
                 pass
         try:
-            os.symlink(skill_src, target_path)
+            os.symlink(source_path, target_path)
         except Exception:
             pass
+
+    @classmethod
+    def _write_file_safely(cls, file_path: str, content: str):
+        """Safely writes content creating parent directories."""
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(content)
+
+    @classmethod
+    def _inject_global_rule(cls, file_path: str, rule_snippet: str, tag: str = "tokensafe"):
+        """Injects or updates a delimited rule block in a markdown instruction file."""
+        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        content = ""
+        if os.path.exists(file_path):
+            try:
+                with open(file_path, "r", encoding="utf-8") as f:
+                    content = f.read()
+            except Exception:
+                content = ""
+        start_tag = f"<!-- {tag} -->"
+        end_tag = f"<!-- /{tag} -->"
+        pattern = re.compile(rf"{re.escape(start_tag)}.*?{re.escape(end_tag)}", re.DOTALL)
+        wrapped = f"{start_tag}\n{rule_snippet.strip()}\n{end_tag}"
+        if start_tag in content:
+            new_content = pattern.sub(wrapped, content)
+        else:
+            new_content = (content.rstrip() + "\n\n" + wrapped).lstrip()
+        with open(file_path, "w", encoding="utf-8") as f:
+            f.write(new_content)
+
+    @classmethod
+    def _symlink_skill(cls, target_path: str):
+        """Symlinks the TokenSafe skill into the target agent's skills directory."""
+        skill_src = os.path.join(PROJECT_ROOT, "skills", "token-optimizer")
+        cls._symlink_dir(skill_src, target_path)
 
     @classmethod
     def run_interactive(cls):
