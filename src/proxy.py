@@ -232,8 +232,12 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
         generic_upstream_key = os.environ.get("TOKENSAFE_UPSTREAM_KEY", "")
 
         # Infer upstream URL if not provided
+        pref = conf_keys.get("preferred_provider", "").lower()
         if not custom_url:
-            if openai_key and not deepseek_key:
+            if (pref == "gemini" and gemini_key) or (gemini_key and not deepseek_key and not openai_key):
+                upstream_url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+                resolved_key = gemini_key
+            elif openai_key and not deepseek_key:
                 upstream_url = "https://api.openai.com/v1/chat/completions"
                 resolved_key = openai_key
             elif anthropic_key and not deepseek_key:

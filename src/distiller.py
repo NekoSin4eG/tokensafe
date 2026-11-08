@@ -115,9 +115,20 @@ Rules:
             return None
 
         # Determine order
+        pref = preferred_provider
+        if not pref:
+            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            config_path = os.path.join(base_dir, "data", "config.json")
+            if os.path.exists(config_path):
+                try:
+                    with open(config_path, "r", encoding="utf-8") as f:
+                        pref = json.load(f).get("preferred_provider")
+                except Exception:
+                    pass
+
         order = []
-        if preferred_provider and preferred_provider in providers:
-            order.append(preferred_provider)
+        if pref and pref in providers:
+            order.append(pref)
         # Add remaining in priority order
         for p in ["gemini", "openai", "deepseek"]:
             if p in providers and p not in order:
