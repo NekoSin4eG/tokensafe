@@ -11,6 +11,7 @@ import urllib.request
 import urllib.error
 from typing import Optional, Dict, Any
 from src.distiller_cache import DistillationCache
+from src.license_manager import LicenseManager
 
 class DeepSeekDistiller:
     """Uses DeepSeek-Flash as a high-density semantic compiler for prompts."""
@@ -72,7 +73,12 @@ Rules:
         """
         Sends raw text to DeepSeek-V3 to compile into an S-Expression.
         Returns distilled S-Expression or None if unavailable/timed out.
+        Requires active TokenSafe Solo or Team subscription.
         """
+        tier, _ = LicenseManager.get_active_license()
+        if tier == "free":
+            return None
+
         conf = cls._get_config()
         if not conf["enabled"] or not conf["api_key"] or not raw_text or len(raw_text.strip()) < 10:
             return None

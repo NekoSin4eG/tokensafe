@@ -24,6 +24,7 @@ from src.metrics import MetricsTracker
 from src.tokenizer import count_tokens
 from src.agent_firewall import AgentFirewall
 from src.diff_slicer import DiffSlicer
+from src.license_manager import LicenseManager
 
 def main():
     try:
@@ -44,6 +45,8 @@ def main():
     last_user_input = payload.get("lastUserInput", "")
 
     tracker = MetricsTracker()
+    quota = LicenseManager.check_quota(tracker)
+    is_quota_exceeded = quota.get("is_quota_exceeded", False)
 
     # 1. Loop Detector Guard (Applies to all tools)
     is_loop, repeat_count, loop_msg = LoopDetector.check_loop(conversation_id, tool_name, args)
@@ -106,6 +109,11 @@ def main():
         path = args.get("Path", "")
         start_line = args.get("StartLine")
         end_line = args.get("EndLine")
+
+        if is_quota_exceeded:
+            # Free tier quota reached: pass through raw read_file without AST skeletonization
+            print(json.dumps(response))
+            return
 
         # Step 3A: Subagent Firewall — Check if file was already read in active session
         is_hit, cached_text, saved_dedup = AgentFirewall.check_cache(
@@ -193,6 +201,14 @@ def main():
     # 4. run_command Optimization (Command Sanitizer & Diff Slicer)
     elif tool_name == "run_command":
         cmd = args.get("CommandLine", "")
+        if is_quota_exceeded:
+            # Free tier quota reached: pass through without AST diff slicing or savings tracking
+            new_cmd, est_saved, reason = CommandSanitizer.sanitize(cmd)
+            if new_cmd and est_saved > 0:
+                response["overwrite"] = {"CommandLine": new_cmd}
+            print(json.dumps(response))
+            return
+
         # Check AST Diff Slicer first
         diff_cmd, diff_saved, diff_reason = DiffSlicer.optimize_git_diff_command(cmd)
         if diff_cmd:

@@ -40,12 +40,22 @@ class TestPromptCompactor(unittest.TestCase):
     def test_threshold_custom_min_distill_tokens(self):
         from unittest.mock import patch
         prompt = "Пожалуйста, поправь функцию authenticate в auth.ts, чтобы она проверяла jwt токен"
-        with patch("src.distiller.UniversalDistiller.distill") as mock_distill:
+        with patch("src.license_manager.LicenseManager.get_active_license", return_value=("solo", {"tier": "solo"})), \
+             patch("src.distiller.UniversalDistiller.distill") as mock_distill:
             mock_distill.return_value = '(DEBUG auth.ts [jwt] "verify token")'
             res = PromptCompactor.compact(prompt, enable_deepseek=True, min_distill_tokens=10)
             self.assertEqual(res["tier"], "DEEPSEEK_V3")
             self.assertEqual(res["compact_text"], '(DEBUG auth.ts [jwt] "verify token")')
             mock_distill.assert_called_once()
+
+    def test_free_tier_skips_neural_distillation(self):
+        from unittest.mock import patch
+        prompt = "Пожалуйста, поправь функцию authenticate в auth.ts, чтобы она проверяла jwt токен"
+        with patch("src.license_manager.LicenseManager.get_active_license", return_value=("free", {"tier": "free"})), \
+             patch("src.distiller.UniversalDistiller.distill") as mock_distill:
+            res = PromptCompactor.compact(prompt, enable_deepseek=True, min_distill_tokens=10)
+            self.assertEqual(res["tier"], "REGEX")
+            mock_distill.assert_not_called()
 
     def test_special_files_detection(self):
         # Dotfiles and extensionless files must be recognized as target_file

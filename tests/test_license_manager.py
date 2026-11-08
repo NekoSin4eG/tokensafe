@@ -64,5 +64,16 @@ class TestLicenseManager(unittest.TestCase):
         self.assertIsNotNone(quota_exceeded["warning"])
         self.assertIn("Quota Alert", quota_exceeded["warning"])
 
+    def test_quota_solo_tier_unlimited(self):
+        from unittest.mock import MagicMock, patch
+        mock_tracker = MagicMock()
+        mock_tracker.get_monthly_saved_tokens.return_value = 5_000_000
+        with patch.object(LicenseManager, "get_active_license", return_value=("solo", {"tier": "solo"})):
+            quota = LicenseManager.check_quota(mock_tracker)
+            self.assertEqual(quota["tier"], "solo")
+            self.assertFalse(quota["is_quota_exceeded"])
+            self.assertIsNone(quota["monthly_limit"])
+            self.assertIsNone(quota["warning"])
+
 if __name__ == "__main__":
     unittest.main()

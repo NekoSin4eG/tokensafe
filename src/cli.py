@@ -179,22 +179,32 @@ def main():
             else:
                 print(f"  Expires:    Never (Lifetime)")
         else:
-            print("  Status:     Free Tier (up to 100,000 tokens/mo)")
+            print("  Status:     Free Tier (up to 500,000 tokens/mo)")
             print("  Upgrade:    https://tokensafe.dev ($9/mo Solo with 7-Day Free Trial)\n")
         print()
 
     elif command in ("providers", "models", "keys"):
+        from src.license_manager import LicenseManager
         from src.distiller import UniversalDistiller
-        configured = UniversalDistiller.get_configured_providers()
+        tier, _ = LicenseManager.get_active_license()
         print("\n\033[1m\033[36m⚡ TOKENSAFE LLM DISTILLATION PROVIDERS ⚡\033[0m\n")
-        all_p = UniversalDistiller.PROVIDERS
-        for key, p in all_p.items():
-            if key in configured:
-                c = configured[key]
-                print(f"  \033[32m✔\033[0m \033[1m{p['name']:<18}\033[0m [Active: {c['model']}]")
-            else:
-                print(f"  \033[2m○ {p['name']:<18} [Set {p['env_key']} to activate]\033[0m")
-        print("\nSet environment variable or add to data/config.json to activate.\n")
+        if tier == "free":
+            print("  \033[33mTier: Free Community Edition\033[0m")
+            print("  Neural Semantic Distillation (Gemini / OpenAI / DeepSeek) is reserved for Solo & Team tiers.")
+            print("  Free Community Edition operates with the zero-latency, zero-cost Local Regex Compactor.\n")
+            print("  \033[1mTo unlock Neural LLM Distillation:\033[0m")
+            print("  1. Start 7-day free trial or upgrade at: \033[36mhttps://tokensafe.dev\033[0m")
+            print("  2. Activate your key: \033[32mtokensafe activate <KEY>\033[0m\n")
+        else:
+            configured = UniversalDistiller.get_configured_providers()
+            all_p = UniversalDistiller.PROVIDERS
+            for key, p in all_p.items():
+                if key in configured:
+                    c = configured[key]
+                    print(f"  \033[32m✔\033[0m \033[1m{p['name']:<18}\033[0m [Active: {c['model']}]")
+                else:
+                    print(f"  \033[2m○ {p['name']:<18} [Set {p['env_key']} to activate]\033[0m")
+            print("\nSet environment variable or add to data/config.json to activate.\n")
 
     elif command in ("markdown", "md", "export"):
         print(dashboard.render_markdown())

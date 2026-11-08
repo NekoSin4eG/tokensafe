@@ -12,6 +12,7 @@ import urllib.request
 import urllib.error
 from typing import Optional, Dict, Any, Tuple
 from src.distiller_cache import DistillationCache
+from src.license_manager import LicenseManager
 
 class UniversalDistiller:
     """Multi-provider semantic intent compiler supporting DeepSeek, OpenAI, and Google Gemini."""
@@ -65,6 +66,10 @@ Rules:
     @classmethod
     def get_configured_providers(cls) -> Dict[str, Dict[str, Any]]:
         """Scans environment and data/config.json for configured LLM distillation keys."""
+        tier, _ = LicenseManager.get_active_license()
+        if tier == "free":
+            return {}
+
         config_file_data = {}
         base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
         config_path = os.path.join(base_dir, "data", "config.json")
@@ -104,7 +109,12 @@ Rules:
         """
         Distills raw conversational text into an S-Expression using the best available provider.
         Priority: Explicit preferred -> Gemini -> OpenAI -> DeepSeek.
+        Requires active TokenSafe Solo or Team subscription.
         """
+        tier, _ = LicenseManager.get_active_license()
+        if tier == "free":
+            return None
+
         if not raw_text or len(raw_text.strip()) < 10:
             return None
 

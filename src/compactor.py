@@ -12,6 +12,7 @@ from typing import Dict, List, Optional, Any
 from src.tokenizer import count_tokens
 from src.distiller import UniversalDistiller
 from src.secret_redactor import SecretRedactor
+from src.license_manager import LicenseManager
 
 class PromptCompactor:
     """Transforms verbose natural language requests into compact Intent IR across major world languages."""
@@ -405,44 +406,47 @@ class PromptCompactor:
                 "tier": "PASS_THROUGH"
             }
 
-        # Tier 2: LLM Intent Distiller (Gemini / OpenAI / DeepSeek)
+        # Tier 2: Neural LLM Intent Distiller (Gemini / OpenAI / DeepSeek)
+        # Exclusive to TokenSafe Solo, Team, and Enterprise (or active trials)
         min_distill = min_distill_tokens if min_distill_tokens is not None else cls._get_min_distill_tokens()
         if enable_deepseek and original_tokens >= min_distill:
-            distilled = UniversalDistiller.distill(raw_text)
-            if distilled:
-                dist_tokens = count_tokens(distilled)
-                if dist_tokens < original_tokens:
-                    saved = original_tokens - dist_tokens
-                    pct = (saved / original_tokens * 100.0)
+            active_tier, _ = LicenseManager.get_active_license()
+            if active_tier != "free":
+                distilled = UniversalDistiller.distill(raw_text)
+                if distilled:
+                    dist_tokens = count_tokens(distilled)
+                    if dist_tokens < original_tokens:
+                        saved = original_tokens - dist_tokens
+                        pct = (saved / original_tokens * 100.0)
 
-                    # Extract action from S-Expression: e.g. "(DEBUG ..."
-                    act_match = re.match(r"^\(([A-Z]+)", distilled)
-                    action = act_match.group(1) if act_match else "TASK"
+                        # Extract action from S-Expression: e.g. "(DEBUG ..."
+                        act_match = re.match(r"^\(([A-Z]+)", distilled)
+                        action = act_match.group(1) if act_match else "TASK"
 
-                    # Extract file if present
-                    files = cls.FILE_REGEX.findall(distilled)
-                    target_file = files[0] if files else ""
+                        # Extract file if present
+                        files = cls.FILE_REGEX.findall(distilled)
+                        target_file = files[0] if files else ""
 
-                    # Extract symbol
-                    symbol = cls.extract_symbol(raw_text, target_file)
+                        # Extract symbol
+                        symbol = cls.extract_symbol(raw_text, target_file)
 
-                    # Extract traits if present in distilled S-Expression: e.g. [async redis ...]
-                    trait_match = re.search(r"\[(.*?)\]", distilled)
-                    traits = trait_match.group(1).split() if trait_match else []
+                        # Extract traits if present in distilled S-Expression: e.g. [async redis ...]
+                        trait_match = re.search(r"\[(.*?)\]", distilled)
+                        traits = trait_match.group(1).split() if trait_match else []
 
-                    return {
-                        "original_text": raw_text,
-                        "compact_text": distilled,
-                        "original_tokens": original_tokens,
-                        "compact_tokens": dist_tokens,
-                        "saved_tokens": saved,
-                        "reduction_pct": round(pct, 1),
-                        "action": action,
-                        "target_file": target_file,
-                        "symbol": symbol,
-                        "traits": traits,
-                        "tier": "DEEPSEEK_V3"
-                    }
+                        return {
+                            "original_text": raw_text,
+                            "compact_text": distilled,
+                            "original_tokens": original_tokens,
+                            "compact_tokens": dist_tokens,
+                            "saved_tokens": saved,
+                            "reduction_pct": round(pct, 1),
+                            "action": action,
+                            "target_file": target_file,
+                            "symbol": symbol,
+                            "traits": traits,
+                            "tier": "DEEPSEEK_V3"
+                        }
 
         # Tier 1: Multilingual Local Regex Compactor
         files = cls.FILE_REGEX.findall(raw_text)
