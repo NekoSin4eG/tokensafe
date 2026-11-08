@@ -1,5 +1,5 @@
 """
-DeepSeek-V3 Intent Distiller: Translates complex, conversational developer requests
+DeepSeek-Flash Intent Distiller: Translates complex, conversational developer requests
 into ultra-dense Token-Optimized Communication Protocol (TOCP) S-Expressions.
 Uses native standard-library urllib with strict timeout and zero dependencies.
 """
@@ -12,10 +12,10 @@ import urllib.error
 from typing import Optional, Dict, Any
 
 class DeepSeekDistiller:
-    """Uses DeepSeek-V3 as a high-density semantic compiler for prompts."""
+    """Uses DeepSeek-Flash as a high-density semantic compiler for prompts."""
 
     DEFAULT_URL = "https://api.deepseek.com/chat/completions"
-    DEFAULT_MODEL = "deepseek-chat"
+    DEFAULT_MODEL = "deepseek-flash"
     DEFAULT_TIMEOUT = 3.5
 
     SYSTEM_PROMPT = """You are a semantic code intent compiler for the Token-Optimized Communication Protocol (TOCP). Your task is to compress verbose, conversational developer requests into an ultra-dense S-Expression with this exact syntax:
@@ -79,7 +79,8 @@ Rules:
                 {"role": "user", "content": raw_text.strip()}
             ],
             "temperature": 0.0,
-            "max_tokens": 100
+            "max_tokens": 300,
+            "effort": "low"
         }
 
         req = urllib.request.Request(

@@ -36,10 +36,10 @@ Rules:
 
     PROVIDERS = {
         "deepseek": {
-            "name": "DeepSeek-V3",
+            "name": "DeepSeek-Flash",
             "env_key": "DEEPSEEK_API_KEY",
             "config_key": "deepseek_api_key",
-            "default_model": "deepseek-chat",
+            "default_model": "deepseek-flash",
             "endpoint": "https://api.deepseek.com/chat/completions"
         },
         "openai": {
@@ -142,8 +142,10 @@ Rules:
                 {"role": "user", "content": raw_text.strip()}
             ],
             "temperature": 0.0,
-            "max_tokens": 100
+            "max_tokens": 300
         }
+        if conf.get("provider") == "deepseek" or "deepseek" in str(conf.get("endpoint", "")).lower():
+            payload["effort"] = "low"
 
         req = urllib.request.Request(
             conf["endpoint"],
