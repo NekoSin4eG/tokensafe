@@ -132,8 +132,8 @@ Verified across 8 real-world production software engineering scenarios (131,604 
 | Tier | Price | Highlights |
 |---|---|---|
 | **Hacker (Open-Core)** | **$0** (Free Forever) | 100k tokens/mo, Local Regex compactor, use own DeepSeek / Gemini key |
-| **Solo Developer** | **$9 / month** | **7-Day Free Trial**, Unlimited Managed DeepSeek-Flash / Gemini Flash-Lite, AST Prefetcher, Output Guards |
-| **Engineering Team** | **$29 / dev / mo** | **7-Day Free Trial**, Team Budget Caps, Centralized Ledger, B2B Docker Proxy |
+| **Solo Developer** | **$9 / month** | **7-Day Free Trial**, Unlimited Compression, Subagent Firewall, Context Window Governor, Prompt Cache Normalizer, Output Guards |
+| **Engineering Team** | **$29 / dev / mo** | **7-Day Free Trial**, Everything in Solo + Friday Team ROI Digest & Leaderboards, Team Seat Quotas, Centralized Ledger, B2B Docker Proxy |
 | **Enterprise** | Custom | On-Premise Nuitka C-compiled Docker Proxy, Custom Compliance, SAML SSO |
 
 👉 **[Start your 7-Day Free Trial on our website](https://tokensafe.dev#pricing)**
