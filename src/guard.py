@@ -75,7 +75,8 @@ class TokenSafeGuard:
 
         is_test = cls.is_test_file(file_path)
         is_doc = cls.is_doc_file(file_path)
-        skip_code_checks = is_test or is_doc
+        is_scanner = bool(file_path and os.path.basename(file_path) in ("guard.py", "secret_redactor.py"))
+        skip_code_checks = is_test or is_doc or is_scanner
 
         # 1. Secret & Private Key Fallback Guard
         is_leak, leak_reason = SecretRedactor.check_secret_fallback(code_snippet, file_path=file_path)

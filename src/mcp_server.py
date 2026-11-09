@@ -26,10 +26,11 @@ from src.graph_engine import GraphEngine
 from src.tokenizer import count_tokens
 from src.agent_firewall import AgentFirewall
 from src.diff_slicer import DiffSlicer
+from src.guard import TokenSafeGuard
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
-    "version": "1.4.0"
+    "version": "1.4.1"
 }
 
 TOOLS = [
@@ -107,6 +108,18 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {}
+        }
+    },
+    {
+        "name": "guard_inspect",
+        "description": "Pre-flight security & hygiene audit for commands or code snippets. Detects secret leaks, SQL injection, TLS bypass, CORS wildcard, destructive commands, and raw grep.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "command": {"type": "string", "description": "Optional: Terminal command line to audit"},
+                "code": {"type": "string", "description": "Optional: Code snippet, replacement diff, or file content to audit"},
+                "file_path": {"type": "string", "description": "Optional: File path being written or modified"}
+            }
         }
     }
 ]
@@ -236,14 +249,98 @@ def handle_tool_call(name: str, args: dict) -> dict:
 
     elif name == "sanitize_command":
         cmd = args.get("command", "")
+        # Step 1: TokenSafe Guard security inspection
+        guard_res = TokenSafeGuard.inspect_command(cmd)
+        if guard_res.blocked:
+            tracker.record_event(
+                session_id="mcp_session",
+                event_type=f"GUARD_{guard_res.check_name}",
+                original_tokens=count_tokens(cmd),
+                optimized_tokens=0,
+                details={"cmd": cmd[:100], "reason": guard_res.reason}
+            )
+            result = {
+                "original_command": cmd,
+                "sanitized_command": None,
+                "blocked": True,
+                "check_name": guard_res.check_name,
+                "reason": guard_res.reason,
+                "recommendation": "Blocked by TokenSafe Guard. Do not execute this command."
+            }
+            return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+
+        # Step 2: Command sanitization
         new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
         result = {
             "original_command": cmd,
             "sanitized_command": new_cmd or cmd,
+            "blocked": False,
             "tokens_saved": saved,
             "reason": reason or "No modification needed"
         }
+        if guard_res.warning_only:
+            result["warning"] = guard_res.reason
         return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+
+    elif name == "guard_inspect":
+        cmd = args.get("command")
+        code = args.get("code")
+        file_path = args.get("file_path", "")
+
+        results = []
+        if cmd is not None:
+            c_res = TokenSafeGuard.inspect_command(cmd)
+            results.append({
+                "target": "command",
+                "input": cmd,
+                "allowed": not c_res.blocked,
+                "blocked": c_res.blocked,
+                "check_name": c_res.check_name,
+                "reason": c_res.reason,
+                "warning_only": c_res.warning_only
+            })
+            if c_res.blocked:
+                tracker.record_event(
+                    session_id="mcp_session",
+                    event_type=f"GUARD_{c_res.check_name}",
+                    original_tokens=count_tokens(cmd),
+                    optimized_tokens=0,
+                    details={"cmd": cmd[:100], "reason": c_res.reason}
+                )
+
+        if code is not None:
+            w_res = TokenSafeGuard.inspect_file_write(file_path, code)
+            results.append({
+                "target": "code",
+                "file_path": file_path,
+                "allowed": not w_res.blocked,
+                "blocked": w_res.blocked,
+                "check_name": w_res.check_name,
+                "reason": w_res.reason,
+                "warning_only": w_res.warning_only
+            })
+            if w_res.blocked:
+                tracker.record_event(
+                    session_id="mcp_session",
+                    event_type=f"GUARD_{w_res.check_name}",
+                    original_tokens=count_tokens(code),
+                    optimized_tokens=0,
+                    details={"target_file": os.path.basename(file_path) if file_path else "unknown", "reason": w_res.reason}
+                )
+
+        if not results:
+            return {
+                "isError": True,
+                "content": [{"type": "text", "text": "Error: Please provide 'command' or 'code' (with optional 'file_path') to inspect."}]
+            }
+
+        overall_blocked = any(r["blocked"] for r in results)
+        payload = {
+            "passed": not overall_blocked,
+            "blocked": overall_blocked,
+            "checks": results
+        }
+        return {"content": [{"type": "text", "text": json.dumps(payload, indent=2)}]}
 
     elif name == "slice_diff":
         raw_diff = args.get("diff", "")

@@ -73,6 +73,56 @@ def main():
         from src.installer import AgentInstaller
         AgentInstaller.self_update()
 
+    elif command in ("guard", "security"):
+        from src.guard import TokenSafeGuard
+        sub = args[1] if len(args) > 1 else "help"
+        if sub in ("audit", "scan"):
+            target_path = args[2] if len(args) > 2 else os.getcwd()
+            print(f"\n\033[1m\033[36m🛡️ TOKENSAFE SECURITY & HYGIENE AUDIT 🛡️\033[0m")
+            print(f"  Target: {target_path}\n")
+            violations = []
+            files_scanned = 0
+            code_exts = (".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java")
+            for root, dirs, files in os.walk(target_path):
+                dirs[:] = [d for d in dirs if d not in (".git", "node_modules", "dist", "build", ".next", ".venv", "venv", "__pycache__")]
+                for f in files:
+                    if f.endswith(code_exts):
+                        files_scanned += 1
+                        full_p = os.path.join(root, f)
+                        try:
+                            with open(full_p, "r", encoding="utf-8", errors="replace") as fp:
+                                content = fp.read()
+                            res = TokenSafeGuard.inspect_file_write(full_p, content)
+                            if res.blocked:
+                                rel_p = os.path.relpath(full_p, target_path)
+                                violations.append((rel_p, res.check_name, res.reason))
+                        except Exception:
+                            pass
+            if not violations:
+                print(f"  \033[32m✔ All {files_scanned} files passed TokenSafe Guard audit cleanly! Zero secret fallbacks or SQLi.\033[0m\n")
+            else:
+                print(f"  \033[31m✖ Found {len(violations)} security violations in {files_scanned} files:\033[0m\n")
+                for rel_p, check, reason in violations:
+                    print(f"    \033[31m• [{check}]\033[0m {rel_p}: {reason}")
+                print()
+        elif sub in ("check", "test") or len(args) > 1:
+            cmd_to_test = " ".join(args[2:]) if sub in ("check", "test") and len(args) > 2 else " ".join(args[1:])
+            print(f"\n\033[1m\033[36m🛡️ TOKENSAFE COMMAND GUARD CHECK 🛡️\033[0m\n")
+            print(f"  Command: \033[1m{cmd_to_test}\033[0m")
+            res = TokenSafeGuard.inspect_command(cmd_to_test)
+            if res.blocked:
+                print(f"  Status:  \033[31m\033[1mBLOCKED\033[0m [{res.check_name}]")
+                print(f"  Reason:  {res.reason}\n")
+            elif res.warning_only:
+                print(f"  Status:  \033[33m\033[1mWARNING\033[0m [{res.check_name}]")
+                print(f"  Notice:  {res.reason}\n")
+            else:
+                print(f"  Status:  \033[32m\033[1mALLOWED\033[0m (Command is safe and policy-compliant)\n")
+        else:
+            print("\nUsage:")
+            print("  tokensafe guard \"<command>\"       Audit a terminal command line")
+            print("  tokensafe guard audit [path]      Recursively audit source files for secrets & vulnerabilities\n")
+
     elif command == "proxy":
         from src.proxy import run_proxy
         port = int(args[1]) if len(args) > 1 else 8765

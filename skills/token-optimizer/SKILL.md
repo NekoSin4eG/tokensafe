@@ -53,6 +53,7 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
 | `tokensafe:sanitize_command` | Intercepts shell commands to strip lockfiles, cap unbounded git logs, and quiet test tracebacks. | Saves **10k-50k tokens** per run |
 | `tokensafe:slice_diff` | Slices unified git diffs, eliminating lockfiles and minimizing hunk context lines. | **-50% to -80%** diff size |
 | `tokensafe:compress_prompt` | Compresses verbose user instructions into lean TOCP S-expressions via DeepSeek/Regex. | **-40% to -65%** prompt tokens |
+| `tokensafe:guard_inspect` | Pre-flight security & hygiene audit for commands or code snippets (secrets, TLS, SQLi, raw grep). | **Zero-Risk** pre-flight gate |
 | `tokensafe:get_token_savings_metrics` | Returns cumulative analytics: tokens saved, context ratio, USD value, and optimization source breakdown. | Persistent SQLite analytics |
 
 ---
@@ -95,6 +96,20 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
 }
 ```
 *Returns all exported interfaces and types without reading hundreds of module files.*
+
+### 4. Pre-flight Security & Hygiene Audit
+```json
+{
+  "ServerName": "tokensafe",
+  "ToolName": "guard_inspect",
+  "Arguments": {
+    "command": "git add .env",
+    "code": "const key = process.env.JWT_SECRET || 'hardcoded_secret';",
+    "file_path": "src/auth.ts"
+  }
+}
+```
+*Validates commands and code snippets before execution; returns structured pass/block verdict with check_name.*
 
 ---
 
@@ -152,6 +167,8 @@ tokensafe install --all       # Automatically configure all 9 detected agent env
 tokensafe update              # One-click self-update & multi-agent re-synchronization
 
 # System Health & Hygiene
+tokensafe guard "<command>"   # Pre-flight check command safety (rm, secrets, grep)
+tokensafe guard audit [path]  # Recursively audit project files for security violations
 tokensafe doctor              # Audit MCP tool overhead and token tax
 tokensafe prune               # Compact metrics database and prune old events
 tokensafe vacuum              # Reclaim SQLite database disk space
