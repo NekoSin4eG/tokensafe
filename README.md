@@ -13,6 +13,7 @@
 <p align="center">
   <a href="https://github.com/tokensafe-dev/tokensafe/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/tokensafe-dev/tokensafe/test.yml?branch=main&label=tests&style=flat-square" alt="Tests"></a>
   <a href="https://www.npmjs.com/package/tokensafe"><img src="https://img.shields.io/npm/v/tokensafe.svg?color=CB3837&style=flat-square" alt="npm"></a>
+  <a href="https://www.npmjs.com/package/tokensafe"><img src="https://img.shields.io/npm/dw/tokensafe.svg?color=10B981&label=npm%20downloads&style=flat-square" alt="npm downloads"></a>
   <a href="https://pypi.org/project/tokensafe/"><img src="https://img.shields.io/pypi/v/tokensafe.svg?color=3775A9&style=flat-square" alt="PyPI"></a>
   <a href="https://github.com/tokensafe-dev/tokensafe/stargazers"><img src="https://img.shields.io/github/stars/tokensafe-dev/tokensafe?style=flat-square&color=yellow" alt="Stars"></a>
   <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-emerald.svg?style=flat-square" alt="License"></a>
