@@ -16,7 +16,7 @@ import urllib.request
 import urllib.error
 from typing import Dict, Any, Optional, Tuple
 
-CURRENT_VERSION = "1.4.6"
+CURRENT_VERSION = "1.4.7"
 CACHE_TTL = 86400  # 24 hours
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -317,18 +317,51 @@ class VersionChecker:
         force: bool = False
     ):
         """
-        Dispatches notify_os_update in a background non-blocking thread.
+        Dispatches notify_os_update in a detached, non-blocking background OS process.
+        Avoids in-process daemon threads to prevent OpenSSL cleanup SIGSEGV races during fast CLI exit.
         """
-        def _bg():
-            try:
-                cls.notify_os_update(
-                    current_version=current_version,
-                    license_key=license_key,
-                    force=force,
-                    timeout=1.5
-                )
-            except Exception:
-                pass
+        now = int(time.time())
+        cached = cls.load_cache()
+        if not force and cached:
+            checked_at = cached.get("checked_at", 0)
+            update_available = cached.get("update_available", False)
+            latest = cached.get("latest_version", current_version)
+            last_notified_ver = cached.get("last_os_notify_version", "")
+            last_notified_at = cached.get("last_os_notify_at", 0)
 
-        t = threading.Thread(target=_bg, daemon=True)
-        t.start()
+            # If cache is valid and no update is available, skip completely
+            if now - checked_at < CACHE_TTL and not update_available:
+                return
+
+            # If update is available but user was already notified within 24h, skip
+            if update_available and last_notified_ver == latest and (now - last_notified_at < CACHE_TTL):
+                return
+
+        try:
+            flags = 0
+            if os.name == "nt":
+                flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            script_path = os.path.abspath(__file__)
+            cmd = [sys.executable, script_path, "--check-bg"]
+            if force:
+                cmd.append("--force")
+            subprocess.Popen(
+                cmd,
+                cwd=PROJECT_ROOT,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=(os.name != "nt"),
+                creationflags=flags
+            )
+        except Exception:
+            pass
+
+
+if __name__ == "__main__":
+    if "--check-bg" in sys.argv:
+        try:
+            is_force = "--force" in sys.argv
+            VersionChecker.notify_os_update(force=is_force)
+        except Exception:
+            pass

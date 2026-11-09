@@ -236,7 +236,7 @@ class TelemetrySync:
             total_sent = 0
             headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "TokenSafe-Sync/1.4.6"
+                "User-Agent": "TokenSafe-Sync/1.4.7"
             }
             if active_key:
                 headers["Authorization"] = f"Bearer {active_key}"
@@ -333,15 +333,7 @@ class TelemetrySync:
                 creationflags=flags
             )
         except Exception:
-            # Fallback to daemon thread if process spawn fails
-            def _worker():
-                try:
-                    cls.sync(timeout=2.0)
-                except Exception:
-                    pass
-
-            t = threading.Thread(target=_worker, daemon=True)
-            t.start()
+            pass
 
 
 if __name__ == "__main__":

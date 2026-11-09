@@ -125,6 +125,22 @@ class TestVersionChecker(unittest.TestCase):
             self.assertTrue(res)
             self.assertTrue(mock_dialog.called)
 
+    def test_notify_os_update_background_spawns_process(self):
+        from unittest.mock import patch
+        mock_data = {
+            "checked_at": int(time.time()) - 100000,
+            "client_version": "1.2.0",
+            "latest_version": "1.3.0",
+            "update_available": True
+        }
+        VersionChecker.save_cache(mock_data)
+        with patch("subprocess.Popen") as mock_popen:
+            VersionChecker.notify_os_update_background(current_version="1.2.0", force=True)
+            self.assertTrue(mock_popen.called)
+            args, kwargs = mock_popen.call_args
+            self.assertIn("--check-bg", args[0])
+            self.assertIn("--force", args[0])
+
 
 if __name__ == "__main__":
     unittest.main()
