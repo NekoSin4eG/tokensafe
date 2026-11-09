@@ -94,6 +94,18 @@ class TestSharedTeamCache(unittest.TestCase):
         team_id_member = CloudBackendService.resolve_team_id(member_key)
         self.assertEqual(team_id_member, "cto@test.com")
 
+        # 4. Revoked seat license should be rejected
+        revoked_key = LicenseManager.generate_license("team", "dev2@test.com", duration_days=30)
+        with get_db_connection() as conn:
+            conn.execute("""
+                INSERT INTO licenses (license_key, customer_email, tier, is_trial, is_seat, parent_email, status, created_at, expires_at)
+                VALUES (?, 'dev2@test.com', 'team', 0, 1, 'cto@test.com', 'revoked', 1000, 2000)
+            """, (revoked_key,))
+            conn.commit()
+
+        team_id_revoked = CloudBackendService.resolve_team_id(revoked_key)
+        self.assertIsNone(team_id_revoked)
+
     def test_client_skips_when_not_team(self):
         # If user is free or solo, TeamCache.get returns None immediately with 0 network calls
         with patch.object(TeamCache, "_is_team_tier", return_value=(False, "")):
@@ -115,6 +127,23 @@ class TestSharedTeamCache(unittest.TestCase):
         with patch.object(TeamCache, "_is_team_tier", return_value=(True, "TS2.fake.key")):
             res = TeamCache.get("PROMPT", "Fix 401 JWT error in auth.ts")
             self.assertEqual(res, '(DEBUG auth.ts [jwt] "fix 401 error")')
+
+    @patch("urllib.request.urlopen")
+    def test_client_hits_team_cache_with_server_cached_value_field(self, mock_urlopen):
+        # Verify compatibility when server responds with 'cached_value' field
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps({
+            "hit": True,
+            "cached_value": '(REFACTOR db.ts [conn] "pool connection")',
+            "hit_count": 5
+        }).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+        mock_urlopen.return_value = mock_resp
+
+        with patch.object(TeamCache, "_is_team_tier", return_value=(True, "TS2.fake.key")):
+            res = TeamCache.get("PROMPT", "Refactor db connection to use pool")
+            self.assertEqual(res, '(REFACTOR db.ts [conn] "pool connection")')
 
     @patch("urllib.request.urlopen")
     def test_client_graceful_timeout_fallback(self, mock_urlopen):

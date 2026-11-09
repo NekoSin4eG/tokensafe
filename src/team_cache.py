@@ -27,14 +27,22 @@ class TeamCache:
     def _is_team_tier(cls) -> Tuple[bool, str]:
         """Checks if current active license belongs to a Team tier subscription."""
         key = os.environ.get("TOKENSAFE_LICENSE_KEY", "").strip()
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        lic_file = os.path.join(base_dir, "data", "license.json")
-        if not key and os.path.exists(lic_file):
-            try:
-                with open(lic_file, "r", encoding="utf-8") as f:
-                    key = json.load(f).get("license_key", "").strip()
-            except Exception:
-                pass
+        if not key:
+            candidate_paths = [
+                os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "license.json"),
+                os.path.join(os.getcwd(), "data", "license.json"),
+                os.path.expanduser("~/.tokensafe/license.json")
+            ]
+            for lic_file in candidate_paths:
+                if os.path.exists(lic_file):
+                    try:
+                        with open(lic_file, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            key = data.get("license_key", "").strip()
+                            if key:
+                                break
+                    except Exception:
+                        pass
 
         if not key:
             return False, ""
@@ -75,8 +83,9 @@ class TeamCache:
             with urllib.request.urlopen(req, timeout=cls.DEFAULT_TIMEOUT) as resp:
                 if resp.status == 200:
                     data = json.loads(resp.read().decode("utf-8"))
-                    if data.get("hit") and data.get("value"):
-                        return data["value"]
+                    val = data.get("value") or data.get("cached_value")
+                    if data.get("hit") and val:
+                        return val
         except Exception:
             # Graceful network degradation: fall back to local computation without error
             return None
