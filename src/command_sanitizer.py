@@ -126,4 +126,11 @@ class CommandSanitizer:
                 est_saved = 2500
                 return new_cmd, est_saved, "Sanitized grep directories and capped output to 30 matches"
 
+        # 7. ls command optimization (Replace verbose permissions/timestamps with compact single-column format)
+        if re.search(r"\bls\b", cmd):
+            if re.search(r"\bls\s+-[a-zA-Z]*(l|a)[a-zA-Z]*\b", cmd):
+                new_cmd = re.sub(r"\bls\s+-[a-zA-Z]+\b", "ls -1 -p", cmd)
+                est_saved = 380
+                return new_cmd, est_saved, "Replaced verbose ls flags with compact, secret-safe format (-1 -p)"
+
         return None, 0, ""

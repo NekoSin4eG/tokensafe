@@ -191,5 +191,99 @@ public class AccountManager {
         if skel_path and os.path.exists(skel_path):
             os.remove(skel_path)
 
+    def test_multiline_arrow_functions_and_ternary_expressions(self):
+        code = """
+// 1. Ternary boolean expression in parentheses must NOT be treated as a function
+const gramBalanceDeduct = (useBalanceForGram && userBalance > 0)
+  ? Math.min(userBalance, totalCost)
+  : 0;
+
+// 2. Ternary returning object literal must NOT fold object into /* ... */
+const serverConfig = (isProd && isReady)
+  ? { host: 'api.prod.com', port: 443 }
+  : { host: 'api.dev.com', port: 8080 };
+
+// 3. Arrow function with return type annotation
+const createPayload = (targetUrl: string, currency?: string): PayloadType => {
+  const result = validate(targetUrl);
+  return { targetUrl, currency, result };
+};
+
+// 4. Arrow function with multi-line destructuring parameters
+export const ComplexModal: React.FC<ModalProps> = ({
+  isOpen,
+  onClose,
+  userBalance,
+}) => {
+  const [active, setActive] = useState(false);
+  return <div className="modal" />;
+};
+"""
+        # Skeletons all
+        skel = Skeletonizer.skeletonize_code(code, ".tsx")
+        # Ensure ternary expressions are 100% intact
+        self.assertIn("const gramBalanceDeduct = (useBalanceForGram && userBalance > 0)", skel)
+        self.assertIn("? Math.min(userBalance, totalCost)", skel)
+        self.assertIn("const serverConfig = (isProd && isReady)", skel)
+        self.assertIn("{ host: 'api.prod.com', port: 443 }", skel)
+
+        # Ensure arrow functions are folded
+        self.assertIn("const createPayload = (targetUrl: string, currency?: string): PayloadType => { /* ... */ };", skel)
+        self.assertIn("export const ComplexModal: React.FC<ModalProps> = ({", skel)
+        self.assertIn("}) => { /* ... */ };", skel)
+        self.assertNotIn("const [active, setActive] = useState", skel)
+
+    def test_css_scss_less_design_tokens(self):
+        css_code = """
+:root {
+  --primary-color: #3b82f6;
+  --secondary-color: #10b981;
+  --font-base: 'Inter', sans-serif;
+}
+
+@theme {
+  --color-brand: #6366f1;
+  --spacing-header: 4rem;
+}
+
+$scss-primary: #3b82f6;
+
+.btn-primary {
+  background-color: var(--primary-color);
+  color: #ffffff;
+  padding: 8px 16px;
+  border-radius: 4px;
+}
+
+.btn-secondary {
+  background-color: var(--secondary-color);
+  color: #ffffff;
+}
+
+@media (max-width: 768px) {
+  .btn-primary {
+    width: 100%;
+  }
+  .sidebar {
+    display: none;
+  }
+}
+"""
+        # Whole-file skeleton: design tokens (:root, @theme) must be preserved in full
+        skel_all = Skeletonizer.skeletonize_code(css_code, ".css")
+        self.assertIn(":root {", skel_all)
+        self.assertIn("--primary-color: #3b82f6;", skel_all)
+        self.assertIn("@theme {", skel_all)
+        self.assertIn("--color-brand: #6366f1;", skel_all)
+        self.assertIn(".btn-primary { /* ... */ }", skel_all)
+        self.assertIn(".btn-secondary { /* ... */ }", skel_all)
+        self.assertIn("@media (max-width: 768px) {", skel_all)
+        self.assertIn(".sidebar { /* ... */ }", skel_all)
+
+        # Graph-guided symbol skeleton: target .btn-primary preserved, .btn-secondary folded
+        skel_target = Skeletonizer.skeletonize_code(css_code, ".css", keep_symbols={"btn-primary"})
+        self.assertIn("padding: 8px 16px;", skel_target)
+        self.assertIn(".btn-secondary { /* ... */ }", skel_target)
+
 if __name__ == "__main__":
     unittest.main()

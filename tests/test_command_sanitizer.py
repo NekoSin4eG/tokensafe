@@ -55,5 +55,17 @@ class TestCommandSanitizer(unittest.TestCase):
         self.assertTrue(new_cmd.endswith("| head -n 30"))
         self.assertIn("--exclude='*.lock'", new_cmd)
 
+    def test_ls_command_sanitization(self):
+        for cmd in ("ls -la frontend", "ls -lah", "ls -l frontend/src", "ls -al"):
+            new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
+            self.assertIsNotNone(new_cmd)
+            self.assertIn("ls -1 -p", new_cmd)
+            self.assertGreater(saved, 300)
+
+        # Unflagged ls is unchanged
+        cmd_clean = "ls frontend"
+        new_cmd, saved, reason = CommandSanitizer.sanitize(cmd_clean)
+        self.assertIsNone(new_cmd)
+
 if __name__ == "__main__":
     unittest.main()

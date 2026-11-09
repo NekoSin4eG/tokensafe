@@ -51,5 +51,13 @@ class TestMCPServer(unittest.TestCase):
         self.assertTrue(data.get("blocked"))
         self.assertEqual(data["checks"][0]["check_name"], "SECRET_FALLBACK")
 
+    def test_list_dir_mcp(self):
+        res = handle_tool_call("list_dir", {"path": "src", "depth": 2})
+        self.assertNotIn("isError", res)
+        text = res["content"][0]["text"]
+        self.assertIn("📁 **src/**", text)
+        self.assertIn("skeletonizer.py", text)
+        self.assertIn("command_sanitizer.py", text)
+
 if __name__ == "__main__":
     unittest.main()

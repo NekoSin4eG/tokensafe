@@ -36,13 +36,31 @@ RUST_FN_REGEX = re.compile(
 )
 
 # 4. Arrow function / React component: const Foo = (...) => { or export const Foo: React.FC<Props> = (...) => {
+# Supports single-line return types, generics, React.memo, useCallback
 ARROW_FN_REGEX = re.compile(
-    r'^(?:export\s+)?(?:const|let|var)\s+([a-zA-Z0-9_$]+)(?:\s*:\s*[^=]+)?\s*=\s*(?:async\s*)?(?:React\.(?:memo|forwardRef)\s*\()?(?:useCallback\s*\()?(?:(?:\([^)]*\)|[a-zA-Z0-9_$]+)\s*=>|function\b)'
+    r'^(?:export\s+)?(?:default\s+)?(?:const|let|var)\s+([a-zA-Z0-9_$]+)'
+    r'(?:\s*:\s*[^=]+)?\s*=\s*'
+    r'(?:async\s*)?'
+    r'(?:React\.(?:memo|forwardRef)\s*\()?'
+    r'(?:useCallback\s*\()?'
+    r'(?:'
+      r'(?:<[^>]+>\s*)?'
+      r'(?:\([^)]*\)|[a-zA-Z0-9_$]+)'
+      r'(?:\s*:\s*[^=>]+)?'
+      r'\s*=>'
+      r'|function\b'
+    r')'
 )
 
 # 4b. Multi-line arrow function start: const Foo: React.FC<Props> = (
 ARROW_MULTILINE_START = re.compile(
-    r'^(?:export\s+)?(?:const|let|var)\s+([a-zA-Z0-9_$]+)(?:\s*:\s*[^=]+)?\s*=\s*(?:async\s*)?(?:React\.(?:memo|forwardRef)\s*\()?(?:useCallback\s*\()?\s*\('
+    r'^(?:export\s+)?(?:default\s+)?(?:const|let|var)\s+([a-zA-Z0-9_$]+)'
+    r'(?:\s*:\s*[^=]+)?\s*=\s*'
+    r'(?:async\s*)?'
+    r'(?:React\.(?:memo|forwardRef)\s*\()?'
+    r'(?:useCallback\s*\()?\s*'
+    r'(?:<[^>]+>\s*)?'
+    r'\('
 )
 
 # 5. Method definition (Java, C#, C++, TS, PHP)
@@ -105,6 +123,8 @@ class Skeletonizer:
             ".go", ".java", ".rs", ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".cs", ".php", ".kt", ".swift"
         ):
             return cls._skeletonize_braces(code, ext, keep_symbols=keep_symbols)
+        elif ext in (".css", ".scss", ".sass", ".less"):
+            return cls._skeletonize_css(code, ext, keep_symbols=keep_symbols)
         return code
 
     @classmethod
@@ -165,7 +185,9 @@ class Skeletonizer:
 
         m = ARROW_MULTILINE_START.match(line_clean)
         if m and not line_clean.endswith(";"):
-            return (m.group(1), "arrow_multiline")
+            # Multi-line parameter list MUST have unclosed parentheses on this line (unless '=>' is present)
+            if line_clean.count("(") > line_clean.count(")") or "=>" in line_clean:
+                return (m.group(1), "arrow_multiline")
 
         m = METHOD_REGEX.match(line_clean)
         if m:
@@ -198,12 +220,13 @@ class Skeletonizer:
         pending_header_lines = []
         pending_name = None
         pending_kind = None
+        arrow_seen = False
 
         comment_token = "/* ... */" if ext != ".py" else "..."
 
         for line in lines:
             raw_line = line
-            line_clean = line.strip()
+            clean_line = lexer.clean_line(line).strip()
 
             # 1. If currently skipping a folded function body
             if in_folding:
@@ -224,58 +247,141 @@ class Skeletonizer:
             # 2. If accumulating a multi-line header
             if pending_header_lines:
                 pending_header_lines.append(raw_line)
-                if "=>" in line_clean or "{" in line_clean:
-                    fn_name = pending_name
-                    should_keep = keep_symbols is not None and fn_name in keep_symbols
 
-                    last_brace_idx = raw_line.rfind("{")
-                    if last_brace_idx != -1:
-                        sig_lines = pending_header_lines[:-1] + [raw_line[:last_brace_idx]]
+                if pending_kind == "arrow_multiline":
+                    if "=>" in clean_line:
+                        arrow_seen = True
+
+                    has_body_brace = False
+                    body_brace_idx = -1
+                    if arrow_seen:
+                        if "=>" in clean_line:
+                            arrow_idx = clean_line.find("=>")
+                            body_brace_idx = clean_line.find("{", arrow_idx + 2)
+                            if body_brace_idx != -1:
+                                has_body_brace = True
+                        elif "{" in clean_line:
+                            body_brace_idx = clean_line.find("{")
+                            has_body_brace = True
+
+                    if has_body_brace:
+                        fn_name = pending_name
+                        should_keep = keep_symbols is not None and fn_name in keep_symbols
+
+                        sig_lines = pending_header_lines[:-1] + [raw_line[:body_brace_idx]]
                         temp_lexer = BraceLexer()
                         sig_open = sum(temp_lexer.count_braces(sl)[0] for sl in sig_lines)
                         sig_close = sum(temp_lexer.count_braces(sl)[1] for sl in sig_lines)
                         base_depth = current_depth + (sig_open - sig_close)
-                    else:
-                        base_depth = current_depth
 
-                    if should_keep:
+                        if should_keep:
+                            out.extend(pending_header_lines)
+                            for phl in pending_header_lines:
+                                op, cl = lexer.count_braces(phl)
+                                current_depth += op - cl
+                        else:
+                            folded_head = raw_line[:body_brace_idx] + f"{{ {comment_token} }}"
+                            if raw_line.rstrip().endswith(";"):
+                                folded_head += ";"
+                            elif raw_line.rstrip().endswith(","):
+                                folded_head += ","
+                            pending_header_lines[-1] = folded_head
+                            out.extend(pending_header_lines)
+                            fold_depth = base_depth
+                            current_depth = base_depth + 1
+                            in_folding = True
+
+                        pending_header_lines = []
+                        pending_name = None
+                        pending_kind = None
+                        arrow_seen = False
+                        continue
+                    elif ";" in clean_line and not has_body_brace:
+                        # Non-function variable assignment or ternary expression (e.g. gramBalanceDeduct)
                         out.extend(pending_header_lines)
                         for phl in pending_header_lines:
                             op, cl = lexer.count_braces(phl)
                             current_depth += op - cl
-                    else:
-                        folded_last_line = re.sub(r'\{.*$', f'{{ {comment_token} }}', raw_line)
-                        pending_header_lines[-1] = folded_last_line
+                        pending_header_lines = []
+                        pending_name = None
+                        pending_kind = None
+                        arrow_seen = False
+                        continue
+                    elif len(pending_header_lines) > 25:
                         out.extend(pending_header_lines)
-                        fold_depth = base_depth
-                        current_depth = base_depth + 1
-                        in_folding = True
-
-                    pending_header_lines = []
-                    pending_name = None
-                    pending_kind = None
-                    continue
-                elif ";" in line_clean and not ("{" in line_clean or "=>" in line_clean):
-                    out.extend(pending_header_lines)
-                    for phl in pending_header_lines:
-                        op, cl = lexer.count_braces(phl)
-                        current_depth += op - cl
-                    pending_header_lines = []
-                    pending_name = None
-                    pending_kind = None
-                    continue
+                        for phl in pending_header_lines:
+                            op, cl = lexer.count_braces(phl)
+                            current_depth += op - cl
+                        pending_header_lines = []
+                        pending_name = None
+                        pending_kind = None
+                        arrow_seen = False
+                        continue
+                    else:
+                        continue
                 else:
-                    continue
+                    # Non-arrow multiline (function foo(, method, func)
+                    if "{" in clean_line:
+                        body_brace_idx = raw_line.rfind("{")
+                        fn_name = pending_name
+                        should_keep = keep_symbols is not None and fn_name in keep_symbols
+
+                        sig_lines = pending_header_lines[:-1] + [raw_line[:body_brace_idx]]
+                        temp_lexer = BraceLexer()
+                        sig_open = sum(temp_lexer.count_braces(sl)[0] for sl in sig_lines)
+                        sig_close = sum(temp_lexer.count_braces(sl)[1] for sl in sig_lines)
+                        base_depth = current_depth + (sig_open - sig_close)
+
+                        if should_keep:
+                            out.extend(pending_header_lines)
+                            for phl in pending_header_lines:
+                                op, cl = lexer.count_braces(phl)
+                                current_depth += op - cl
+                        else:
+                            folded_last_line = re.sub(r'\{.*$', f'{{ {comment_token} }}', raw_line)
+                            pending_header_lines[-1] = folded_last_line
+                            out.extend(pending_header_lines)
+                            fold_depth = base_depth
+                            current_depth = base_depth + 1
+                            in_folding = True
+
+                        pending_header_lines = []
+                        pending_name = None
+                        pending_kind = None
+                        continue
+                    elif ";" in clean_line and "{" not in clean_line:
+                        out.extend(pending_header_lines)
+                        for phl in pending_header_lines:
+                            op, cl = lexer.count_braces(phl)
+                            current_depth += op - cl
+                        pending_header_lines = []
+                        pending_name = None
+                        pending_kind = None
+                        continue
+                    else:
+                        continue
 
             # 3. Check for function start
             fn_info = cls._extract_fn(raw_line)
             if fn_info:
                 name, kind = fn_info
 
-                if (kind in ('arrow_multiline', 'arrow_fn')) and "=>" not in raw_line:
+                if kind == 'arrow_multiline':
+                    clean = lexer.clean_line(raw_line)
+                    if "=>" in clean and clean.find("{") > clean.find("=>"):
+                        kind = 'arrow_fn'
+                    else:
+                        pending_header_lines = [raw_line]
+                        pending_name = name
+                        pending_kind = 'arrow_multiline'
+                        arrow_seen = "=>" in clean
+                        continue
+
+                if kind == 'arrow_fn' and "=>" not in raw_line:
                     pending_header_lines = [raw_line]
                     pending_name = name
                     pending_kind = 'arrow_multiline'
+                    arrow_seen = False
                     continue
 
                 if "{" in raw_line:
@@ -287,6 +393,8 @@ class Skeletonizer:
                         current_depth += open_b - close_b
                     else:
                         folded_line = re.sub(r'\{.*$', f'{{ {comment_token} }}', raw_line)
+                        if raw_line.rstrip().endswith(";"):
+                            folded_line += ";"
                         out.append(folded_line)
                         open_b_head, _ = lexer.count_braces(raw_line[:raw_line.find("{") + 1])
                         fold_depth = current_depth + open_b_head - 1
@@ -296,6 +404,137 @@ class Skeletonizer:
                     continue
 
             # 4. Normal line
+            out.append(raw_line)
+            open_b, close_b = lexer.count_braces(raw_line)
+            current_depth += open_b - close_b
+
+        return "\n".join(out)
+
+    @classmethod
+    def _skeletonize_css(cls, code: str, ext: str, keep_symbols: Optional[Set[str]] = None) -> str:
+        """
+        Specialized CSS / SCSS / SASS / LESS AST skeletonizer.
+        Design tokens (:root, @theme, html, body, $variables, @variables) are ALWAYS preserved in full
+        so AI agents always possess the complete project design palette and variables.
+        Container at-rules (@media, @supports, @container, @layer) preserve structure and track depth.
+        Component selectors and mixins are folded into '{ /* ... */ }' unless matching keep_symbols.
+        """
+        lines = code.splitlines()
+        out = []
+        lexer = BraceLexer()
+        in_folding = False
+        fold_depth = 0
+        current_depth = 0
+
+        CONTAINER_RULES = ("@media", "@supports", "@container", "@layer", "@document")
+        TOKEN_SELECTORS = (":root", "@theme", "html", "body")
+
+        pending_sel = []
+
+        for line in lines:
+            raw_line = line
+            clean_line = lexer.clean_line(line).strip()
+
+            if in_folding:
+                open_b, close_b = lexer.count_braces(raw_line)
+                current_depth += open_b - close_b
+                if current_depth <= fold_depth:
+                    in_folding = False
+                    trailing = ""
+                    idx = raw_line.rfind("}")
+                    if idx != -1 and idx < len(raw_line) - 1:
+                        suffix = raw_line[idx + 1:].strip()
+                        if suffix.startswith(";") or suffix.startswith(","):
+                            trailing = suffix
+                    if trailing and out:
+                        out[-1] = out[-1] + trailing
+                continue
+
+            if pending_sel:
+                pending_sel.append(raw_line)
+                if "{" in clean_line:
+                    full_sel = " ".join(s.strip() for s in pending_sel)
+                    brace_idx = raw_line.find("{")
+                    is_container = any(full_sel.strip().startswith(c) for c in CONTAINER_RULES)
+                    is_token = any(ts in full_sel for ts in TOKEN_SELECTORS)
+
+                    matched_symbol = False
+                    if keep_symbols:
+                        for sym in keep_symbols:
+                            clean_sym = sym.lstrip(".#")
+                            if clean_sym and (clean_sym in full_sel or sym in full_sel):
+                                matched_symbol = True
+                                break
+
+                    should_keep = is_container or is_token or matched_symbol
+                    if should_keep:
+                        out.extend(pending_sel)
+                        for pl in pending_sel:
+                            op, cl = lexer.count_braces(pl)
+                            current_depth += op - cl
+                    else:
+                        head = raw_line[:brace_idx] + "{ /* ... */ }"
+                        if raw_line.rstrip().endswith(";"):
+                            head += ";"
+                        pending_sel[-1] = head
+                        out.extend(pending_sel)
+                        open_b_head, _ = lexer.count_braces(raw_line[:brace_idx + 1])
+                        fold_depth = current_depth + open_b_head - 1
+                        open_b, close_b = lexer.count_braces(raw_line)
+                        current_depth += open_b - close_b
+                        if current_depth > fold_depth:
+                            in_folding = True
+                    pending_sel = []
+                elif ";" in clean_line and "{" not in clean_line:
+                    out.extend(pending_sel)
+                    for pl in pending_sel:
+                        op, cl = lexer.count_braces(pl)
+                        current_depth += op - cl
+                    pending_sel = []
+                continue
+
+            if "{" in clean_line:
+                is_container = any(clean_line.startswith(c) for c in CONTAINER_RULES)
+                is_token = any(ts in clean_line for ts in TOKEN_SELECTORS)
+
+                matched_symbol = False
+                if keep_symbols:
+                    for sym in keep_symbols:
+                        clean_sym = sym.lstrip(".#")
+                        if clean_sym and (clean_sym in clean_line or sym in clean_line):
+                            matched_symbol = True
+                            break
+
+                should_keep = is_container or is_token or matched_symbol
+                open_b, close_b = lexer.count_braces(raw_line)
+
+                if should_keep:
+                    out.append(raw_line)
+                    current_depth += open_b - close_b
+                else:
+                    brace_idx = raw_line.find("{")
+                    folded = raw_line[:brace_idx] + "{ /* ... */ }"
+                    if raw_line.rstrip().endswith(";"):
+                        folded += ";"
+                    out.append(folded)
+                    open_b_head, _ = lexer.count_braces(raw_line[:brace_idx + 1])
+                    fold_depth = current_depth + open_b_head - 1
+                    current_depth += open_b - close_b
+                    if current_depth > fold_depth:
+                        in_folding = True
+                continue
+
+            # Closing braces or standalone operators
+            if clean_line.startswith("}"):
+                out.append(raw_line)
+                open_b, close_b = lexer.count_braces(raw_line)
+                current_depth += open_b - close_b
+                continue
+
+            if clean_line and not clean_line.endswith(";") and not clean_line.startswith("//") and not clean_line.startswith("/*") and not clean_line.startswith("*"):
+                pending_sel = [raw_line]
+                continue
+
             out.append(raw_line)
             open_b, close_b = lexer.count_braces(raw_line)
             current_depth += open_b - close_b

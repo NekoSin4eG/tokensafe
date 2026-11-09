@@ -8,6 +8,7 @@ import sys
 import os
 import json
 import traceback
+import fnmatch
 from typing import Tuple, Optional
 
 # Ensure project root in sys.path
@@ -30,7 +31,7 @@ from src.guard import TokenSafeGuard
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
-    "version": "1.4.2"
+    "version": "1.4.3"
 }
 
 TOOLS = [
@@ -121,8 +122,117 @@ TOOLS = [
                 "file_path": {"type": "string", "description": "Optional: File path being written or modified"}
             }
         }
+    },
+    {
+        "name": "list_dir",
+        "description": "Returns a clean, token-efficient directory tree up to depth N without permissions, timestamps, or ignored folders (node_modules, .git, dist, .env). Replaces verbose ls -la.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "path": {"type": "string", "description": "Path to the directory (relative to project root or absolute)"},
+                "depth": {"type": "integer", "description": "Maximum traversal depth (default: 2, max: 4)"},
+                "max_entries": {"type": "integer", "description": "Maximum entries to display before pruning (default: 80)"}
+            },
+            "required": ["path"]
+        }
     }
 ]
+
+def format_file_size(size_bytes: int) -> str:
+    if size_bytes < 1024:
+        return f"{size_bytes} B"
+    elif size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    else:
+        return f"{size_bytes / (1024 * 1024):.1f} MB"
+
+def build_dir_tree(dir_path: str, max_depth: int = 2, max_entries: int = 80) -> str:
+    """
+    Builds a clean, compact markdown tree for dir_path.
+    Ignores heavy folders (node_modules, dist, .git, etc.) and redacts sensitive files (.env*).
+    """
+    IGNORE_DIRS = {
+        'node_modules', '.git', 'dist', 'build', '.next', 'coverage',
+        '__pycache__', '.turbo', '.vite', '.output', '.bunny', 'data',
+        '.venv', 'venv', '.cache', '.idea', '.vscode'
+    }
+    IGNORE_FILES = {
+        '*.lock', '*.lockb', '*.map', '.DS_Store', 'Thumbs.db', 'package-lock.json',
+        'pnpm-lock.yaml', 'yarn.lock', 'Cargo.lock', 'composer.lock'
+    }
+    SECRET_FILES = {
+        '.env', '.env.local', '.env.production', '.env.staging', '.env.development'
+    }
+
+    if not os.path.exists(dir_path):
+        return f"Error: Directory not found: {dir_path}"
+    if not os.path.isdir(dir_path):
+        return f"Error: Path is not a directory: {dir_path}"
+
+    base_name = os.path.basename(os.path.abspath(dir_path)) or dir_path
+    lines = [f"📁 **{base_name}/** (max depth: {max_depth})"]
+    entries_count = 0
+
+    def _traverse(curr_dir: str, prefix: str, current_depth: int):
+        nonlocal entries_count
+        if current_depth > max_depth or entries_count >= max_entries:
+            return
+
+        try:
+            items = sorted(os.listdir(curr_dir))
+        except Exception as e:
+            lines.append(f"{prefix}└── [Permission Denied: {e}]")
+            return
+
+        dirs = []
+        files = []
+        for it in items:
+            if it.startswith('.') and it not in SECRET_FILES and it != '.gitignore':
+                continue
+            full_p = os.path.join(curr_dir, it)
+            if os.path.isdir(full_p):
+                if it in IGNORE_DIRS:
+                    continue
+                dirs.append(it)
+            else:
+                files.append(it)
+
+        all_items = [(d, True) for d in dirs] + [(f, False) for f in files]
+        total_items = len(all_items)
+
+        for i, (name, is_dir) in enumerate(all_items):
+            if entries_count >= max_entries:
+                lines.append(f"{prefix}└── ... ({total_items - i} more items omitted for token efficiency)")
+                break
+
+            is_last = (i == total_items - 1)
+            pointer = "└── " if is_last else "├── "
+            extension_prefix = "    " if is_last else "│   "
+            item_path = os.path.join(curr_dir, name)
+
+            if is_dir:
+                entries_count += 1
+                lines.append(f"{prefix}{pointer}📁 {name}/")
+                _traverse(item_path, prefix + extension_prefix, current_depth + 1)
+            else:
+                if name in SECRET_FILES:
+                    lines.append(f"{prefix}{pointer}🔒 {name} [PROTECTED SECRET]")
+                    entries_count += 1
+                    continue
+                if any(fnmatch.fnmatch(name, pat) for pat in IGNORE_FILES):
+                    continue
+                try:
+                    sz = os.path.getsize(item_path)
+                    sz_str = format_file_size(sz)
+                except Exception:
+                    sz_str = ""
+                entries_count += 1
+                size_label = f" ({sz_str})" if sz_str else ""
+                lines.append(f"{prefix}{pointer}{name}{size_label}")
+
+    _traverse(dir_path, "", 1)
+    lines.append("\n*Pruned noisy directories (node_modules, dist, .git) & lockfiles to conserve tokens.*")
+    return "\n".join(lines)
 
 def _resolve_project_root(args: dict) -> Tuple[Optional[str], Optional[str]]:
     """
@@ -412,6 +522,29 @@ def handle_tool_call(name: str, args: dict) -> dict:
             details={"type": "API_SURFACE", "symbols_count": len(graph.symbols)}
         )
         return {"content": [{"type": "text", "text": surface_md}]}
+
+    elif name == "list_dir":
+        path = args.get("path", "")
+        if not path:
+            return {"isError": True, "content": [{"type": "text", "text": "Error: 'path' argument is required for list_dir."}]}
+
+        # Resolve path relative to current working directory or absolute
+        abs_path = os.path.abspath(path)
+        depth = min(4, max(1, int(args.get("depth", 2))))
+        max_entries = min(150, max(10, int(args.get("max_entries", 80))))
+
+        tree_output = build_dir_tree(abs_path, max_depth=depth, max_entries=max_entries)
+        tree_tokens = count_tokens(tree_output)
+        # Estimate equivalent tokens from multiple verbose ls -la calls (at least ~800 tokens)
+        est_orig_tokens = max(800, tree_tokens * 6)
+        tracker.record_event(
+            session_id="mcp_session",
+            event_type="DIR_LIST",
+            original_tokens=est_orig_tokens,
+            optimized_tokens=tree_tokens,
+            details={"path": os.path.basename(abs_path) or abs_path, "depth": depth, "tokens_saved": est_orig_tokens - tree_tokens}
+        )
+        return {"content": [{"type": "text", "text": tree_output}]}
 
     return {"isError": True, "content": [{"type": "text", "text": f"Unknown tool: {name}"}]}
 

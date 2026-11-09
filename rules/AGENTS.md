@@ -31,6 +31,8 @@ Execute the specified action directly based on these extracted parameters.
 3. **Architecture Discovery**: Before executing multi-file exploration, ALWAYS call `tokensafe:get_architecture_graph(project_path)` to locate God Nodes and dependency topology in < 250 tokens without file crawling.
 4. **API Surface Map**: Use `tokensafe:get_api_surface(project_path)` to get all exported classes, types, and interfaces in a single markdown map.
 5. **Bounded Reads**: Never call `read_file` without `StartLine`/`EndLine` on files > 100 lines unless inspecting a skeleton.
+6. **Directory Navigation**: Never run verbose `ls -la` or `ls -l`; use `tokensafe:list_dir(path, depth=2)` to inspect directory trees without permissions, timestamps, or lockfiles (-90% tokens).
+7. **Style & Design Tokens**: When inspecting CSS/SCSS/LESS/Tailwind, `tokensafe:smart_read_file` automatically preserves all design tokens (`:root`, `@theme`, CSS variables) in full while folding component selectors.
 
 ### 4. Turn Token Savings Footer (Proof-of-Savings)
 At the end of your response for any turn where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer:
