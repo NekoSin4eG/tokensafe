@@ -236,7 +236,7 @@ class TelemetrySync:
             total_sent = 0
             headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "TokenSafe-Sync/1.4.5"
+                "User-Agent": "TokenSafe-Sync/1.4.6"
             }
             if active_key:
                 headers["Authorization"] = f"Bearer {active_key}"
