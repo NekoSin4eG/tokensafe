@@ -166,5 +166,33 @@ class TestTokenSafeGuard(unittest.TestCase):
         self.assertFalse(res_legit.blocked)
         self.assertFalse(res_legit.warning_only)
 
+    def test_raw_code_search_blocked(self):
+        # 1. Single file grep for component in JSX/TSX
+        res = TokenSafeGuard.inspect_command('cd paidz-frontend && grep -n -C 15 "<LuckyWheelTab" src/views/StatsView.tsx')
+        self.assertTrue(res.blocked)
+        self.assertEqual(res.check_name, "RAW_CODE_SEARCH")
+        self.assertIn("tokensafe:smart_read_file", res.reason)
+
+        # 2. Recursive grep in src
+        res2 = TokenSafeGuard.inspect_command('grep -rn "areSectorEqual" src/')
+        self.assertTrue(res2.blocked)
+        self.assertEqual(res2.check_name, "RAW_CODE_SEARCH")
+
+        # 3. ripgrep in components
+        res3 = TokenSafeGuard.inspect_command('rg "useWallet" components/')
+        self.assertTrue(res3.blocked)
+        self.assertEqual(res3.check_name, "RAW_CODE_SEARCH")
+
+        # 4. find code files
+        res4 = TokenSafeGuard.inspect_command('find src -name "*.tsx"')
+        self.assertTrue(res4.blocked)
+        self.assertEqual(res4.check_name, "RAW_CODE_SEARCH")
+
+        # 5. Piped grep on system commands allowed
+        self.assertFalse(TokenSafeGuard.inspect_command("ps aux | grep node").blocked)
+        self.assertFalse(TokenSafeGuard.inspect_command("git log -n 5 | grep fix").blocked)
+        self.assertFalse(TokenSafeGuard.inspect_command("npm test | grep passing").blocked)
+        self.assertFalse(TokenSafeGuard.inspect_command("docker ps | grep paidz").blocked)
+
 if __name__ == "__main__":
     unittest.main()

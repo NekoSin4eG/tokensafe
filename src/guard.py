@@ -288,7 +288,69 @@ class TokenSafeGuard:
                         )
                     )
 
+        # 5. Raw Code Search Interception (Enforce TokenSafe MCP tools over terminal grep/find)
+        code_search_err = cls._check_raw_code_search(cmd)
+        if code_search_err:
+            return GuardResult(
+                blocked=True,
+                check_name="RAW_CODE_SEARCH",
+                reason=code_search_err
+            )
+
         return GuardResult(blocked=False)
+
+    @classmethod
+    def _check_raw_code_search(cls, cmd: str) -> Optional[str]:
+        """
+        Detects unconstrained terminal code searches (grep/rg/find targeting source files).
+        Enforces use of TokenSafe MCP tools (smart_read_file, get_architecture_graph).
+        Excludes safe pipe filters (e.g., git log | grep, ps | grep, npm test | grep).
+        """
+        # Split compound commands (&&, ||, ;)
+        stages = [s.strip() for s in re.split(r'(?:&&|\|\||;)', cmd) if s.strip()]
+
+        for stage in stages:
+            pipe_parts = [p.strip() for p in stage.split('|')]
+
+            # If grep is preceded by a non-code command (ps, git log, docker, npm test), it's a pipe filter
+            if len(pipe_parts) > 1:
+                first_part = pipe_parts[0]
+                is_file_dump = bool(re.search(r'\b(cat|less|more)\s+[\w\.\/\-]+', first_part))
+                if not is_file_dump:
+                    continue
+
+            sub_cmd = pipe_parts[-1]
+
+            # 1. Check for grep / egrep / ripgrep (rg)
+            grep_match = re.search(r'\b(grep|egrep|rg|ripgrep)\b', sub_cmd)
+            if grep_match:
+                has_code_ext = any(ext in sub_cmd for ext in cls.CODE_EXTENSIONS)
+                has_code_dir = any(re.search(rf'\b{re.escape(d)}(?:/|\b)', sub_cmd) for d in cls.CODE_DIRS)
+                is_recursive_all = bool(re.search(r'\b(grep|egrep)\b.*?\s-[a-zA-Z]*[rR]\b', sub_cmd)) or \
+                                   bool(re.search(r'\brg\b', sub_cmd))
+
+                if has_code_ext or has_code_dir or is_recursive_all:
+                    return (
+                        f"Raw terminal code search blocked: '{sub_cmd}'. "
+                        f"TokenSafe Protocol mandates using MCP tools to prevent context window bloat:\n"
+                        f"• To inspect definitions/symbols in a file: call 'tokensafe:smart_read_file(path, symbol)'\n"
+                        f"• To locate God Nodes & architecture: call 'tokensafe:get_architecture_graph(project_path)'\n"
+                        f"• To inspect project exports & types: call 'tokensafe:get_api_surface(project_path)'"
+                    )
+
+            # 2. Check for find on source code
+            find_match = re.search(r'\bfind\b\s+([\w\.\/\-]+)', sub_cmd)
+            if find_match:
+                has_code_ext = any(ext in sub_cmd for ext in cls.CODE_EXTENSIONS)
+                has_code_dir = any(re.search(rf'\b{re.escape(d)}(?:/|\b)', sub_cmd) for d in cls.CODE_DIRS)
+                if has_code_ext or has_code_dir:
+                    return (
+                        f"Raw file crawl via 'find' blocked: '{sub_cmd}'. "
+                        f"Use 'tokensafe:get_architecture_graph(project_path)' or "
+                        f"'tokensafe:get_api_surface(project_path)' instead of scanning directory trees."
+                    )
+
+        return None
 
     @classmethod
     def _is_git_ignored(cls, file_path: str, repo_root: str) -> bool:

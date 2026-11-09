@@ -8,6 +8,7 @@ import sys
 import os
 import json
 import traceback
+from typing import Tuple, Optional
 
 # Ensure project root in sys.path
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -48,11 +49,11 @@ TOOLS = [
     },
     {
         "name": "get_architecture_graph",
-        "description": "Returns top architectural God Nodes and dependency topology for the target project.",
+        "description": "Returns top architectural God Nodes and dependency topology for the target project. Call this BEFORE reading files or searching.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "project_path": {"type": "string", "description": "Optional: root directory or file path of the project"}
+                "project_path": {"type": "string", "description": "Absolute root path of the project directory. Highly recommended to pass explicitly."}
             }
         }
     },
@@ -62,7 +63,7 @@ TOOLS = [
         "inputSchema": {
             "type": "object",
             "properties": {
-                "project_path": {"type": "string", "description": "Optional: root directory or file path of the project"}
+                "project_path": {"type": "string", "description": "Absolute root path of the project directory. Highly recommended to pass explicitly."}
             }
         }
     },
@@ -109,6 +110,48 @@ TOOLS = [
         }
     }
 ]
+
+def _resolve_project_root(args: dict) -> Tuple[Optional[str], Optional[str]]:
+    """
+    Safely resolves the target project root without falling back to system root dirs.
+    """
+    target = args.get("project_path") or args.get("root_dir") or args.get("path") or args.get("directory")
+    system_roots = {"/", "/Users", "/home", "/root", os.path.expanduser("~")}
+
+    if target:
+        target_abs = os.path.abspath(target)
+        if os.path.isfile(target_abs):
+            target_abs = os.path.dirname(target_abs)
+        if target_abs not in system_roots and os.path.isdir(target_abs):
+            return target_abs, None
+
+    # Check environment variables
+    for env_var in ("AGY_PROJECT_PATH", "WORKSPACE_FOLDER", "PROJECT_DIR", "PWD"):
+        candidate = os.environ.get(env_var)
+        if candidate:
+            cand_abs = os.path.abspath(candidate)
+            if cand_abs not in system_roots and os.path.isdir(cand_abs):
+                return cand_abs, None
+
+    # Check cwd
+    cwd = os.getcwd()
+    if cwd:
+        cwd_abs = os.path.abspath(cwd)
+        if cwd_abs not in system_roots and os.path.isdir(cwd_abs):
+            return cwd_abs, None
+
+    # Hint with active projects if found under ~/Documents/projects
+    projects_dir = os.path.expanduser("~/Documents/projects")
+    if os.path.isdir(projects_dir):
+        try:
+            subdirs = [d for d in os.listdir(projects_dir) if not d.startswith(".") and os.path.isdir(os.path.join(projects_dir, d))]
+            if subdirs:
+                examples = ", ".join([f"'{d}'" for d in subdirs[:4]])
+                return None, f"Error: Please specify 'project_path' explicitly. Available projects in ~/Documents/projects: {examples}. Example: project_path='{os.path.join(projects_dir, subdirs[0])}'"
+        except Exception:
+            pass
+
+    return None, "Error: Invalid or root project_path. Please specify an explicit 'project_path' pointing to your project directory (e.g. project_path='/path/to/project')."
 
 def handle_tool_call(name: str, args: dict) -> dict:
     tracker = MetricsTracker()
@@ -222,13 +265,11 @@ def handle_tool_call(name: str, args: dict) -> dict:
         return {"content": [{"type": "text", "text": dashboard.render_markdown()}]}
 
     elif name == "get_architecture_graph":
-        target = args.get("project_path") or args.get("root_dir") or args.get("path") or args.get("directory") or os.getcwd()
-        target_abs = os.path.abspath(target)
-        system_roots = {"/", "/Users", "/home", "/root", os.path.expanduser("~")}
-        if target_abs in system_roots:
+        target_abs, err = _resolve_project_root(args)
+        if err or not target_abs:
             return {
                 "isError": True,
-                "content": [{"type": "text", "text": "Error: Invalid or root project_path. Please specify an explicit 'project_path' pointing to your project directory."}]
+                "content": [{"type": "text", "text": err or "Error: Invalid project_path."}]
             }
         graph = GraphEngine.get_instance(target_abs)
         god_nodes = graph.get_god_nodes(7)
@@ -254,13 +295,11 @@ def handle_tool_call(name: str, args: dict) -> dict:
         return {"content": [{"type": "text", "text": json.dumps(payload, indent=2, ensure_ascii=False)}]}
 
     elif name == "get_api_surface":
-        target = args.get("project_path") or args.get("root_dir") or args.get("path") or args.get("directory") or os.getcwd()
-        target_abs = os.path.abspath(target)
-        system_roots = {"/", "/Users", "/home", "/root", os.path.expanduser("~")}
-        if target_abs in system_roots:
+        target_abs, err = _resolve_project_root(args)
+        if err or not target_abs:
             return {
                 "isError": True,
-                "content": [{"type": "text", "text": "Error: Invalid or root project_path. Please specify an explicit 'project_path' pointing to your project directory."}]
+                "content": [{"type": "text", "text": err or "Error: Invalid project_path."}]
             }
         graph = GraphEngine.get_instance(target_abs)
         surface_md = graph.generate_api_surface()
