@@ -93,6 +93,28 @@ Traditional AI code interactions suffer from massive context bloat:
 
 ---
 
+## 🤯 The Accidental Side Effect: Your AI Stops Hallucinating
+
+We originally built TokenSafe for a purely selfish reason: **to stop getting $400 monthly LLM API bills** from running autonomous coding agents.
+
+Then something unexpected happened during real-world dogfooding.
+
+Our agents didn't just get cheaper — **they wrote noticeably better code, stopped inventing imaginary methods, and eliminated cyclic regression bugs.**
+
+Turns out, there's a simple reason for this:
+> **Transformer models don't write bad code because they're stupid. They write bad code because we drown them in 15,000 lines of garbage.**
+
+### How stripping 90% of token noise fixes AI code quality:
+
+| What Usually Breaks the AI | How TokenSafe Fixes It | The Result |
+| :--- | :--- | :--- |
+| **"Lost in the Middle" Attention Fade**<br>Agent reads a 2,000-line file just to tweak a 10-line helper. The model loses track of imports and invents fictional methods. | **AST Skeletonizer** (`src/slicer.py`) collapses dead code into typed interfaces, keeping only target functions and 1-hop callees full. | **High-Density Signal.** The model sees 100% of the type contracts without drowning in unrelated loops. |
+| **Terminal Log Poisoning**<br>`npm test` or `pytest` fails and dumps 4,000 lines of stack traces and lockfile diffs. The model panics and rewrites unrelated code. | **Command Sanitizer** (`src/command_sanitizer.py`) snips the matrix down to the exact failing assertion line and call frame. | **Laser Focus.** The agent fixes the actual bug instead of hallucinating workarounds for log noise. |
+| **The 5-Attempt Doom Loop**<br>Agent tries a broken fix, fails, tries the exact same broken fix again, and oscillates until your session context limit catches fire. | **Anti-Stuck Loop Guard** (`src/loop_detector.py`) intercepts repeated tool calls and cyclic edits in flight. | **No Cascading Regressions.** The loop is halted before the agent can butcher working modules. |
+| **Vague Human Prompts**<br>*"Hey, fix the auth bug but don't break the cache or whatever."* The model takes creative liberties and breaks three other files. | **TOCP Intent Compactor** (`src/compactor.py`) distills messy instructions into explicit S-Expressions with hard constraint boundaries. | **Zero Ambiguity.** The model executes `(DEBUG auth.ts [jwt] "fix 401 token expiry")` with strict parameter bounds. |
+
+---
+
 ## 🛡️ The Hidden Context Killer: MCP Tool Schema Bloat
 
 Why do AI coding agent quotas (like Antigravity's **5-Hour Limit** or Claude/OpenAI monthly token budgets) evaporate after just a few prompts?
