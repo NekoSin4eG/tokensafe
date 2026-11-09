@@ -1,13 +1,16 @@
 import unittest
+import os
 from unittest.mock import patch, MagicMock
 import io
 import json
 from src.deepseek_distiller import DeepSeekDistiller
 
 class TestDeepSeekDistiller(unittest.TestCase):
+    @patch.dict(os.environ, {"TOKENSAFE_SELF_HOSTED": "1", "DEEPSEEK_API_KEY": "test-key"})
+    @patch("src.distiller_cache.DistillationCache.get", return_value=None)
     @patch("src.license_manager.LicenseManager.get_active_license", return_value=("solo", {"tier": "solo"}))
     @patch("urllib.request.urlopen")
-    def test_distill_success(self, mock_urlopen, mock_license):
+    def test_distill_success(self, mock_urlopen, mock_license, mock_cache):
         mock_response = MagicMock()
         mock_response.status = 200
         mock_data = {
@@ -26,9 +29,11 @@ class TestDeepSeekDistiller(unittest.TestCase):
         res = DeepSeekDistiller.distill("У меня в auth.ts при логине падает с ошибкой 401 jwt expired")
         self.assertEqual(res, '(DEBUG auth.ts [jwt] "fix 401 error on login")')
 
+    @patch.dict(os.environ, {"TOKENSAFE_SELF_HOSTED": "1", "DEEPSEEK_API_KEY": "test-key"})
+    @patch("src.distiller_cache.DistillationCache.get", return_value=None)
     @patch("src.license_manager.LicenseManager.get_active_license", return_value=("solo", {"tier": "solo"}))
     @patch("urllib.request.urlopen")
-    def test_distill_timeout_fallback(self, mock_urlopen, mock_license):
+    def test_distill_timeout_fallback(self, mock_urlopen, mock_license, mock_cache):
         # Simulate network timeout
         mock_urlopen.side_effect = TimeoutError("Connection timed out")
         res = DeepSeekDistiller.distill("Some long prompt that times out")
