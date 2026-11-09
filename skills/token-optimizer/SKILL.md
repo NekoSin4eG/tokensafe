@@ -1,19 +1,33 @@
 ---
 name: token-optimizer
 description: >-
-  Inspect token efficiency metrics, view cost savings dashboard, test prompt compression,
-  navigate codebases via zero-token AST architecture graphs, and operate the Token-Optimized Communication Protocol (TOCP).
+  MANDATORY code inspection and architecture navigation skill.
+  Activate whenever inspecting files, searching code, locating components/functions/classes,
+  reading implementations, analyzing dependencies, or navigating codebase architecture.
+  Replaces wasteful terminal grep/find with zero-loss AST smart slicing (-90% tokens),
+  extracts definitions with 1-hop dependencies, and tracks token efficiency metrics.
 ---
 
 # TokenSafe Optimization & Architecture Intelligence Skill
 
 This skill provides autonomous AI coding assistants with deterministic, zero-token AST architecture indexing, graph-guided code slicing, command sanitization, and context optimization metrics.
 
-## When to Activate This Skill
-1. **Architecture Discovery**: Mapping new or unfamiliar codebases, finding God Nodes and key dependency hubs without LLM token burn.
-2. **Graph-Guided Code Inspection**: Reading functions or classes with their 1-hop dependencies while folding inert boilerplate (-85% to -92% tokens).
-3. **Telemetry & Economics**: Inspecting token savings, breakdown by optimization source, and ROI.
-4. **Command & Prompt Optimization**: Sanitizing terminal output and testing TOCP compression.
+## MANDATORY CODE INSPECTION DIRECTIVES (ALL AGENTS)
+
+1. **NO RAW TERMINAL GREP OR FIND**:
+   - Strictly NEVER run `grep`, `egrep`, `ripgrep`, or `find` in `run_command` on source code files (`.ts`, `.tsx`, `.py`, `.js`, `src/`, `views/`, `components/`).
+   - Raw code searches via bash burn thousands of context tokens and are blocked by TokenSafe Guard.
+
+2. **SYMBOL & COMPONENT EXTRACTION (`smart_read_file`)**:
+   - When locating or reading any function, component, class, or handler (e.g. `<LuckyWheelTab>`, `areSectorEqual`, `useWallet`), ALWAYS call `tokensafe:smart_read_file` with `path` and `symbol`.
+   - Returns the exact target definition and 1-hop dependencies in full while folding surrounding inert code into lightweight signatures (-85% to -92% tokens).
+
+3. **ARCHITECTURE SURVEY BEFORE BROWSING (`get_architecture_graph`)**:
+   - Before multi-file exploration or asking where things are located, ALWAYS call `tokensafe:get_architecture_graph(project_path)`.
+   - Returns top architectural God Nodes and dependency topology in < 250 tokens.
+
+4. **API SURFACE INSPECTION (`get_api_surface`)**:
+   - Call `tokensafe:get_api_surface(project_path)` to get all exported classes, types, interfaces, and function signatures in a single compact markdown map.
 
 ## Core MCP Tools (`tokensafe`)
 

@@ -32,12 +32,13 @@ PYTHON_BIN = sys.executable
 
 UNIFIED_TOKENSAFE_RULE = (
     "## TOKENSAFE GRAPH-FIRST OPTIMIZATION PROTOCOL\n"
-    "Always prioritize `tokensafe` MCP tools over default raw file reads or high-output terminal executions to prevent context window exhaustion.\n\n"
-    "1. **Architecture Discovery**: Always call `tokensafe:get_architecture_graph` before grep or multi-file reading. Returns project God Nodes and key dependency hubs in < 250 tokens without file crawling.\n"
-    "2. **Graph-Guided Symbol Inspection**: When inspecting code implementations, prioritize `tokensafe:smart_read_file` with the targeted `symbol`. Returns full executable bodies for the symbol and 1-hop dependencies while folding inert code into signatures (-85% to -92% tokens).\n"
-    "3. **No Unconstrained Shell Grep/Find**: Strictly avoid running raw recursive grep/find across projects. Use `get_architecture_graph` or `get_api_surface`.\n"
-    "4. **Command Sanitization**: Use `sanitize_command` on high-output terminal commands (`git diff`, `pytest`, `find`, `grep`) to prevent lockfile or test log context contamination.\n"
-    "5. **Proof-of-Savings Turn Footer (English default)**:\n"
+    "Always use `tokensafe` MCP tools over default raw file reads or high-output terminal executions to prevent context window exhaustion.\n\n"
+    "1. **Zero Raw Grep/Find (Blocked)**: Strictly NEVER execute terminal `grep`, `egrep`, `ripgrep`, or `find` on source code files or directories (`src/`, `views/`, `components/`, `.ts`, `.tsx`, `.py`, `.js`). These commands are hard-blocked by TokenSafe Guard.\n"
+    "2. **Mandatory Symbol & Component Inspection**: Whenever locating or reading a function, class, component, or method, ALWAYS call `tokensafe:smart_read_file` with `path` and `symbol`. It preserves the full executable target and 1-hop dependencies while folding inert code into signatures (-85% to -92% tokens).\n"
+    "3. **Architecture Discovery**: Always call `tokensafe:get_architecture_graph(project_path)` before exploratory multi-file reading. Returns project God Nodes and key dependency hubs in < 250 tokens without file crawling.\n"
+    "4. **API Surface Map**: Use `tokensafe:get_api_surface(project_path)` to get all exported classes, types, and interfaces in a single markdown map.\n"
+    "5. **Command Sanitization**: Use `sanitize_command` on high-output terminal commands (`git diff`, `pytest`, `find`, `grep`) to prevent lockfile or test log context contamination.\n"
+    "6. **Proof-of-Savings Turn Footer (English default)**:\n"
     "At the end of your response for any turn where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer in English:\n"
     "`⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens ($<usd>)`\n"
 )

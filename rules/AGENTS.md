@@ -26,9 +26,11 @@ Execute the specified action directly based on these extracted parameters.
 4. **Dense Formatting**: Use compact bullet points and direct technical prose.
 
 ### 3. Architecture & Code Navigation Directives (Graph-Guided)
-1. **Never Crawl with Raw Grep/Find**: Before executing exploratory searches or answering architecture questions, inspect `tokensafe:get_architecture_graph` or `tokensafe-out/API_SURFACE.md`. It provides project God Nodes and dependencies in < 250 tokens without file crawling.
-2. **Graph-Guided File Reading**: When inspecting code implementations, call `tokensafe:smart_read_file` with the targeted `symbol`. It preserves full executable bodies for the target function and its 1-hop callees while folding inert code into signatures (-85% to -92% tokens).
-3. **Bounded Reads**: Never call `read_file` without `StartLine`/`EndLine` on files > 100 lines unless inspecting a skeleton.
+1. **Zero Raw Terminal Grep/Find (Blocked)**: Strictly NEVER execute terminal `grep`, `egrep`, `ripgrep`, or `find` on source code files or directories (`src/`, `views/`, `components/`, `.ts`, `.tsx`, `.py`, `.js`). These commands are hard-blocked by TokenSafe Guard.
+2. **Mandatory Symbol & Component Inspection**: Whenever locating or reading a function, class, component, or method, ALWAYS call `tokensafe:smart_read_file` with `path` and `symbol`. It preserves the full executable target and 1-hop dependencies while folding inert code into signatures (-85% to -92% tokens).
+3. **Architecture Discovery**: Before executing multi-file exploration, ALWAYS call `tokensafe:get_architecture_graph(project_path)` to locate God Nodes and dependency topology in < 250 tokens without file crawling.
+4. **API Surface Map**: Use `tokensafe:get_api_surface(project_path)` to get all exported classes, types, and interfaces in a single markdown map.
+5. **Bounded Reads**: Never call `read_file` without `StartLine`/`EndLine` on files > 100 lines unless inspecting a skeleton.
 
 ### 4. Turn Token Savings Footer (Proof-of-Savings)
 At the end of your response for any turn where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer:
