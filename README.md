@@ -118,6 +118,29 @@ Turns out, there's a simple reason for this:
 
 ---
 
+## 🌐 Polyglot Zero-Loss AST Engine (10+ Languages)
+
+TokenSafe is built from the ground up to support modern polyglot monorepos. Its zero-LLM deterministic AST state machine folds non-target function bodies in **< 30ms** with zero external dependencies, while preserving active symbols and 1-hop dependencies with full executable bodies.
+
+### Supported Language Matrix
+
+| Language / Framework | File Extensions | Preserved Structures | Folding Mechanism |
+|---|---|---|---|
+| **TypeScript / React** | `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs` | React components (`React.FC`, `memo`, `forwardRef`, multi-line destructuring), arrow functions, hooks, classes, interfaces | Target & 1-hop bodies kept full; non-target bodies folded into `{ /* ... */ };` |
+| **Python** | `.py` | Classes, typed signatures, docstrings, decorators, `async def` | Native `ast.parse` tree pruning with `...` body replacement |
+| **Go** | `.go` | Struct declarations, interfaces, methods `func (r *Recv) Method(...)`, generics `func Map[T any]` | Non-target functions folded; struct layouts and `select` blocks preserved |
+| **Rust** | `.rs` | `struct`, `enum`, `impl` blocks, `trait` blocks, `pub(crate) async fn`, `const fn` | `impl` containers stay open; method bodies folded into `{ /* ... */ }` |
+| **Java & C#** | `.java`, `.cs` | Classes, records, methods with access modifiers (`public`, `protected`, `static`, `async`, `override`), generic return types (`Task<T>`, `List<E>`), `throws` | Method bodies folded; classes and interfaces remain structural |
+| **C & C++** | `.c`, `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp` | Classes, structs, namespaces, scoped methods `ClassName::method`, `const`, `noexcept`, `override`, destructors | Functions folded; namespace and class hierarchies preserved |
+| **PHP, Kotlin, Swift** | `.php`, `.kt`, `.kts`, `.swift` | Classes, `function`, `fun`, `func` declarations with visibility modifiers | Function bodies folded into `{ /* ... */ }` |
+
+### Key Engine Guarantees:
+- **Graph-Guided Neighborhood Slicing**: When your AI agent inspects a function or component (via `tokensafe:smart_read_file(path, symbol="Target")`), TokenSafe automatically keeps the full implementation of the target **and its 1-hop callees/callers**, while collapsing all unrelated code.
+- **Comment & String Bracket Immunity**: Multi-line block comments (`/* ... */`, JSX `{/* ... */}`), template strings (`` `${...}` ``), and escaped quotes are tracked in a dedicated token lexer (`BraceLexer`), guaranteeing zero bracket desynchronization.
+- **Control-Flow Statement Immunity**: Statements like `if (...)`, `catch (err) {`, `for (...)`, and `while (...)` are strictly protected and never corrupted into placeholders.
+
+---
+
 ## 🛡️ The Hidden Context Killer: MCP Tool Schema Bloat
 
 Why do AI coding agent quotas (like Antigravity's **5-Hour Limit** or Claude/OpenAI monthly token budgets) evaporate after just a few prompts?

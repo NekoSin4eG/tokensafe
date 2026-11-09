@@ -222,13 +222,18 @@ class CodeGraph:
                 self.add_edge(file_node, f"mod:{target_mod}")
 
         # Functions & Methods
-        fn_pattern = re.compile(r"""(?:export\s+)?(?:async\s+)?(?:function\s+([a-zA-Z0-9_]+)|(?:class|interface)\s+([a-zA-Z0-9_]+)|func\s+(?:\(.*?\)\s+)?([a-zA-Z0-9_]+)|(?:const|let)\s+([a-zA-Z0-9_]+)\s*=\s*(?:async\s*)?\()""")
+        fn_pattern = re.compile(
+            r"""(?:export\s+(?:default\s+)?)?(?:async\s+)?(?:function\s*\*?\s*([a-zA-Z0-9_$]+)|(?:class|interface|struct|impl|trait)\s+([a-zA-Z0-9_$]+)|func\s+(?:\(.*?\)\s+)?([a-zA-Z0-9_]+)|(?:const|let|var)\s+([a-zA-Z0-9_$]+)(?:\s*:\s*[^=]+)?\s*=\s*(?:async\s*)?(?:React\.(?:memo|forwardRef)\s*\()?(?:useCallback\s*\()?\s*\(?)"""
+        )
+        call_pattern = re.compile(r"""(?:<|\b)([a-zA-Z0-9_$]{3,})\s*(?:\(|>|(?:\s+[a-zA-Z0-9_$-]+))""")
+        current_sym = None
+
         for idx, line in enumerate(lines, 1):
             match = fn_pattern.search(line)
             if match:
                 name = match.group(1) or match.group(2) or match.group(3) or match.group(4)
-                if name:
-                    kind = "class" if "class" in line or "interface" in line else "function"
+                if name and name not in {"if", "for", "while", "switch", "catch", "return", "import", "export"}:
+                    kind = "class" if any(w in line for w in ("class", "interface", "struct", "impl")) else "function"
                     sym_key = f"{rel_path}::{name}"
                     symbol = CodeSymbol(
                         name=name,
@@ -241,6 +246,12 @@ class CodeGraph:
                     self.symbols[sym_key] = symbol
                     self.file_symbols[rel_path].append(sym_key)
                     self.add_edge(file_node, sym_key)
+                    current_sym = sym_key
+            elif current_sym:
+                for cm in call_pattern.finditer(line):
+                    callee = cm.group(1)
+                    if callee not in {"div", "span", "button", "input", "label", "form", "svg", "path", "true", "false", "null", "undefined"}:
+                        self.add_edge(current_sym, f"call:{callee}")
 
     # -------------------------------------------------------------
     # 1. God Nodes Analysis (Degree Centrality)
@@ -321,41 +332,19 @@ class CodeGraph:
         except OSError:
             return ""
 
-        if not target_symbol:
-            # Fall back to standard skeletonization
-            from src.skeletonizer import Skeletonizer
-            _, ext = os.path.splitext(full_path)
-            return Skeletonizer.skeletonize_code(code, ext)
-
+        from src.skeletonizer import Skeletonizer
         _, ext = os.path.splitext(full_path)
         ext = ext.lower()
 
-        if ext != ".py":
-            # For brace-based languages, fallback to standard skeleton
-            from src.skeletonizer import Skeletonizer
+        if not target_symbol:
             return Skeletonizer.skeletonize_code(code, ext)
 
-        # Python Graph-Guided AST Pruning
-        try:
-            tree = ast.parse(code)
-            neighborhood = self.get_neighborhood(target_symbol)
-            keep_full_names = {target_symbol}
-            for k in neighborhood["one_hop"]:
-                keep_full_names.add(k.split("::")[-1])
+        neighborhood = self.get_neighborhood(target_symbol)
+        keep_full_names = {target_symbol}
+        for k in neighborhood.get("one_hop", set()):
+            keep_full_names.add(k.split("::")[-1])
 
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    if node.name not in keep_full_names:
-                        doc = ast.get_docstring(node)
-                        new_body = []
-                        if doc:
-                            new_body.append(ast.Expr(value=ast.Constant(value=doc)))
-                        new_body.append(ast.Expr(value=ast.Constant(value=Ellipsis)))
-                        node.body = new_body
-
-            return ast.unparse(tree)
-        except Exception:
-            return code
+        return Skeletonizer.skeletonize_code(code, ext, keep_symbols=keep_full_names)
 
     # -------------------------------------------------------------
     # 3. API Surface Generator (tokensafe-out/API_SURFACE.md)
