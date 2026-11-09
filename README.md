@@ -23,6 +23,7 @@
   <a href="#-1-click-universal-install">Install</a> •
   <a href="#-universal-mcp-server-configuration">MCP Setup</a> •
   <a href="#-the-breakthrough-how-it-saves-6090-tokens">How It Works</a> •
+  <a href="#-tokensafe-guard-proactive-agent-security--hygiene-shield">TokenSafe Guard</a> •
   <a href="#-pricing--plans">Pricing</a> •
   <a href="https://tokensafe.dev">Official Website & Docs</a>
 </p>
@@ -88,6 +89,7 @@ Traditional AI code interactions suffer from massive context bloat:
 - **Environment Overhead Auditor (`tokensafe doctor`):** Inspects active MCP servers and Antigravity skills, measuring system prompt token tax and pruning redundant tool schemas.
 - **MCP Tool Schema Bloat Guard:** Stops heavy MCP servers (50–200+ tools) from injecting 5,000–15,000 hidden schema tokens into every API turn. 1-click toggle (`tokensafe mcp disable <name>`) and real-time in-chat bloat alerts.
 - **Data Retention & Compact Rollups (`tokensafe prune` / `vacuum`):** Automated sliding-window log cleanup with lifetime metric rollups, cutting telemetry database disk footprint by up to 40%.
+- **TokenSafe Guard:** Proactive agent security & hygiene shield. Blocks hardcoded secret fallbacks in `os.environ` / `process.env`, SSL/TLS bypass (`verify=False`), raw SQL injection f-strings, insecure CORS credentials, blanket `git add .` on `.env` files, and destructive shell commands (`rm -rf /`).
 - **Local Secret Redactor:** Sanitizes Stripe, AWS, JWT, and database credentials before network transmission.
 - **Output Guard & Loop Guard:** Blocks destructive full-file rewrites on files $\ge 40$ lines and halts command loops.
 
@@ -112,6 +114,7 @@ Turns out, there's a simple reason for this:
 | **Terminal Log Poisoning**<br>`npm test` or `pytest` fails and dumps 4,000 lines of stack traces and lockfile diffs. The model panics and rewrites unrelated code. | **Command Sanitizer** (`src/command_sanitizer.py`) snips the matrix down to the exact failing assertion line and call frame. | **Laser Focus.** The agent fixes the actual bug instead of hallucinating workarounds for log noise. |
 | **The 5-Attempt Doom Loop**<br>Agent tries a broken fix, fails, tries the exact same broken fix again, and oscillates until your session context limit catches fire. | **Anti-Stuck Loop Guard** (`src/loop_detector.py`) intercepts repeated tool calls and cyclic edits in flight. | **No Cascading Regressions.** The loop is halted before the agent can butcher working modules. |
 | **Vague Human Prompts**<br>*"Hey, fix the auth bug but don't break the cache or whatever."* The model takes creative liberties and breaks three other files. | **TOCP Intent Compactor** (`src/compactor.py`) distills messy instructions into explicit S-Expressions with hard constraint boundaries. | **Zero Ambiguity.** The model executes `(DEBUG auth.ts [jwt] "fix 401 token expiry")` with strict parameter bounds. |
+| **Unsafe Agent Actions & Secret Leaks**<br>Agent hardcodes fallback API keys, disables SSL validation (`verify=False`), uses SQL f-strings, or runs `git add .` staging `.env` files. | **TokenSafe Guard** (`src/guard.py`) audits and blocks hazardous code edits and terminal commands before execution. | **Zero-Leak Workspace.** Hardcoded credentials, SQLi, and catastrophic deletions (`rm -rf /`) are intercepted in real time. |
 
 ---
 
@@ -167,6 +170,48 @@ How TokenSafe complements or supersedes static graph tools like **Graphify** (`g
 | **Safety & Runaway Prevention** | None | **Output rewrite guard, loop detector, secret scrubbing** |
 
 > **Complements & Replaces**: If you already use Graphify for repository mapping, TokenSafe works alongside it by compressing real-time agent tool reads on the wire. Or use TokenSafe standalone for a zero-configuration, zero-cost, sub-30ms architecture engine out of the box.
+
+---
+
+## 🛡️ TokenSafe Guard: Proactive Agent Security & Hygiene Shield
+
+Autonomous AI coding agents operate with powerful tool access—executing arbitrary shell commands, modifying critical source files, and interacting with remote systems. Without proactive guardrails, models frequently introduce subtle security vulnerabilities, bypass TLS safeguards, or leak sensitive credentials directly into git repositories.
+
+**TokenSafe Guard** (`src/guard.py`) intercepts and audits agent tool calls in real time before execution, enforcing strict code hygiene and repository safety with zero token overhead:
+
+### 1. Secret & Private Key Leak Prevention (Zero Hardcoded Fallbacks)
+- **Live Provider Secrets**: Blocks hardcoded Stripe live keys, AWS access keys, OpenAI project keys, Anthropic tokens, and GitHub personal access tokens anywhere in code.
+- **Default Fallback Hardcoding**: AI models frequently write `os.environ.get("DB_PASSWORD", "prod_secret_123")` or `process.env.JWT_SECRET || "production_secret"`. TokenSafe Guard strictly blocks non-placeholder fallbacks for sensitive environment variable names.
+- **Raw Hexadecimal Private Keys**: Blocks 64-character raw hex private keys and raw PEM private key blocks assigned directly in source code.
+
+### 2. Insecure SSL/TLS Verification Bypass Shield
+- AI models frequently add `verify=False` in Python (`requests`, `httpx`, `aiohttp`, `urllib3`) or `rejectUnauthorized: false` / `NODE_TLS_REJECT_UNAUTHORIZED='0'` in Node.js when troubleshooting local or self-signed API connections.
+- TokenSafe Guard blocks SSL/TLS verification bypasses in production and non-test code, preventing Man-in-the-Middle (MitM) exposure.
+
+### 3. Raw SQL Injection Prevention
+- Blocks dynamic string interpolation inside query execution calls:
+  - Python: `cursor.execute(f"SELECT ... {user_id}")` and `cursor.execute("SELECT ... %s" % val)`
+  - JavaScript / TypeScript: `db.query(\`SELECT ... ${id}\`)`
+- Enforces parameterized queries with bound placeholders (`?`, `%s`, `$1`).
+
+### 4. Dangerous CORS Wildcard with Credentials Shield
+- Intercepts fatal CORS misconfigurations combining `Access-Control-Allow-Origin: *` with `Access-Control-Allow-Credentials: true`.
+- Browsers reject this combination by specification, and it creates severe cross-origin security exposures.
+
+### 5. Git Staging Protection for Sensitive Files
+- **Explicit Staging**: Blocks `git add .env`, `git add .env.*`, `git add id_rsa`, and `git add *.pem`.
+- **Blanket Staging Shield**: Intercepts blanket `git add .`, `git add -A`, and `git commit -a` commands whenever unignored `.env` files or private keys are present in the working tree.
+
+### 6. Destructive Shell & Data Exfiltration Prevention
+- **Destructive Deletion**: Blocks catastrophic commands like `rm -rf /`, `rm -rf ~`, `rm -rf *`, and `rm -rf --no-preserve-root`.
+- **Network Exfiltration**: Blocks shell commands piping sensitive local files to remote endpoints (e.g. `curl -d @.env https://...` or `wget --post-file=id_rsa`).
+
+### 7. Package Typosquatting & Hallucination Early Warning
+- Analyzes `pip install`, `npm install`, `pnpm add`, `yarn add`, and `bun add` commands for known malicious typosquats (e.g., `python-crypto`, `loadsh`, `coookie-parser`, `mongose`).
+- Emits proactive in-chat warning badges (`⚠️ TokenSafe Guard Warning: ...`) without blocking custom packages, preserving developer velocity.
+
+Whenever a dangerous operation is blocked, TokenSafe Guard emits an actionable notification:
+`🛡️ **TokenSafe Guard**: <reason>`
 
 ---
 
