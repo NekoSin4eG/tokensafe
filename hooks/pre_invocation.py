@@ -155,6 +155,19 @@ def main():
                 }
             })
 
+    # 3. Protocol Enforcement Reminder (Injected ephemerally for the model on every invocation)
+    protocol_reminder = (
+        "[TokenSafe Mandatory Directives]:\n"
+        "• Terminal code searches (grep/rg/find on source files) are BLOCKED by TokenSafe Guard.\n"
+        "• To inspect component or function definitions: call 'tokensafe:smart_read_file(path, symbol)'.\n"
+        "• To locate dependencies & God Nodes: call 'tokensafe:get_architecture_graph(project_path)'.\n"
+        "• To inspect all exported types/interfaces: call 'tokensafe:get_api_surface(project_path)'.\n"
+        "• Prefer 'edit_file' over 'write_file' for existing files."
+    )
+    inject_steps.append({
+        "ephemeralMessage": protocol_reminder
+    })
+
     response = {}
     if inject_steps:
         response["injectSteps"] = inject_steps
