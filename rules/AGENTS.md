@@ -35,3 +35,9 @@ At the end of your response for any turn where tools were executed, files were i
 `⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens`
 Example:
 `⚡ **TokenSafe Turn Savings**: +3,520 tokens (~88%) | Cumulative Total: 3.04M tokens ($4.56)`
+
+### 5. Secret Leak Prevention Directive (Zero Hardcoded Fallbacks)
+1. **Never Hardcode Credential Fallbacks**: Never provide real private keys, API secrets, access tokens, or webhook secrets as default fallback arguments in `os.environ.get()`, `os.getenv()`, or `process.env`. If an environment variable is absent, raise an explicit configuration error or use an empty string / test mock. Real credentials must exist strictly in environment variables.
+2. **Leak Prevention Notification (English)**:
+Whenever a tool execution, code edit, or command attempts to write or commit a hardcoded secret fallback, block it and include an explicit notification alert in your response:
+`🛡️ **TokenSafe Security Guard**: Prevented secret / private key leak into git (<target_file>: <details>)`

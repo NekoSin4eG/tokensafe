@@ -92,5 +92,50 @@ MIIEowIBAAKCAQEA0Y2X9w8s7d6f5g4h3j2k1l0m9n8b7v6c5x4z3a2s1d0f
         self.assertNotIn("VerySecretPass99", res["compact_text"])
         self.assertIn("REDACTED_DB_PWD", res["compact_text"])
 
+    def test_check_secret_fallback_python(self):
+        # Dangerous fallback with Ed25519 hex private key
+        code_bad = 'DEFAULT_ED25519_PRIVATE_KEY = os.environ.get("TOKENSAFE_PRIVATE_KEY", "65b68297d7a3901d8a4b3287b7757f11e7cfc34377a21b039d0f750d643ad9d5")'
+        is_bad, reason = SecretRedactor.check_secret_fallback(code_bad, file_path="src/license_manager.py")
+        self.assertTrue(is_bad)
+        self.assertIn("TOKENSAFE_PRIVATE_KEY", reason)
+
+        # Safe empty fallback
+        code_good = 'DEFAULT_ED25519_PRIVATE_KEY = os.environ.get("TOKENSAFE_PRIVATE_KEY", "")'
+        is_bad, _ = SecretRedactor.check_secret_fallback(code_good, file_path="src/license_manager.py")
+        self.assertFalse(is_bad)
+
+        # Safe placeholder fallback
+        code_mock = 'API_SECRET = os.environ.get("API_SECRET", "mock_secret_key")'
+        is_bad, _ = SecretRedactor.check_secret_fallback(code_mock, file_path="src/config.py")
+        self.assertFalse(is_bad)
+
+    def test_check_secret_fallback_javascript(self):
+        # Dangerous fallback in TypeScript/JS
+        code_bad = 'const key = process.env.STRIPE_SECRET_KEY || "REDACTED-STRIPE-TEST-FIXTURE-1"'
+        is_bad, reason = SecretRedactor.check_secret_fallback(code_bad, file_path="server/billing.ts")
+        self.assertTrue(is_bad)
+
+        # Safe placeholder
+        code_good = 'const key = process.env.STRIPE_SECRET_KEY || "mock_key"'
+        is_bad, _ = SecretRedactor.check_secret_fallback(code_good, file_path="server/billing.ts")
+        self.assertFalse(is_bad)
+
+    def test_check_secret_fallback_public_key_allowed(self):
+        # Public key must NOT be blocked (designed to be in client code)
+        code_pub = 'DEFAULT_ED25519_PUBLIC_KEY = os.environ.get("TOKENSAFE_PUBLIC_KEY", "3911e2ffe5ad07ee23be392b88f238af302f9d3a0bf51881de8b5e0e6af71430")'
+        is_bad, _ = SecretRedactor.check_secret_fallback(code_pub, file_path="src/license_manager.py")
+        self.assertFalse(is_bad)
+
+    def test_check_secret_fallback_in_test_files_allowed(self):
+        # Test fixture assignment in test files is permitted
+        code_test = 'TEST_PRIV_HEX = "db13e3dd82937482937482937482937482937482937482937482937482937482"'
+        is_bad, _ = SecretRedactor.check_secret_fallback(code_test, file_path="tests/test_crypto.py")
+        self.assertFalse(is_bad)
+
+        # But live provider keys are blocked even in tests!
+        code_live_stripe = 'STRIPE_KEY = "REDACTED-STRIPE-TEST-FIXTURE-156"'
+        is_bad, _ = SecretRedactor.check_secret_fallback(code_live_stripe, file_path="tests/test_crypto.py")
+        self.assertTrue(is_bad)
+
 if __name__ == "__main__":
     unittest.main()

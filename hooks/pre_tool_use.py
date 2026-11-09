@@ -25,6 +25,7 @@ from src.tokenizer import count_tokens
 from src.agent_firewall import AgentFirewall
 from src.diff_slicer import DiffSlicer
 from src.license_manager import LicenseManager
+from src.secret_redactor import SecretRedactor
 
 def main():
     try:
@@ -66,7 +67,35 @@ def main():
 
     response = {"decision": "allow"}
 
-    # 2. Output Guard: Block write_file on large existing files to enforce edit_file
+    # 2. Secret Guard: Prevent hardcoded credentials and private key fallbacks from leaking to git
+    if tool_name in ("write_file", "edit_file"):
+        path = args.get("Path", "")
+        code_to_check = args.get("Content", "") if tool_name == "write_file" else args.get("Replacement", "")
+        is_leak, leak_reason = SecretRedactor.check_secret_fallback(code_to_check, file_path=path)
+        if is_leak:
+            tracker.record_event(
+                session_id=conversation_id,
+                event_type="SECRET_GUARD",
+                original_tokens=count_tokens(code_to_check),
+                optimized_tokens=0,
+                details={
+                    "tool": tool_name,
+                    "target_file": os.path.basename(path) if path else "unknown",
+                    "reason": leak_reason
+                }
+            )
+            print(json.dumps({
+                "decision": "deny",
+                "reason": (
+                    f"🛡️ TokenSafe Security Guard: Prevented secret / private key leak into git! "
+                    f"{leak_reason} in '{os.path.basename(path) if path else 'target file'}'. "
+                    f"Real credentials and private keys must never be hardcoded into source code or default fallbacks. "
+                    f"Load strictly from environment variables without hardcoded production fallbacks."
+                )
+            }))
+            return
+
+    # 3. Output Guard: Block write_file on large existing files to enforce edit_file
     if tool_name == "write_file":
         path = args.get("Path", "")
         content = args.get("Content", "")
