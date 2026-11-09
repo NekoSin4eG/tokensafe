@@ -55,6 +55,22 @@ class TestTelemetrySync(unittest.TestCase):
         st = TelemetrySync.get_state()
         self.assertGreaterEqual(st["last_synced_at"], 0)
 
+    @patch("subprocess.Popen")
+    @patch.object(TelemetrySync, "get_sync_status")
+    def test_sync_background_spawns_process_when_pending(self, mock_status, mock_popen):
+        mock_status.return_value = {"pending_events": 5}
+        TelemetrySync.save_state({"last_synced_at": 0})
+        TelemetrySync.sync_background(throttle_seconds=60.0)
+        self.assertTrue(mock_popen.called)
+
+    @patch("subprocess.Popen")
+    @patch.object(TelemetrySync, "get_sync_status")
+    def test_sync_background_throttles(self, mock_status, mock_popen):
+        mock_status.return_value = {"pending_events": 5}
+        TelemetrySync.save_state({"last_synced_at": int(time.time())})
+        TelemetrySync.sync_background(throttle_seconds=60.0)
+        self.assertFalse(mock_popen.called)
+
 
 if __name__ == "__main__":
     unittest.main()

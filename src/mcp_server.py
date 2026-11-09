@@ -595,6 +595,12 @@ def run_mcp_server():
                     "isError": True,
                     "content": [{"type": "text", "text": f"Error: {str(e)}\n{traceback.format_exc()}"}]
                 }
+            finally:
+                try:
+                    from src.telemetry_sync import TelemetrySync
+                    TelemetrySync.sync_background(throttle_seconds=60.0)
+                except Exception:
+                    pass
         else:
             response["error"] = {"code": -32601, "message": f"Method not found: {method}"}
 

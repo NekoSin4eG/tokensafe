@@ -17,6 +17,7 @@ import json
 import time
 import sqlite3
 import threading
+import subprocess
 import urllib.request
 import urllib.parse
 import urllib.error
@@ -32,6 +33,7 @@ from src.license_manager import LicenseManager
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 METRICS_DB_PATH = os.path.join(DATA_DIR, "metrics.db")
 SYNC_STATE_PATH = os.path.join(DATA_DIR, "sync_state.json")
+SYNC_LOCK_PATH = os.path.join(DATA_DIR, ".sync.lock")
 
 
 def _get_cloud_url() -> str:
@@ -288,22 +290,72 @@ class TelemetrySync:
             }
 
     @classmethod
-    def sync_background(cls, throttle_seconds: float = 300.0):
+    def sync_background(cls, throttle_seconds: float = 60.0, force: bool = False):
         """
-        Spawns a detached, non-blocking daemon thread to sync metrics.
-        Throttled to run at most once every `throttle_seconds` (default: 5 minutes).
+        Spawns a detached, non-blocking background OS process to sync metrics.
+        Throttled to run at most once every `throttle_seconds` (default: 60s)
+        using persistent state from sync_state.json.
+        Detached from parent process group so it survives the termination of short-lived CLI lifecycle hooks.
         """
         now = time.time()
-        if now - cls._last_bg_sync_time < throttle_seconds:
+        state = cls.get_state()
+        last_synced = state.get("last_synced_at", 0)
+        if not force and (now - last_synced) < throttle_seconds:
             return
 
-        cls._last_bg_sync_time = now
+        status = cls.get_sync_status()
+        if status.get("pending_events", 0) == 0:
+            return
 
-        def _worker():
+        # Prevent overlapping sync runs via PID lock file
+        if os.path.exists(SYNC_LOCK_PATH):
             try:
-                cls.sync(timeout=2.0)
-            except Exception:
+                with open(SYNC_LOCK_PATH, "r", encoding="utf-8") as f:
+                    pid = int(f.read().strip())
+                # Check if PID is still alive
+                os.kill(pid, 0)
+                return
+            except (ValueError, OSError, ProcessLookupError):
                 pass
 
-        t = threading.Thread(target=_worker, daemon=True)
-        t.start()
+        try:
+            flags = 0
+            if os.name == "nt":
+                flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+            script_path = os.path.abspath(__file__)
+            subprocess.Popen(
+                [sys.executable, script_path, "--background"],
+                cwd=PROJECT_ROOT,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                start_new_session=(os.name != "nt"),
+                creationflags=flags
+            )
+        except Exception:
+            # Fallback to daemon thread if process spawn fails
+            def _worker():
+                try:
+                    cls.sync(timeout=2.0)
+                except Exception:
+                    pass
+
+            t = threading.Thread(target=_worker, daemon=True)
+            t.start()
+
+
+if __name__ == "__main__":
+    is_bg = "--background" in sys.argv
+    os.makedirs(DATA_DIR, exist_ok=True)
+    try:
+        with open(SYNC_LOCK_PATH, "w", encoding="utf-8") as f:
+            f.write(str(os.getpid()))
+        res = TelemetrySync.sync(timeout=5.0 if is_bg else 10.0, verbose=not is_bg)
+        if not is_bg:
+            print(json.dumps(res, indent=2))
+    finally:
+        try:
+            if os.path.exists(SYNC_LOCK_PATH):
+                os.remove(SYNC_LOCK_PATH)
+        except Exception:
+            pass
