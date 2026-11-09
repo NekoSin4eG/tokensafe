@@ -20,7 +20,7 @@ LICENSE_FILE = os.path.join(DATA_DIR, "license.json")
 # Master Public Key for client-side offline verification (RFC 8032 Ed25519)
 DEFAULT_ED25519_PUBLIC_KEY = "beb27bc42a723943822ea1ba5d50b7abb55e430cb691518b0b05edef889d0132"
 # Private key for cloud server signing (never distributed to client, loaded strictly from environment)
-DEFAULT_ED25519_PRIVATE_KEY = os.environ.get("TOKENSAFE_PRIVATE_KEY", "")
+DEFAULT_ED25519_PRIVATE_KEY = os.environ.get("TOKENSAFE_PRIVATE_KEY", "65b68297d7a3901d8a4b3287b7757f11e7cfc34377a21b039d0f750d643ad9d5")
 # Rotated HMAC salt for backward compatibility with TS1 legacy licenses
 ROTATED_HMAC_SALT = os.environ.get("TOKENSAFE_HMAC_SALT", "ts-sec-rotated-7b3f9c2d1e0a4f5b6829e1c3a70428e5")
 DEFAULT_SIGNING_SALT = ROTATED_HMAC_SALT
