@@ -1,16 +1,31 @@
-# ⚡ TokenSafe (`tokensafe`)
+<p align="center">
+  <img src="assets/logo.svg" alt="TokenSafe Logo" width="100" height="100" />
+</p>
 
-[![npm version](https://img.shields.io/npm/v/tokensafe.svg?color=CB3837)](https://www.npmjs.com/package/tokensafe)
-[![PyPI version](https://img.shields.io/pypi/v/tokensafe.svg?color=3775A9)](https://pypi.org/project/tokensafe/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-emerald.svg)](https://opensource.org/licenses/MIT)
-[![SWE-bench: Verified](https://img.shields.io/badge/SWE--bench-up_to_95%25_Savings-06B6D4.svg)](https://tokensafe.dev#benchmarks)
-[![Python: 3.10+](https://img.shields.io/badge/Python-3.10+-3B82F6.svg)](https://python.org)
-[![Trial: 7 Days Free](https://img.shields.io/badge/Trial-7_Days_Free-10B981.svg)](https://tokensafe.dev#pricing)
+<h1 align="center">⚡ TokenSafe</h1>
 
-> **Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents.**  
-> Slashes LLM token costs by **up to 95%** with zero quality loss. Built for **Google Antigravity, OpenAI Codex, Cursor, Claude Desktop, Z.ai Code, Windsurf & Cline**.
+<p align="center">
+  <b>Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents</b><br>
+  Slashes LLM token costs by <b>up to 90%</b> with zero quality loss.<br>
+  Built for <b>Cursor, Claude Desktop, Google Antigravity, Windsurf & Cline</b>.
+</p>
 
-🌐 **Official Website:** [https://tokensafe.dev](https://tokensafe.dev)
+<p align="center">
+  <a href="https://github.com/tokensafe-dev/tokensafe/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/tokensafe-dev/tokensafe/test.yml?branch=main&label=tests&style=flat-square" alt="Tests"></a>
+  <a href="https://www.npmjs.com/package/tokensafe"><img src="https://img.shields.io/npm/v/tokensafe.svg?color=CB3837&style=flat-square" alt="npm"></a>
+  <a href="https://pypi.org/project/tokensafe/"><img src="https://img.shields.io/pypi/v/tokensafe.svg?color=3775A9&style=flat-square" alt="PyPI"></a>
+  <a href="https://github.com/tokensafe-dev/tokensafe/stargazers"><img src="https://img.shields.io/github/stars/tokensafe-dev/tokensafe?style=flat-square&color=yellow" alt="Stars"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-emerald.svg?style=flat-square" alt="License"></a>
+  <a href="https://tokensafe.dev#pricing"><img src="https://img.shields.io/badge/Trial-7_Days_Free-10B981.svg?style=flat-square" alt="Trial"></a>
+</p>
+
+<p align="center">
+  <a href="#-1-click-universal-install">Install</a> •
+  <a href="#-universal-mcp-server-configuration">MCP Setup</a> •
+  <a href="#-the-breakthrough-how-it-saves-6090-tokens">How It Works</a> •
+  <a href="#-pricing--plans">Pricing</a> •
+  <a href="https://tokensafe.dev">Official Website & Docs</a>
+</p>
 
 ---
 
