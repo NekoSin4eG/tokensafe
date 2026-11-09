@@ -133,6 +133,12 @@ class MetricsTracker:
 
         # Periodic amortized auto-retention check (every 100 events)
         self._event_counter += 1
+        if self._event_counter % 20 == 0:
+            try:
+                from src.telemetry_sync import TelemetrySync
+                TelemetrySync.sync_background()
+            except Exception:
+                pass
         if self._event_counter >= 100:
             self._event_counter = 0
             try:

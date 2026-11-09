@@ -570,6 +570,11 @@ def run_mcp_server():
         response = {"jsonrpc": "2.0", "id": msg_id}
 
         if method == "initialize":
+            try:
+                from src.telemetry_sync import TelemetrySync
+                TelemetrySync.sync_background()
+            except Exception:
+                pass
             response["result"] = {
                 "protocolVersion": "2024-11-05",
                 "capabilities": {"tools": {}},

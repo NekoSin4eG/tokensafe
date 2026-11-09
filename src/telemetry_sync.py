@@ -131,6 +131,12 @@ class TelemetrySync:
                 _, payload, _ = LicenseManager.validate_license(active_key)
                 target_email = payload.get("email", "").strip().lower()
 
+            # Community fallback: unauthenticated users participate in global token savings
+            if not target_email:
+                target_email = "community@tokensafe.dev"
+            if not active_key:
+                active_key = "community"
+
             if not os.path.exists(METRICS_DB_PATH):
                 return {
                     "success": True,
