@@ -52,6 +52,11 @@ def main():
     # 1. Quota and Environment Audits (Fires on first invocation)
     quota = LicenseManager.check_quota(tracker)
     if invocation_num <= 1:
+        try:
+            from src.version_checker import VersionChecker
+            VersionChecker.notify_os_update_background()
+        except Exception:
+            pass
         if quota.get("warning"):
             inject_steps.append({
                 "systemMessage": {

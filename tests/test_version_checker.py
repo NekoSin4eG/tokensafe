@@ -5,6 +5,30 @@ import time
 from src.version_checker import VersionChecker, semver_tuple
 
 class TestVersionChecker(unittest.TestCase):
+    def setUp(self):
+        from src.version_checker import CACHE_FILE
+        self.cache_backup = None
+        if os.path.exists(CACHE_FILE):
+            try:
+                with open(CACHE_FILE, "r") as f:
+                    self.cache_backup = f.read()
+            except Exception:
+                pass
+
+    def tearDown(self):
+        from src.version_checker import CACHE_FILE
+        if self.cache_backup is not None:
+            try:
+                with open(CACHE_FILE, "w") as f:
+                    f.write(self.cache_backup)
+            except Exception:
+                pass
+        elif os.path.exists(CACHE_FILE):
+            try:
+                os.remove(CACHE_FILE)
+            except Exception:
+                pass
+
     def test_semver_tuple_parsing(self):
         self.assertEqual(semver_tuple("1.2.0"), (1, 2, 0))
         self.assertEqual(semver_tuple("v1.2.0"), (1, 2, 0))
@@ -72,6 +96,35 @@ class TestVersionChecker(unittest.TestCase):
         VersionChecker.save_cache(mock_data)
         banner = VersionChecker.get_banner(current_version="1.2.0")
         self.assertIsNone(banner)
+
+    def test_notify_os_update_throttled(self):
+        mock_data = {
+            "checked_at": int(time.time()),
+            "client_version": "1.2.0",
+            "latest_version": "1.3.0",
+            "update_available": True,
+            "last_os_notify_at": int(time.time()),
+            "last_os_notify_version": "1.3.0"
+        }
+        VersionChecker.save_cache(mock_data)
+        # Should not notify because last_os_notify_at is current
+        res = VersionChecker.notify_os_update(current_version="1.2.0", force=False)
+        self.assertFalse(res)
+
+    def test_notify_os_update_force(self):
+        from unittest.mock import patch
+        mock_data = {
+            "checked_at": int(time.time()),
+            "client_version": "1.2.0",
+            "latest_version": "1.3.0",
+            "update_available": True
+        }
+        VersionChecker.save_cache(mock_data)
+        with patch.object(VersionChecker, "show_os_dialog", return_value=True) as mock_dialog:
+            res = VersionChecker.notify_os_update(current_version="1.2.0", force=True)
+            self.assertTrue(res)
+            self.assertTrue(mock_dialog.called)
+
 
 if __name__ == "__main__":
     unittest.main()

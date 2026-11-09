@@ -78,6 +78,35 @@ def main():
         from src.installer import AgentInstaller
         AgentInstaller.self_update()
 
+    elif command in ("version", "--version", "-v"):
+        from src.version_checker import CURRENT_VERSION, VersionChecker
+        print(f"TokenSafe v{CURRENT_VERSION}")
+        if "--check" in args or "-c" in args:
+            banner = VersionChecker.get_banner()
+            if banner:
+                print(banner)
+            else:
+                print("\033[32m✔ TokenSafe is up to date.\033[0m")
+            if "--notify" in args or "--prompt" in args:
+                VersionChecker.notify_os_update(force=True)
+
+    elif command in ("check-update", "check_update"):
+        from src.version_checker import CURRENT_VERSION, VersionChecker
+        print(f"\n\033[1m\033[36m⚡ CHECKING FOR TOKENSAFE UPDATES ⚡\033[0m\n")
+        print(f"  Current version: v{CURRENT_VERSION}")
+        info = VersionChecker.check_version(force_fetch=True)
+        latest = info.get("latest_version", CURRENT_VERSION)
+        avail = info.get("update_available", False)
+        print(f"  Latest version:  v{latest}")
+        banner = VersionChecker.get_banner()
+        if banner:
+            print(banner)
+        else:
+            print("\n  \033[32m✔ TokenSafe is up to date.\033[0m\n")
+        if avail or "--notify" in args or "--prompt" in args or "-p" in args:
+            print("  \033[36mTriggering native OS update dialog...\033[0m")
+            VersionChecker.notify_os_update(force=True)
+
     elif command in ("guard", "security"):
         from src.guard import TokenSafeGuard
         sub = args[1] if len(args) > 1 else "help"

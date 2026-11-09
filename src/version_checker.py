@@ -9,6 +9,8 @@ import sys
 import json
 import time
 import re
+import subprocess
+import threading
 import urllib.parse
 import urllib.request
 import urllib.error
@@ -163,3 +165,170 @@ class VersionChecker:
             )
 
         return None
+
+    @classmethod
+    def show_os_dialog(
+        cls,
+        current_version: str = CURRENT_VERSION,
+        latest_version: str = CURRENT_VERSION,
+        update_command: str = "tokensafe update"
+    ) -> bool:
+        """
+        Displays a native OS desktop popup dialog with English texts and 'Update Now' / 'Later' buttons.
+        Uses zero external third-party packages (macOS AppleScript, Windows ctypes/PowerShell, Linux zenity/notify-send).
+        """
+        plat = sys.platform
+
+        if plat == "darwin":
+            try:
+                escaped_cmd = update_command.replace('"', '\\"')
+                apple_script = f'''
+                set dialogResult to display dialog "A new version of TokenSafe (v{latest_version}) is available.\\n\\nCurrent version: v{current_version}\\nLatest version: v{latest_version}\\n\\nWould you like to update now?" with title "TokenSafe Update Available" buttons {{"Later", "Update Now"}} default button "Update Now" with icon note
+                if button returned of dialogResult is "Update Now" then
+                    tell application "Terminal"
+                        activate
+                        do script "{escaped_cmd}"
+                    end tell
+                end if
+                '''
+                subprocess.Popen(
+                    ["osascript", "-e", apple_script],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    stdin=subprocess.DEVNULL,
+                    start_new_session=True
+                )
+                return True
+            except Exception:
+                return False
+
+        elif plat == "win32":
+            try:
+                import ctypes
+                flags = 0x00000004 | 0x00000040 | 0x00010000 | 0x00040000  # MB_YESNO | MB_ICONINFORMATION | MB_SETFOREGROUND | MB_TOPMOST
+                msg = (
+                    f"A new version of TokenSafe (v{latest_version}) is available.\n\n"
+                    f"Current version: v{current_version}\n"
+                    f"Latest version:  v{latest_version}\n\n"
+                    "Would you like to update now?"
+                )
+                title = "TokenSafe Update Available"
+
+                def _win_worker():
+                    res = ctypes.windll.user32.MessageBoxW(0, msg, title, flags)
+                    if res == 6:  # IDYES
+                        subprocess.Popen(
+                            ["cmd.exe", "/c", "start", "cmd.exe", "/k", update_command],
+                            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
+                        )
+
+                threading.Thread(target=_win_worker, daemon=True).start()
+                return True
+            except Exception:
+                return False
+
+        elif plat.startswith("linux"):
+            try:
+                zenity_cmd = [
+                    "zenity",
+                    "--question",
+                    "--title=TokenSafe Update Available",
+                    f"--text=A new version of TokenSafe (v{latest_version}) is available.\n\nCurrent version: v{current_version}\nLatest version: v{latest_version}\n\nWould you like to update now?",
+                    "--ok-label=Update Now",
+                    "--cancel-label=Later"
+                ]
+                p = subprocess.Popen(zenity_cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+                def _zenity_wait():
+                    if p.wait() == 0:
+                        for term in (
+                            ["x-terminal-emulator", "-e", update_command],
+                            ["gnome-terminal", "--", update_command],
+                            ["konsole", "-e", update_command],
+                            ["xterm", "-e", update_command]
+                        ):
+                            try:
+                                subprocess.Popen(term)
+                                break
+                            except Exception:
+                                pass
+
+                threading.Thread(target=_zenity_wait, daemon=True).start()
+                return True
+            except Exception:
+                pass
+
+            try:
+                subprocess.Popen([
+                    "notify-send",
+                    "TokenSafe Update Available",
+                    f"A new version (v{latest_version}) is available. Run: {update_command}"
+                ])
+                return True
+            except Exception:
+                return False
+
+        return False
+
+    @classmethod
+    def notify_os_update(
+        cls,
+        current_version: str = CURRENT_VERSION,
+        license_key: str = "",
+        force: bool = False,
+        timeout: float = 1.5
+    ) -> bool:
+        """
+        Checks if an update is available and presents a native OS desktop popup dialog.
+        Throttled to at most once per 24 hours per target version unless force=True.
+        Returns True if prompt was dispatched, False otherwise.
+        """
+        info = cls.check_version(current_version=current_version, license_key=license_key, timeout=timeout)
+        update_available = info.get("update_available", False)
+        latest = info.get("latest_version", current_version)
+        cmd = info.get("update_command", "tokensafe update")
+
+        if not update_available and not force:
+            return False
+
+        cached = cls.load_cache() or {}
+        now = int(time.time())
+        last_notified_ver = cached.get("last_os_notify_version", "")
+        last_notified_at = cached.get("last_os_notify_at", 0)
+
+        if not force and last_notified_ver == latest and (now - last_notified_at) < CACHE_TTL:
+            return False
+
+        cached["last_os_notify_version"] = latest
+        cached["last_os_notify_at"] = now
+        cls.save_cache(cached)
+
+        return cls.show_os_dialog(
+            current_version=current_version,
+            latest_version=latest,
+            update_command=cmd
+        )
+
+    @classmethod
+    def notify_os_update_background(
+        cls,
+        current_version: str = CURRENT_VERSION,
+        license_key: str = "",
+        force: bool = False
+    ):
+        """
+        Dispatches notify_os_update in a background non-blocking thread.
+        """
+        def _bg():
+            try:
+                cls.notify_os_update(
+                    current_version=current_version,
+                    license_key=license_key,
+                    force=force,
+                    timeout=1.5
+                )
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_bg, daemon=True)
+        t.start()
