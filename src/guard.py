@@ -50,6 +50,13 @@ class TokenSafeGuard:
     )
 
     @classmethod
+    def is_doc_file(cls, file_path: str) -> bool:
+        """Determines if the targeted file is documentation or non-executable text."""
+        if not file_path:
+            return False
+        return file_path.lower().endswith((".md", ".markdown", ".rst", ".txt", ".json", ".yaml", ".yml"))
+
+    @classmethod
     def is_test_file(cls, file_path: str) -> bool:
         """Determines if the targeted file is part of a test suite or mock fixture."""
         if not file_path:
@@ -67,6 +74,8 @@ class TokenSafeGuard:
             return GuardResult(blocked=False)
 
         is_test = cls.is_test_file(file_path)
+        is_doc = cls.is_doc_file(file_path)
+        skip_code_checks = is_test or is_doc
 
         # 1. Secret & Private Key Fallback Guard
         is_leak, leak_reason = SecretRedactor.check_secret_fallback(code_snippet, file_path=file_path)
@@ -78,7 +87,7 @@ class TokenSafeGuard:
             )
 
         # 2. Insecure SSL/TLS Verification Bypass Detection
-        if not is_test:
+        if not skip_code_checks:
             # Python: verify=False in requests, httpx, urllib3, aiohttp
             if re.search(r"\bverify\s*=\s*False\b", code_snippet):
                 return GuardResult(
@@ -104,7 +113,7 @@ class TokenSafeGuard:
                 )
 
         # 3. Raw SQL Injection in Query Execution
-        if not is_test:
+        if not skip_code_checks:
             # Python: cursor.execute(f"...") or conn.execute(f"...")
             py_fstring_sql = re.search(
                 r"""\b(?:cursor|conn|connection|db)\.execute\s*\(\s*f["'](?:\s*SELECT|\s*INSERT|\s*UPDATE|\s*DELETE|\s*DROP|\s*ALTER)""",
@@ -157,7 +166,7 @@ class TokenSafeGuard:
                 )
 
         # 4. Dangerous CORS Wildcard with Credentials
-        if not is_test:
+        if not skip_code_checks:
             has_wildcard_origin = bool(re.search(
                 r"""(?:Access-Control-Allow-Origin['"]?\s*[:=,]\s*['"]\*['"]|origin\s*:\s*['"]\*['"])""",
                 code_snippet,

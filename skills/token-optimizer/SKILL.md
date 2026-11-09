@@ -5,97 +5,163 @@ description: >-
   Activate whenever inspecting files, searching code, locating components/functions/classes,
   reading implementations, analyzing dependencies, or navigating codebase architecture.
   Replaces wasteful terminal grep/find with zero-loss AST smart slicing (-90% tokens),
-  extracts definitions with 1-hop dependencies, and tracks token efficiency metrics.
+  extracts definitions with 1-hop dependencies, enforces security guards, and tracks token efficiency metrics.
 ---
 
 # TokenSafe Optimization & Architecture Intelligence Skill
 
-This skill provides autonomous AI coding assistants with deterministic, zero-token AST architecture indexing, graph-guided code slicing, command sanitization, and context optimization metrics.
+TokenSafe is the zero-loss token economy, context governor, and security engine for autonomous AI coding agents.
+It replaces brute-force terminal crawls (`grep`, `find`, `cat`) with deterministic AST symbol extraction,
+folds multi-turn conversation history, slices verbose tool outputs, and guards against secret leaks and destructive actions.
 
-## MANDATORY CODE INSPECTION DIRECTIVES (ALL AGENTS)
+---
 
-1. **NO RAW TERMINAL GREP OR FIND**:
+## MANDATORY AGENT DIRECTIVES
+
+1. **ZERO RAW TERMINAL GREP / FIND (HARD-BLOCKED)**:
    - Strictly NEVER run `grep`, `egrep`, `ripgrep`, or `find` in `run_command` on source code files (`.ts`, `.tsx`, `.py`, `.js`, `src/`, `views/`, `components/`).
-   - Raw code searches via bash burn thousands of context tokens and are blocked by TokenSafe Guard.
+   - Raw code searches via bash burn thousands of context tokens and are blocked by **TokenSafe Guard** (`decision: deny`).
 
 2. **SYMBOL & COMPONENT EXTRACTION (`smart_read_file`)**:
    - When locating or reading any function, component, class, or handler (e.g. `<LuckyWheelTab>`, `areSectorEqual`, `useWallet`), ALWAYS call `tokensafe:smart_read_file` with `path` and `symbol`.
-   - Returns the exact target definition and 1-hop dependencies in full while folding surrounding inert code into lightweight signatures (-85% to -92% tokens).
+   - **Result**: Preserves the exact target definition and its direct 1-hop dependencies while folding surrounding inert code into 1-line signatures (-85% to -92% tokens).
 
 3. **ARCHITECTURE SURVEY BEFORE BROWSING (`get_architecture_graph`)**:
    - Before multi-file exploration or asking where things are located, ALWAYS call `tokensafe:get_architecture_graph(project_path)`.
-   - Returns top architectural God Nodes and dependency topology in < 250 tokens.
+   - **Result**: Returns top architectural God Nodes, dependency hubs, and centrality rankings in < 250 tokens without file crawling.
 
 4. **API SURFACE INSPECTION (`get_api_surface`)**:
    - Call `tokensafe:get_api_surface(project_path)` to get all exported classes, types, interfaces, and function signatures in a single compact markdown map.
 
+5. **SURGICAL FILE EDITS (`edit_file`)**:
+   - On existing files with >= 40 lines, wholesale rewrites via `write_file` are blocked by **Output Guard**. Always use `edit_file` with precise `Target` and `Replacement` blocks.
+
+6. **SECRET LEAK PREVENTION (ZERO HARDCODED FALLBACKS)**:
+   - Never provide real private keys, API secrets, or credentials as fallback values in `os.environ.get()` or `process.env`. Real credentials must exist strictly in environment variables.
+
+---
+
 ## Core MCP Tools (`tokensafe`)
 
-| MCP Tool | Purpose | Token Cost |
+All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
+
+| MCP Tool | Description | Efficiency Impact |
 |---|---|---|
-| `tokensafe:get_architecture_graph` | Analyzes AST topology, God Nodes, and hub centrality for `project_path`. | ~150-250 tokens |
-| `tokensafe:get_api_surface` | Exports public signatures and types for the entire project. | ~300-600 tokens |
-| `tokensafe:smart_read_file` | Reads `path` focusing on `symbol` + 1-hop dependencies; folds inert code into signatures. | -85% to -92% vs raw read |
-| `tokensafe:sanitize_command` | Strips lockfiles, limits test/build output, and prevents context poisoning. | Saves 10k-50k tokens |
-| `tokensafe:slice_diff` | Slices unified git diffs, eliminates lockfiles, and minimizes hunk context lines. | -50% to -80% |
-| `tokensafe:compress_prompt` | Compresses verbose user instructions into lean TOCP S-expressions. | -40% to -65% |
-| `tokensafe:get_token_savings_metrics` | Returns total tokens saved, USD value, and breakdown by source. | ~100 tokens |
+| `tokensafe:smart_read_file` | Graph-guided AST reader with target `symbol` body retention and 1-hop dependency inlining. | **-85% to -92%** token reduction |
+| `tokensafe:get_architecture_graph` | Computes dependency topology, hub centrality, and identifies top God Nodes for `project_path`. | **~200 tokens** (replaces 50k crawl) |
+| `tokensafe:get_api_surface` | Generates a compact markdown map of all exported types, interfaces, and classes. | **~500 tokens** for entire project |
+| `tokensafe:sanitize_command` | Intercepts shell commands to strip lockfiles, cap unbounded git logs, and quiet test tracebacks. | Saves **10k-50k tokens** per run |
+| `tokensafe:slice_diff` | Slices unified git diffs, eliminating lockfiles and minimizing hunk context lines. | **-50% to -80%** diff size |
+| `tokensafe:compress_prompt` | Compresses verbose user instructions into lean TOCP S-expressions via DeepSeek/Regex. | **-40% to -65%** prompt tokens |
+| `tokensafe:get_token_savings_metrics` | Returns cumulative analytics: tokens saved, context ratio, USD value, and optimization source breakdown. | Persistent SQLite analytics |
 
-## Agent Graph-First Workflow
+---
 
-### 1. Zero-Token Architecture Survey
-Before running recursive searches or reading multi-file structures, query the architecture graph:
+## Agent Workflows
+
+### 1. Architecture Exploration Workflow
 ```json
 {
   "ServerName": "tokensafe",
   "ToolName": "get_architecture_graph",
   "Arguments": {
-    "project_path": "/absolute/path/to/project"
+    "project_path": "/Users/.../projects/my-app"
   }
 }
 ```
-* **Output**: Centrality scores, dependent counts, and identified God Nodes (e.g., `src/graph_engine.py (71 deps)`).
+*Identifies core architectural hubs and dependency weights before inspecting files.*
 
-### 2. Graph-Guided Symbol Inspection
-To read a targeted function or class without reading hundreds of lines of inert code:
+### 2. Targeted Symbol Inspection Workflow
 ```json
 {
   "ServerName": "tokensafe",
   "ToolName": "smart_read_file",
   "Arguments": {
-    "path": "/absolute/path/to/file.py",
-    "symbol": "TargetClassName"
+    "path": "/Users/.../projects/my-app/src/views/StatsView.tsx",
+    "symbol": "LuckyWheelTab"
   }
 }
 ```
-* **Output**: The target definition and its direct 1-hop callees are shown in full; all other classes/methods are folded into 1-line signatures.
+*Extracts only the `LuckyWheelTab` implementation and its direct sub-components with inert code folded.*
 
-### 3. Command Sanitization
-Before executing potentially verbose terminal commands (`git diff`, `git grep`, `pytest`, `find`):
+### 3. Public API Map Workflow
 ```json
 {
   "ServerName": "tokensafe",
-  "ToolName": "sanitize_command",
+  "ToolName": "get_api_surface",
   "Arguments": {
-    "command": "git diff HEAD~1"
+    "project_path": "/Users/.../projects/my-app"
   }
 }
 ```
+*Returns all exported interfaces and types without reading hundreds of module files.*
 
-## CLI Usage
+---
 
-Developers and agents can run `tokensafe` directly from the terminal:
+## Security & Hygiene Engine (TokenSafe Guard)
+
+TokenSafe Guard automatically intercepts dangerous operations in `PreToolUse`:
+
+| Guard Check | Monitored Operation | Action Taken |
+|---|---|---|
+| **RAW_CODE_SEARCH** | Terminal `grep`, `egrep`, `rg`, `find` on source code | **Blocked** (`decision: deny`), directs to `smart_read_file` |
+| **SECRET_FALLBACK** | Hardcoded secrets in `os.environ.get()` / `process.env` | **Blocked** (`decision: deny`), prevents credential commit |
+| **TLS_VERIFY_BYPASS** | Insecure TLS bypass (`verify=False` / `rejectUnauthorized: false`) | **Blocked** (`decision: deny`), MitM attack prevention |
+| **SQL_INJECTION** | Unsafe f-string / template string interpolation in queries | **Blocked** (`decision: deny`), enforces parameterized queries |
+| **GIT_SECRET_STAGING** | `git add .env` or blanket staging with unignored secrets | **Blocked** (`decision: deny`), prevents staging credentials |
+| **DESTRUCTIVE_RM** | `rm -rf /`, `rm -rf ~`, `rm -rf *` | **Blocked** (`decision: deny`), prevents catastrophic deletion |
+| **DATA_EXFILTRATION** | Piping `.env` or private keys to `curl`/`wget` | **Blocked** (`decision: deny`), prevents secret leakage |
+| **PACKAGE_TYPOSQUAT** | Installing known typosquatted packages | **Warning** injected into turn context |
+
+---
+
+## Context Governor & History Compactor
+
+For long-running autonomous sessions, TokenSafe actively manages context bloat:
+
+1. **Multi-Turn History Compaction**:
+   - At conversation turn >= 3, automatically compiles past turns into a lean **Consolidated State Ledger**.
+   - Preserves active file paths, modified symbols, and pending tasks while discarding transient tool output noise.
+2. **Subagent Deduplication Firewall**:
+   - Caches file reads across subagents. If subagent B attempts to read a file already inspected by subagent A, returns the cached skeleton instantly.
+3. **Loop Guard**:
+   - Detects repeated identical tool calls and triggers `force_ask` to prevent runaway infinite agent loops.
+4. **Output Token Guard**:
+   - Intercepts wholesale `write_file` calls on existing files with >= 40 lines to prevent expensive output token burn.
+
+---
+
+## CLI Reference (`tokensafe`)
+
+Run standalone in the terminal or invoke via agent:
 
 ```bash
-# View terminal breakdown & recent optimizations
-tokensafe stats
+# Telemetry & Economics
+tokensafe stats               # View terminal report with tokens saved & USD ROI
+tokensafe html                # Launch interactive Apple-style HTML dashboard
+tokensafe benchmark           # Run zero-loss SWE-bench benchmark suite
 
-# Open interactive Apple-style HTML dashboard in browser
-tokensafe html
+# Code Intelligence & Architecture
+tokensafe graph [path]        # Inspect God Nodes and centrality ranking
+tokensafe map [path]          # Generate tokensafe-out/API_SURFACE.md
+tokensafe skeleton <file>     # View AST skeleton for a specific file
 
-# Run universal agent installer/synchronizer
-tokensafe install
+# Multi-Agent Ecosystem Management
+tokensafe install             # Interactive agent installer (Cursor, Windsurf, Claude, etc.)
+tokensafe install --all       # Automatically configure all 9 detected agent environments
+tokensafe update              # One-click self-update & multi-agent re-synchronization
 
-# Test prompt compression
-tokensafe test "Refactor get_user_balance with redis caching"
+# System Health & Hygiene
+tokensafe doctor              # Audit MCP tool overhead and token tax
+tokensafe prune               # Compact metrics database and prune old events
+tokensafe vacuum              # Reclaim SQLite database disk space
+tokensafe test "<prompt>"     # Test TOCP S-expression prompt compaction
 ```
+
+---
+
+## Proof-of-Savings Turn Footer
+
+At the end of any response where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer:
+`⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens ($<usd>)`
+
