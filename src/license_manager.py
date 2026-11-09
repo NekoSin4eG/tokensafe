@@ -18,7 +18,7 @@ DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 LICENSE_FILE = os.path.join(DATA_DIR, "license.json")
 
 # Master Public Key for client-side offline verification (RFC 8032 Ed25519)
-DEFAULT_ED25519_PUBLIC_KEY = "beb27bc42a723943822ea1ba5d50b7abb55e430cb691518b0b05edef889d0132"
+DEFAULT_ED25519_PUBLIC_KEY = os.environ.get("TOKENSAFE_PUBLIC_KEY", "3911e2ffe5ad07ee23be392b88f238af302f9d3a0bf51881de8b5e0e6af71430")
 # Private key for cloud server signing (never distributed to client, loaded strictly from environment)
 DEFAULT_ED25519_PRIVATE_KEY = os.environ.get("TOKENSAFE_PRIVATE_KEY", "")
 # Rotated HMAC salt for backward compatibility with TS1 legacy licenses
@@ -170,7 +170,8 @@ class LicenseManager:
             if not priv_hex:
                 raise ValueError("TOKENSAFE_PRIVATE_KEY environment variable is required to generate license signatures.")
             priv_bytes = bytes.fromhex(priv_hex)
-            pub_bytes = bytes.fromhex(DEFAULT_ED25519_PUBLIC_KEY)
+            pub_hex = os.environ.get("TOKENSAFE_PUBLIC_KEY") or DEFAULT_ED25519_PUBLIC_KEY
+            pub_bytes = bytes.fromhex(pub_hex)
             sig_raw = _ed25519_sign_bytes(payload_bytes, priv_bytes, pub_bytes)
             sig_b64 = base64.urlsafe_b64encode(sig_raw).decode("ascii").rstrip("=")
             return f"TS2.{payload_b64}.{sig_b64}"
@@ -211,7 +212,7 @@ class LicenseManager:
 
         # 1. Asymmetric Ed25519 Verification (TS2)
         if schema_ver == "TS2":
-            pub_hex = public_key or DEFAULT_ED25519_PUBLIC_KEY
+            pub_hex = public_key or os.environ.get("TOKENSAFE_PUBLIC_KEY") or DEFAULT_ED25519_PUBLIC_KEY
             try:
                 pub_bytes = bytes.fromhex(pub_hex)
                 padded_sig = sig_part + "=" * (-len(sig_part) % 4)
