@@ -19,6 +19,7 @@ class DistillationCache:
     _memory_cache: OrderedDict = OrderedDict()
     _MAX_MEMORY_ENTRIES = 1000
     _db_path: Optional[str] = None
+    _initialized_dbs: set = set()
     _hits: int = 0
     _misses: int = 0
 
@@ -46,6 +47,9 @@ class DistillationCache:
 
     @classmethod
     def _init_db(cls, conn: sqlite3.Connection):
+        db_path = cls._get_db_path()
+        if db_path in cls._initialized_dbs:
+            return
         conn.execute("""
             CREATE TABLE IF NOT EXISTS distillation_cache (
                 prompt_hash TEXT PRIMARY KEY,
@@ -57,6 +61,8 @@ class DistillationCache:
             );
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_distill_hash ON distillation_cache(prompt_hash);")
+        conn.commit()
+        cls._initialized_dbs.add(db_path)
 
     @classmethod
     def get(cls, prompt_text: str) -> Optional[str]:
