@@ -13,6 +13,8 @@
     "src/*.py",
     "!src/cloud_backend.py",
     "!src/mailer.py",
+    "!**/__pycache__/**",
+    "!**/*.pyc",
     "rules/",
     "skills/",
     "hooks/",
