@@ -14,7 +14,7 @@ import urllib.request
 import urllib.error
 from typing import Dict, Any, Optional, Tuple
 
-CURRENT_VERSION = "1.3.12"
+CURRENT_VERSION = "1.4.3"
 CACHE_TTL = 86400  # 24 hours
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -87,6 +87,13 @@ class VersionChecker:
         Falls back gracefully on network or offline scenarios.
         """
         now = int(time.time())
+        if not license_key:
+            try:
+                from src.license_manager import LicenseManager
+                license_key = LicenseManager.get_active_license_key()
+            except Exception:
+                license_key = ""
+
         cached = cls.load_cache()
 
         if not force_fetch and cached:
@@ -107,7 +114,9 @@ class VersionChecker:
         }
 
         try:
-            params = f"?version={urllib.parse.quote(current_version)}&license={urllib.parse.quote(license_key)}"
+            import platform as _plat
+            plat_str = f"{_plat.system().lower()}-{_plat.machine().lower()}"
+            params = f"?version={urllib.parse.quote(current_version)}&license={urllib.parse.quote(license_key)}&platform={urllib.parse.quote(plat_str)}&client_type=cli"
             url = f"{CLOUD_CHECK_URL}{params}"
             req = urllib.request.Request(
                 url,

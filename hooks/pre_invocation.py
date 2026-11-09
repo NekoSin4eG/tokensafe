@@ -45,6 +45,11 @@ def main():
     # 0. Quota and Environment Audits (Fires on first invocation)
     quota = LicenseManager.check_quota(tracker)
     if invocation_num <= 1:
+        try:
+            from src.telemetry_sync import TelemetrySync
+            TelemetrySync.sync_background()
+        except Exception:
+            pass
         if quota.get("warning"):
             inject_steps.append({
                 "systemMessage": {

@@ -29,6 +29,11 @@ def main():
     command = args[0] if args else "stats"
 
     if command in ("stats", "dashboard"):
+        try:
+            from src.telemetry_sync import TelemetrySync
+            TelemetrySync.sync_background()
+        except Exception:
+            pass
         print(dashboard.render_terminal())
 
     elif command in ("html", "web"):
@@ -207,10 +212,40 @@ def main():
         key = args[1].strip()
         ok, msg = LicenseManager.save_license(key)
         if ok:
-            print(f"\n\033[32m\033[1m✔ {msg}\033[0m\n")
+            print(f"\n\033[32m\033[1m✔ {msg}\033[0m")
+            # Automatically report version and seat activation to cloud
+            try:
+                from src.version_checker import VersionChecker
+                VersionChecker.check_version(license_key=key, force_fetch=True)
+            except Exception:
+                pass
+            # Automatically sync existing local token metrics to newly activated license
+            try:
+                from src.telemetry_sync import TelemetrySync
+                sync_res = TelemetrySync.sync(license_key=key, timeout=3.0)
+                if sync_res.get("success") and sync_res.get("synced_events", 0) > 0:
+                    print(f"  \033[36m✔ Synced {sync_res['synced_events']:,} past optimization events to cloud dashboard.\033[0m")
+            except Exception:
+                pass
+            print()
         else:
             print(f"\n\033[31m\033[1m✖ {msg}\033[0m\n")
             sys.exit(1)
+
+    elif command in ("sync", "push"):
+        from src.telemetry_sync import TelemetrySync
+        print("\n\033[1m\033[36m⚡ SYNCHRONIZING TOKEN METRICS WITH DASHBOARD ⚡\033[0m\n")
+        force_sync = "--force" in args or "-f" in args
+        status_before = TelemetrySync.get_sync_status()
+        print(f"  Local recorded events: {status_before['total_local_events']:,}")
+        print(f"  Pending sync:          {status_before['pending_events']:,}\n")
+        res = TelemetrySync.sync(force=force_sync, verbose=True)
+        if res.get("success"):
+            print(f"  \033[32m✔ {res.get('message', 'Synchronized successfully.')}\033[0m")
+            status_after = TelemetrySync.get_sync_status()
+            print(f"  Total synced events:   {status_after['total_synced_events']:,}\n")
+        else:
+            print(f"  \033[31m✖ Sync failed: {res.get('error', 'Unknown error')}\033[0m\n")
 
     elif command in ("license", "tier"):
         from src.license_manager import LicenseManager
@@ -391,7 +426,7 @@ def main():
 
     else:
         print(f"Unknown command: {command}")
-        print("Available commands: stats, html, test, doctor, providers, mcp, benchmark, proxy, graph, map, vacuum, prune, digest, activate, license, markdown, setup, reset")
+        print("Available commands: stats, sync, html, test, doctor, providers, mcp, benchmark, proxy, graph, map, vacuum, prune, digest, activate, license, markdown, setup, reset")
         sys.exit(1)
 
 if __name__ == "__main__":

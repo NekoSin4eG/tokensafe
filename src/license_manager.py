@@ -19,6 +19,8 @@ LICENSE_FILE = os.path.join(DATA_DIR, "license.json")
 
 # Master Public Key for client-side offline verification (RFC 8032 Ed25519)
 DEFAULT_ED25519_PUBLIC_KEY = os.environ.get("TOKENSAFE_PUBLIC_KEY", "3911e2ffe5ad07ee23be392b88f238af302f9d3a0bf51881de8b5e0e6af71430")
+# Pre-rotation public keys accepted for backwards compatibility
+LEGACY_ED25519_PUBLIC_KEYS = ("8a2c9d550180ab5b00a06174cb6aecfd712740c59d0bdcff66a56515348c855e",)
 # Private key for cloud server signing (never distributed to client, loaded strictly from environment)
 DEFAULT_ED25519_PRIVATE_KEY = os.environ.get("TOKENSAFE_PRIVATE_KEY", "")
 # Rotated HMAC salt for backward compatibility with TS1 legacy licenses
@@ -221,7 +223,17 @@ class LicenseManager:
                 return False, {}, "Invalid signature encoding"
 
             if not _ed25519_verify_bytes(sig_bytes, payload_bytes, pub_bytes):
-                return False, {}, "Invalid digital signature: license key has been tampered with or is counterfeit"
+                verified = False
+                if not public_key:
+                    for leg_hex in LEGACY_ED25519_PUBLIC_KEYS:
+                        try:
+                            if _ed25519_verify_bytes(sig_bytes, payload_bytes, bytes.fromhex(leg_hex)):
+                                verified = True
+                                break
+                        except Exception:
+                            pass
+                if not verified:
+                    return False, {}, "Invalid digital signature: license key has been tampered with or is counterfeit"
 
         # 2. Legacy TS1 Verification
         else:
@@ -261,6 +273,19 @@ class LicenseManager:
                 return payload.get("tier", "solo"), payload
 
         return "free", {"tier": "free", "max_tokens_monthly": 500_000}
+
+    @classmethod
+    def get_active_license_key(cls) -> str:
+        """Retrieves active raw license key string from env or data/license.json, or empty string."""
+        key = os.environ.get("TOKENSAFE_LICENSE_KEY", "").strip()
+        if not key and os.path.exists(LICENSE_FILE):
+            try:
+                with open(LICENSE_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    key = data.get("license_key", "").strip()
+            except Exception:
+                pass
+        return key
 
     @classmethod
     def save_license(cls, license_key: str) -> Tuple[bool, str]:

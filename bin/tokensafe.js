@@ -39,6 +39,7 @@ Usage:
 
 Commands:
   tokensafe stats              Show token economy savings & performance metrics
+  tokensafe sync               Synchronize local token metrics with Cloud Dashboard
   tokensafe html               Generate and open interactive browser dashboard
   tokensafe test "<prompt>"    Test prompt compression on custom input
   tokensafe doctor             Audit MCP servers & skills context token tax
