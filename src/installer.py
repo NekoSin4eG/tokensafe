@@ -15,7 +15,10 @@ import sys
 import json
 import shutil
 import re
+import shlex
+import signal
 import subprocess
+import time
 from typing import Dict, List, Any, Optional, Tuple
 
 RESET = "\033[0m"
@@ -542,6 +545,104 @@ class AgentInstaller:
         print(f"\n\033[32m\033[1m✅ TokenSafe successfully connected to {installed_count} agent(s)!\033[0m")
         print("   Restart your IDE / Agent to start saving tokens automatically.\n")
 
+    @staticmethod
+    def _is_tokensafe_mcp_command(cmd: str) -> bool:
+        """Returns True if a process command line represents a running TokenSafe MCP server daemon."""
+        if not cmd or not cmd.strip():
+            return False
+        try:
+            tokens = shlex.split(cmd)
+        except ValueError:
+            tokens = cmd.split()
+        if not tokens:
+            return False
+
+        # Ignore shell wrappers or inline python -c inspection commands
+        exe_base = os.path.basename(tokens[0]).lower()
+        if exe_base in ("sh", "bash", "zsh", "fish", "dash") and "-c" in tokens:
+            return False
+        if exe_base.startswith("python") and "-c" in tokens:
+            return False
+
+        for idx, tok in enumerate(tokens):
+            base = os.path.basename(tok).lower()
+            if base == "mcp_server.py" and ("tokensafe" in tok.lower() or "agy-token-optimizer" in tok.lower() or "src/mcp_server.py" in tok.replace("\\", "/")):
+                return True
+            if base in ("tokensafe", "tokensafe.js", "agy-tokens"):
+                rest = tokens[idx + 1:]
+                if rest and rest[0] == "mcp":
+                    subcmd = rest[1] if len(rest) > 1 else "serve"
+                    if subcmd not in ("disable", "off", "rm", "enable", "on", "add", "list", "ls", "status"):
+                        return True
+        return False
+
+    @classmethod
+    def restart_mcp_daemons(cls) -> int:
+        """
+        Touches the MCP reload marker and terminates active TokenSafe MCP server daemons
+        so auto-reconnecting IDEs (Antigravity, Cursor, Claude Code) spawn the updated version.
+        """
+        try:
+            data_dir = os.path.join(PROJECT_ROOT, "data")
+            os.makedirs(data_dir, exist_ok=True)
+            reload_marker = os.path.join(data_dir, ".mcp_reload")
+            with open(reload_marker, "w", encoding="utf-8") as f:
+                f.write(str(time.time()))
+        except Exception:
+            pass
+
+        if os.name == "nt":
+            return 0
+
+        my_pid = os.getpid()
+        parent_pid = os.getppid()
+        target_pids: List[int] = []
+
+        try:
+            res = subprocess.run(
+                ["ps", "-ax", "-o", "pid=,command="],
+                capture_output=True,
+                text=True,
+                timeout=3
+            )
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    parts = line.split(None, 1)
+                    if len(parts) < 2:
+                        continue
+                    try:
+                        pid = int(parts[0])
+                    except ValueError:
+                        continue
+                    if pid in (my_pid, parent_pid) or pid <= 1:
+                        continue
+                    if cls._is_tokensafe_mcp_command(parts[1]):
+                        target_pids.append(pid)
+        except Exception:
+            return 0
+
+        restarted = 0
+        for pid in target_pids:
+            try:
+                os.kill(pid, signal.SIGTERM)
+                restarted += 1
+            except (ProcessLookupError, PermissionError, OSError):
+                continue
+
+        if restarted > 0:
+            time.sleep(0.2)
+            for pid in target_pids:
+                try:
+                    os.kill(pid, 0)
+                    os.kill(pid, signal.SIGKILL)
+                except (ProcessLookupError, PermissionError, OSError):
+                    pass
+
+        return restarted
+
     @classmethod
     def self_update(cls):
         """
@@ -549,7 +650,7 @@ class AgentInstaller:
         1. Detects package installation source (git, npm, pip).
         2. Upgrades TokenSafe engine to latest release.
         3. Re-synchronizes MCP configs and rules for all active agents.
-        4. Refreshes local version cache.
+        4. Refreshes local version cache and restarts running MCP daemons.
         """
         print(f"\n{BOLD}{CYAN}╔════════════════════════════════════════════════════════════════════╗{RESET}")
         print(f"{BOLD}{CYAN}║             ⚡ TOKENSAFE ONE-CLICK SELF-UPDATE ⚡                 ║{RESET}")
@@ -612,6 +713,12 @@ class AgentInstaller:
                 os.remove(cache_file)
         except Exception:
             pass
+
+        # 6. Restart running MCP server daemons so IDEs load the new version
+        restarted_count = cls.restart_mcp_daemons()
+        if restarted_count > 0:
+            print(f"  {GREEN}✔{RESET} Restarted {restarted_count} running TokenSafe MCP daemon(s).")
+            print(f"    {CYAN}ℹ{RESET} Antigravity/Cursor/Claude Code reconnect automatically; reload MCP in Claude Desktop/VS Code if disconnected.")
 
         print(f"\n{BOLD}{GREEN}✅ Self-update complete!{RESET}")
         print(f"   Synchronized {synced_count} agent environments with zero-loss AST & God Nodes rules.")

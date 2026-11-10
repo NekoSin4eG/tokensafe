@@ -1,6 +1,8 @@
 import unittest
+from unittest.mock import patch, MagicMock
 import os
 import json
+import signal
 import tempfile
 import shutil
 from src.installer import AgentInstaller, AGENTS_REGISTRY
@@ -101,6 +103,42 @@ class TestAgentInstaller(unittest.TestCase):
                 self.assertTrue(os.path.exists(fake_skills))
             finally:
                 AGENTS_REGISTRY["zcode"] = orig_entry
+
+    def test_is_tokensafe_mcp_command_filtering(self):
+        self.assertTrue(AgentInstaller._is_tokensafe_mcp_command("python3 /app/bin/tokensafe mcp"))
+        self.assertTrue(AgentInstaller._is_tokensafe_mcp_command("node /usr/local/bin/tokensafe mcp"))
+        self.assertTrue(AgentInstaller._is_tokensafe_mcp_command("python3 /Users/dev/agy-token-optimizer/src/mcp_server.py"))
+        self.assertFalse(AgentInstaller._is_tokensafe_mcp_command("python3 /app/bin/tokensafe update"))
+        self.assertFalse(AgentInstaller._is_tokensafe_mcp_command("python3 /app/bin/tokensafe mcp list"))
+        self.assertFalse(AgentInstaller._is_tokensafe_mcp_command("zsh -c 'ps aux | grep tokensafe mcp'"))
+        self.assertFalse(AgentInstaller._is_tokensafe_mcp_command("python3 -c 'print(\"tokensafe mcp\")'"))
+
+    def test_restart_mcp_daemons_signals_matching_pids_only(self):
+        fake_ps = "\n".join([
+            f"{os.getpid()} python3 /app/bin/tokensafe update",
+            "54321 python3 /Users/dev/agy-token-optimizer/bin/tokensafe mcp",
+            "54322 node /Users/dev/.nvm/bin/tokensafe mcp",
+            "54323 python3 /Users/dev/agy-token-optimizer/bin/tokensafe mcp list",
+            "54324 zsh -c ps aux | python3 -c tokensafe mcp",
+        ])
+        mock_proc = MagicMock(returncode=0, stdout=fake_ps)
+        killed = []
+
+        def fake_kill(pid, sig):
+            if sig == 0:
+                raise ProcessLookupError()
+            killed.append((pid, sig))
+
+        with tempfile.TemporaryDirectory() as tmpdir, \
+             patch("src.installer.PROJECT_ROOT", tmpdir), \
+             patch("src.installer.subprocess.run", return_value=mock_proc), \
+             patch("src.installer.os.kill", side_effect=fake_kill), \
+             patch("src.installer.time.sleep"):
+            count = AgentInstaller.restart_mcp_daemons()
+            self.assertTrue(os.path.exists(os.path.join(tmpdir, "data", ".mcp_reload")))
+
+        self.assertEqual(count, 2)
+        self.assertEqual(killed, [(54321, signal.SIGTERM), (54322, signal.SIGTERM)])
 
 if __name__ == "__main__":
     unittest.main()

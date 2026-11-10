@@ -12,7 +12,7 @@ import json
 import threading
 import traceback
 import fnmatch
-from typing import Tuple, Optional
+from typing import List, Tuple, Optional
 
 # Ensure project root in sys.path
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -738,8 +738,27 @@ def _execute_with_timeout(tool_name: str, tool_args: dict, timeout: float = MCP_
     return box["result"]
 
 
+def _get_watched_mtimes() -> Tuple[Optional[float], ...]:
+    """Returns mtimes for core server/package files and the update reload marker."""
+    watched_paths = (
+        os.path.abspath(__file__),
+        os.path.join(BASE_DIR, "package.json"),
+        os.path.join(BASE_DIR, "data", ".mcp_reload"),
+    )
+    mtimes: List[Optional[float]] = []
+    for p in watched_paths:
+        try:
+            mtimes.append(os.path.getmtime(p))
+        except OSError:
+            mtimes.append(None)
+    return tuple(mtimes)
+
+
 def run_mcp_server():
-    """Runs stdio JSON-RPC 2.0 loop with per-call timeout & resilient error recovery."""
+    """Runs stdio JSON-RPC 2.0 loop with per-call timeout, resilient recovery & auto-reload on upgrade."""
+    initial_mtimes = _get_watched_mtimes()
+    auto_reload = os.environ.get("TOKENSAFE_MCP_AUTORELOAD", "1").strip().lower() not in ("0", "false", "no")
+
     while True:
         try:
             line = sys.stdin.readline()
@@ -800,6 +819,12 @@ def run_mcp_server():
             sys.stdout.flush()
         except Exception:
             break
+
+        # Safeguard: if TokenSafe files were upgraded on disk while running, exit cleanly
+        # immediately after sending the response so the host IDE respawns the new version.
+        if auto_reload and method == "tools/call":
+            if _get_watched_mtimes() != initial_mtimes:
+                break
 
 def main():
     run_mcp_server()

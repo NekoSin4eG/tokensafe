@@ -96,5 +96,27 @@ class TestMCPServer(unittest.TestCase):
         self.assertEqual(resp["id"], 99)
         self.assertIn("tools", resp["result"])
 
+    def test_run_mcp_server_exits_cleanly_after_disk_upgrade(self):
+        # Two tools/call requests queued, but watched mtimes change after the 1st request
+        stdin_data = (
+            json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {"name": "list_dir", "arguments": {"path": "src"}}}) + "\n" +
+            json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "list_dir", "arguments": {"path": "src"}}}) + "\n"
+        )
+        fake_in = io.StringIO(stdin_data)
+        fake_out = io.StringIO()
+        mtimes_seq = [(100.0, 100.0, None), (200.0, 100.0, None)]
+
+        with patch("sys.stdin", fake_in), \
+             patch("sys.stdout", fake_out), \
+             patch("src.mcp_server._get_watched_mtimes", side_effect=mtimes_seq):
+            run_mcp_server()
+
+        lines = [line for line in fake_out.getvalue().strip().splitlines() if line]
+        # Only the 1st request is answered; server then exits cleanly so host IDE respawns new code
+        self.assertEqual(len(lines), 1)
+        resp = json.loads(lines[0])
+        self.assertEqual(resp["id"], 1)
+        self.assertFalse(resp["result"].get("isError", False))
+
 if __name__ == "__main__":
     unittest.main()
