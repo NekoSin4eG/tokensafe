@@ -915,16 +915,25 @@ class TestPublicSurfaceHygiene(unittest.TestCase):
     it must never advertise the administrative API surface."""
 
     def test_readme_has_no_admin_endpoints(self):
-        readme = open(os.path.join(PROJECT_ROOT, "README.md"), encoding="utf-8").read()
+        with open(os.path.join(PROJECT_ROOT, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
         self.assertNotIn("/api/admin", readme, "README leaks admin endpoint paths to the public repo")
 
     def test_admin_docs_are_private_and_stripped_from_export(self):
-        # Private ops doc exists and is excluded by the public exporter...
-        self.assertTrue(os.path.exists(os.path.join(PROJECT_ROOT, "docs", "ADMIN_API.md")))
-        sync_script = open(os.path.join(PROJECT_ROOT, "bin", "sync-public.sh"), encoding="utf-8").read()
-        self.assertIn("docs/ADMIN_API.md", sync_script)
+        sync_path = os.path.join(PROJECT_ROOT, "bin", "sync-public.sh")
+        admin_doc_path = os.path.join(PROJECT_ROOT, "docs", "ADMIN_API.md")
+        if os.path.exists(sync_path):
+            # Private repo: ops doc exists and is excluded by the public exporter...
+            self.assertTrue(os.path.exists(admin_doc_path))
+            with open(sync_path, encoding="utf-8") as f:
+                sync_script = f.read()
+            self.assertIn("docs/ADMIN_API.md", sync_script)
+        else:
+            # Public export: private ops doc and exporter script must be stripped.
+            self.assertFalse(os.path.exists(admin_doc_path))
         # ...and README points admins to it without printing the surface.
-        readme = open(os.path.join(PROJECT_ROOT, "README.md"), encoding="utf-8").read()
+        with open(os.path.join(PROJECT_ROOT, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
         self.assertIn("not documented in the public API surface", readme)
 
 
