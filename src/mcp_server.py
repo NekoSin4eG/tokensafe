@@ -44,6 +44,7 @@ TOOLS = [
             "properties": {
                 "path": {"type": "string", "description": "Absolute path to the code file"},
                 "symbol": {"type": "string", "description": "Optional: targeted function or class name for graph-guided skeletonization"},
+                "include_deps": {"type": "boolean", "description": "Optional: whether to include 1-hop dependencies in full (default: true). Set false for single-symbol surgical isolation."},
                 "start_line": {"type": "integer", "description": "Optional: starting line number"},
                 "end_line": {"type": "integer", "description": "Optional: ending line number"}
             },
@@ -347,7 +348,8 @@ def handle_tool_call(name: str, args: dict) -> dict:
         if symbol:
             try:
                 graph, rel_path = GraphEngine.for_file(path)
-                graph_skel = graph.graph_guided_skeletonize(path, target_symbol=symbol)
+                inc_deps = bool(args.get("include_deps", True))
+                graph_skel = graph.graph_guided_skeletonize(path, target_symbol=symbol, include_deps=inc_deps)
                 if graph_skel:
                     with open(path, "r", encoding="utf-8", errors="replace") as f:
                         raw_code = f.read()
@@ -359,9 +361,10 @@ def handle_tool_call(name: str, args: dict) -> dict:
                         event_type="GRAPH_SKELETON",
                         original_tokens=orig_t,
                         optimized_tokens=skel_t,
-                        details={"file": os.path.basename(path), "symbol": symbol, "saved_tokens": saved}
+                        details={"file": os.path.basename(path), "symbol": symbol, "saved_tokens": saved, "include_deps": inc_deps}
                     )
-                    header = f"// [TokenSafe Graph-Guided Skeleton for '{symbol}' | Full body + 1-hop dependencies]\n"
+                    dep_label = "Full body + 1-hop dependencies" if inc_deps else "Surgical single-symbol isolation"
+                    header = f"// [TokenSafe Graph-Guided Skeleton for '{symbol}' | {dep_label}]\n"
                     return {"content": [{"type": "text", "text": (prefetch_block or "") + header + graph_skel}]}
             except Exception:
                 pass

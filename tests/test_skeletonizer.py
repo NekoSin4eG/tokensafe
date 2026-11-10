@@ -285,5 +285,29 @@ $scss-primary: #3b82f6;
         self.assertIn("padding: 8px 16px;", skel_target)
         self.assertIn(".btn-secondary { /* ... */ }", skel_target)
 
+    def test_python_folded_functions_docstrings_stripped(self):
+        py_code = '''
+def target_fn():
+    """Keep this docstring."""
+    return 42
+
+def inert_fn():
+    """This docstring must be stripped."""
+    do_something()
+'''
+        skel = Skeletonizer.skeletonize_code(py_code, ".py", keep_symbols={"target_fn"})
+        self.assertIn("Keep this docstring.", skel)
+        self.assertNotIn("This docstring must be stripped.", skel)
+        self.assertIn("def inert_fn():\n    ...", skel)
+
+    def test_include_deps_flag_in_graph_engine(self):
+        from src.graph_engine import GraphEngine
+        graph, _ = GraphEngine.for_file("src/guard.py")
+        skel_deps = graph.graph_guided_skeletonize("src/guard.py", "inspect_command", include_deps=True)
+        skel_no_deps = graph.graph_guided_skeletonize("src/guard.py", "inspect_command", include_deps=False)
+        self.assertLess(len(skel_no_deps.splitlines()), len(skel_deps.splitlines()))
+        self.assertIn("def _check_raw_code_search", skel_no_deps)
+        self.assertIn("def _check_raw_code_search", skel_deps)
+
 if __name__ == "__main__":
     unittest.main()

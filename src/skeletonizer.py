@@ -129,19 +129,21 @@ class Skeletonizer:
 
     @classmethod
     def _skeletonize_python(cls, code: str, keep_symbols: Optional[Set[str]] = None) -> str:
-        """Uses Python standard library `ast` to fold function bodies."""
+        """Uses Python standard library `ast` to fold function bodies cleanly."""
         try:
             tree = ast.parse(code)
+            # When targeting specific symbols, condense verbose module docstring to 1 line
+            if keep_symbols and tree.body and isinstance(tree.body[0], ast.Expr) and isinstance(tree.body[0].value, ast.Constant):
+                doc_val = str(tree.body[0].value.value)
+                first_line = doc_val.strip().split("\n")[0].strip()
+                tree.body[0].value.value = f"{first_line} ..."
+
             for node in ast.walk(tree):
                 if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                     if keep_symbols is not None and node.name in keep_symbols:
                         continue
-                    doc = ast.get_docstring(node)
-                    new_body = []
-                    if doc:
-                        new_body.append(ast.Expr(value=ast.Constant(value=doc)))
-                    new_body.append(ast.Expr(value=ast.Constant(value=Ellipsis)))
-                    node.body = new_body
+                    # Fold inert functions to pure ellipsis without verbose docstrings
+                    node.body = [ast.Expr(value=ast.Constant(value=Ellipsis))]
             return ast.unparse(tree)
         except Exception:
             return code

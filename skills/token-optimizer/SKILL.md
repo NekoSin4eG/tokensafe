@@ -24,7 +24,8 @@ folds multi-turn conversation history, slices verbose tool outputs, and guards a
 
 2. **SYMBOL & COMPONENT EXTRACTION (`smart_read_file`)**:
    - When locating or reading any function, component, class, or handler (e.g. `<LuckyWheelTab>`, `areSectorEqual`, `useWallet`), ALWAYS call `tokensafe:smart_read_file` with `path` and `symbol`.
-   - **Result**: Preserves the exact target definition and its direct 1-hop dependencies while folding surrounding inert code into 1-line signatures (-85% to -92% tokens).
+   - **1-Hop vs Surgical**: By default, `smart_read_file` includes direct 1-hop dependencies so you understand called helper functions without extra tool calls. When you only need the target method for a surgical edit, pass `"include_deps": false` to get pure single-method isolation (-95% tokens).
+   - **Result**: Preserves the exact target definition while folding surrounding inert code into clean 1-line signatures without docstrings (-85% to -95% tokens).
 
 3. **ARCHITECTURE SURVEY BEFORE BROWSING (`get_architecture_graph`)**:
    - Before multi-file exploration or asking where things are located, ALWAYS call `tokensafe:get_architecture_graph(project_path)`.
@@ -93,11 +94,12 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
   "ToolName": "smart_read_file",
   "Arguments": {
     "path": "/Users/.../projects/my-app/src/views/StatsView.tsx",
-    "symbol": "LuckyWheelTab"
+    "symbol": "LuckyWheelTab",
+    "include_deps": false
   }
 }
 ```
-*Extracts only the `LuckyWheelTab` implementation and its direct sub-components with inert code folded.*
+*Extracts only the targeted `LuckyWheelTab` implementation with inert code and docstrings folded. Omit `include_deps` or set `true` to also inline 1-hop internal dependencies.*
 
 ### 3. Public API Map Workflow
 ```json

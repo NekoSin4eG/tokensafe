@@ -318,12 +318,12 @@ class CodeGraph:
             "one_hop": one_hop
         }
 
-    def graph_guided_skeletonize(self, full_path: str, target_symbol: Optional[str] = None) -> str:
+    def graph_guided_skeletonize(self, full_path: str, target_symbol: Optional[str] = None, include_deps: bool = True) -> str:
         """
         Surgically folds code based on graph connectivity:
         - target_symbol: Retains FULL function body.
-        - 1-hop dependencies: Retains FULL body.
-        - 2-hop / Unrelated functions in the same file: Stripped to AST signatures (ellipsis / pass).
+        - 1-hop dependencies: Retained if include_deps=True.
+        - 2-hop / Unrelated functions in the same file: Stripped to AST signatures (ellipsis).
         Yields up to 90% token reduction without breaking context.
         """
         try:
@@ -339,10 +339,11 @@ class CodeGraph:
         if not target_symbol:
             return Skeletonizer.skeletonize_code(code, ext)
 
-        neighborhood = self.get_neighborhood(target_symbol)
         keep_full_names = {target_symbol}
-        for k in neighborhood.get("one_hop", set()):
-            keep_full_names.add(k.split("::")[-1])
+        if include_deps:
+            neighborhood = self.get_neighborhood(target_symbol)
+            for k in neighborhood.get("one_hop", set()):
+                keep_full_names.add(k.split("::")[-1])
 
         return Skeletonizer.skeletonize_code(code, ext, keep_symbols=keep_full_names)
 
