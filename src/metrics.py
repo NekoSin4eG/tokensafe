@@ -247,6 +247,59 @@ class MetricsTracker:
             "measurement": measurement_label
         }
 
+    @staticmethod
+    def _infer_agent(session_id: str, details: Dict[str, Any]) -> str:
+        """Best-effort attribution of an event to the agent that produced it.
+        Explicit details.agent (new adapters) wins; session_id prefixes cover
+        the historic naming conventions."""
+        explicit = details.get("agent")
+        if explicit:
+            return str(explicit)
+        sid = session_id or ""
+        if sid == "mcp_session":
+            return "mcp"
+        if sid == "proxy_session":
+            return "proxy"
+        if sid.startswith("hook_"):
+            return sid[len("hook_"):] or "hook"
+        return "antigravity"
+
+    def get_by_agent(self) -> Dict[str, Dict[str, Any]]:
+        """Per-agent savings breakdown for the honest Cumulative Total:
+        aggregates events by the agent that produced them, with the
+        measured/estimated split (see METRICS.md)."""
+        by_agent: Dict[str, Dict[str, Any]] = {}
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT session_id, saved_tokens, est_usd_saved, measurement, details
+                    FROM events
+                """)
+                for row in cursor.fetchall():
+                    try:
+                        details = json.loads(row["details"] or "{}")
+                        if not isinstance(details, dict):
+                            details = {}
+                    except Exception:
+                        details = {}
+                    agent = self._infer_agent(row["session_id"], details)
+                    bucket = by_agent.setdefault(agent, {
+                        "events": 0, "saved_tokens": 0, "saved_tokens_measured": 0,
+                        "saved_tokens_estimated": 0, "est_usd_saved": 0.0,
+                    })
+                    saved = int(row["saved_tokens"] or 0)
+                    measurement = row["measurement"] or "measured"
+                    bucket["events"] += 1
+                    bucket["saved_tokens"] += saved
+                    bucket["saved_tokens_measured"] += saved if measurement == "measured" else 0
+                    bucket["saved_tokens_estimated"] += saved if measurement == "estimated" else 0
+                    bucket["est_usd_saved"] = round(bucket["est_usd_saved"] + float(row["est_usd_saved"] or 0.0), 4)
+        except Exception:
+            pass
+        # Largest contributor first
+        return dict(sorted(by_agent.items(), key=lambda kv: kv[1]["saved_tokens"], reverse=True))
+
     def get_summary(self) -> Dict[str, Any]:
         """Returns cumulative statistics across all sessions, including lifetime rollups."""
         with self._get_connection() as conn:
@@ -324,6 +377,8 @@ class MetricsTracker:
             "total_saved_tokens_estimated": saved_estimated,
             "overall_reduction_pct": round(overall_reduction, 1),
             "total_usd_saved": round(total_usd, 4),
+            "total_usd_saved_approx": True,  # USD is a derived estimate (~$1.5/M blended), never a bill
+            "by_agent": self.get_by_agent(),
             "breakdown": combined_breakdown
         }
 

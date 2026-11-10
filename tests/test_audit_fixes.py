@@ -1086,6 +1086,41 @@ class TestContextBudgetHUD(unittest.TestCase):
     not os.path.exists(os.path.join(PROJECT_ROOT, 'src', 'cloud_backend.py')),
     'cloud backend stripped from public export'
 )
+class TestByAgentBreakdown(unittest.TestCase):
+    """Honest Cumulative Total: per-agent aggregation with measured/estimated split."""
+
+    def setUp(self):
+        from src import metrics as metrics_mod
+        self._tmp = tempfile.mkdtemp(prefix="tokensafe_by_agent_")
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        os.environ["TOKENSAFE_DB_PATH"] = os.path.join(self._tmp, "metrics.db")
+        os.environ["TOKENSAFE_TELEMETRY_DISABLED"] = "1"
+        metrics_mod._INITIALIZED_METRICS_DBS.clear()
+        self.addCleanup(os.environ.pop, "TOKENSAFE_DB_PATH", None)
+        self.addCleanup(os.environ.pop, "TOKENSAFE_TELEMETRY_DISABLED", None)
+        from src.metrics import MetricsTracker
+        self.tracker = MetricsTracker()
+
+    def test_inference_and_splits(self):
+        t = self.tracker
+        t.record_event("mcp_session", "TOOL_READ", 100, 30, measurement="measured")
+        t.record_event("proxy_session", "COMMAND_FILTER", 400, 100, measurement="measured")
+        t.record_event("hook_cursor", "GUARD_JUNK_READ", 4000, 0, measurement="measured")
+        t.record_event("antigravity_conv_1", "HISTORY_FOLD", 1000, 100)  # estimated by type map
+        t.record_event("any_session", "TOOL_READ", 50, 10,
+                       details={"agent": "claude_code"})  # explicit agent wins
+
+        by_agent = t.get_summary()["by_agent"]
+        self.assertEqual(by_agent["mcp"]["saved_tokens"], 70)  # saved = 100 - 30
+        self.assertEqual(by_agent["proxy"]["saved_tokens"], 300)
+        self.assertEqual(by_agent["cursor"]["saved_tokens_measured"], 4000)
+        self.assertEqual(by_agent["antigravity"]["saved_tokens_estimated"], 900)
+        self.assertEqual(by_agent["claude_code"]["saved_tokens"], 40)
+        # Totals reconcile
+        self.assertEqual(sum(a["saved_tokens"] for a in by_agent.values()),
+                         t.get_summary()["total_saved_tokens"])
+
+
 class TestPerSeatRoi(unittest.TestCase):
     """Owner dashboard seats carry per-member ROI with measured/estimated split."""
 

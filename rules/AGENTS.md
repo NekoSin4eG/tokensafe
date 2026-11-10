@@ -36,9 +36,9 @@ Execute the specified action directly based on these extracted parameters.
 
 ### 4. Turn Token Savings Footer (Proof-of-Savings)
 At the end of your response for any turn where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer:
-`⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens`
+`⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens (≈$<usd> approx)`
 Example:
-`⚡ **TokenSafe Turn Savings**: +3,520 tokens (~88%) | Cumulative Total: 3.04M tokens ($4.56)`
+`⚡ **TokenSafe Turn Savings**: +3,520 tokens (~88%) | Cumulative Total: 3.04M tokens (≈$4.56 approx)`
 
 ### 5. Secret Leak Prevention Directive (Zero Hardcoded Fallbacks)
 1. **Never Hardcode Credential Fallbacks**: Never provide real private keys, API secrets, access tokens, or webhook secrets as default fallback arguments in `os.environ.get()`, `os.getenv()`, or `process.env`. If an environment variable is absent, raise an explicit configuration error or use an empty string / test mock. Real credentials must exist strictly in environment variables.

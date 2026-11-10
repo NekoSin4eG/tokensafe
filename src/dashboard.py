@@ -93,7 +93,19 @@ class Dashboard:
 
         out.append(f"  {BOLD}Total Tokens Saved:{RESET}  {GREEN}{BOLD}{total_saved:,}{RESET} tokens")
         out.append(f"  {BOLD}Efficiency Gain:{RESET}     {YELLOW}{BOLD}{render_bar(pct)}{RESET}")
-        out.append(f"  {BOLD}Estimated Savings:{RESET}   {GREEN}${usd:.4f} USD{RESET}")
+        out.append(f"  {BOLD}Estimated Savings:{RESET}   {GREEN}≈${usd:.4f} USD{RESET} {DIM}(derived: tokens × $1.5/M — approximation, not a bill){RESET}")
+
+        # Per-agent breakdown (honest Cumulative Total across ALL agents)
+        by_agent = summary.get("by_agent") or {}
+        if by_agent:
+            out.append(f"\n  {BOLD}By Agent:{RESET}")
+            for agent, stats in by_agent.items():
+                out.append(
+                    f"    • {agent:<14} {stats['saved_tokens']:>12,} tok "
+                    f"({stats['saved_tokens_measured']:,} metered / {stats['saved_tokens_estimated']:,} est.) "
+                    f"≈${stats['est_usd_saved']:.2f}"
+                )
+            out.append("")
         out.append(f"  {BOLD}Context Traffic:{RESET}     {orig:,} raw ➔ {opt:,} optimized ({events_count} events)\n")
 
         # Breakdown by category
@@ -155,7 +167,7 @@ class Dashboard:
         md.append(f"| **Total Tokens Saved** | **{total_saved:,} tokens** |")
         md.append(f"| **Context Ratio** | {orig:,} raw ➔ {opt:,} optimized |")
         md.append(f"| **Net Efficiency Gain** | `{render_bar(pct)}` |")
-        md.append(f"| **Estimated Value Saved** | **${usd:.4f} USD** |\n")
+        md.append(f"| **Estimated Value Saved** | **≈${usd:.4f} USD** (derived approximation) |\n")
 
         md.append("### Source Breakdown\n")
         md.append("| Pipeline Stage | Events | Tokens Saved |")
@@ -373,7 +385,7 @@ class Dashboard:
           }}
           if (data.total_usd_saved !== undefined) {{
             const el = document.getElementById('val-usd-saved');
-            if (el) el.innerText = '$' + data.total_usd_saved.toFixed(4);
+            if (el) el.innerText = '≈$' + data.total_usd_saved.toFixed(4);
           }}
           if (data.total_original_tokens !== undefined && data.total_optimized_tokens !== undefined) {{
             const el = document.getElementById('val-traffic');

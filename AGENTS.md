@@ -46,7 +46,7 @@ Never hardcode real private keys, API secrets, access tokens, or webhook secrets
 `🛡️ **TokenSafe Security Guard**: Prevented secret / private key leak into git (<target_file>: <details>)`
 7. **Proof-of-Savings Turn Footer (English default)**:
 At the end of your response for any turn where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer in English:
-`⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens ($<usd>)`
+`⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens (≈$<usd> approx)`
 <!-- /tokensafe -->
 
 <!-- bunny-cli:start -->
