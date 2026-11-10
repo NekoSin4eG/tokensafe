@@ -57,6 +57,7 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
 | `tokensafe:slice_diff` | Slices unified git diffs, eliminating lockfiles and minimizing hunk context lines. | **-50% to -80%** diff size |
 | `tokensafe:compress_prompt` | Compresses verbose user instructions into lean TOCP S-expressions via DeepSeek/Regex. | **-40% to -65%** prompt tokens |
 | `tokensafe:compact_conversation` | On-demand context compaction: folds a long JSONL session transcript into a lean Consolidated State Ledger (`transcript_path`, optional `invocation_num`). Call when the context window feels heavy or before a new subtask. | **-80% to -95%** history tokens |
+| `tokensafe:context_budget` | Context Budget HUD: estimated window usage (`model`/`window_tokens`/`session_id`) with tools/history/prompts breakdown and 50/80/95% thresholds. Call before deciding to compact. | Floor estimate, always labeled estimated |
 | `tokensafe:guard_inspect` | Pre-flight security & hygiene audit for commands or code snippets (secrets, TLS, SQLi, raw grep). | **Zero-Risk** pre-flight gate |
 | `tokensafe:get_token_savings_metrics` | Returns cumulative analytics: tokens saved, context ratio, USD value, and optimization source breakdown. | Persistent SQLite analytics |
 

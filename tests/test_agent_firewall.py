@@ -38,17 +38,42 @@ class TestAgentFirewall(unittest.TestCase):
         self.assertIn("Subagent Firewall: Reused session read", content2)
         self.assertIn("return 42", content2)
 
-    def test_cache_invalidates_on_mtime_change(self):
+    def test_mtime_only_change_still_hits(self):
+        """Diff-aware contract: mtime lies after `git checkout`; unchanged
+        content must still HIT (stage-2 hash lookup), now across sessions."""
         session = "swarm_session_2"
         file_path = self.tmp.name
 
-        AgentFirewall.record_cache(session, file_path, "v1", tracker=self.tracker)
+        AgentFirewall.record_cache("other_session", file_path, "def worker():\n    return 42\n", tracker=self.tracker)
 
-        # Touch file with future mtime
+        # git-checkout-style mtime reset (file content untouched)
         future_time = os.path.getmtime(file_path) + 10
         os.utime(file_path, (future_time, future_time))
 
         hit, content, saved = AgentFirewall.check_cache(session, file_path, tracker=self.tracker)
+        self.assertTrue(hit, "unchanged content must hit across sessions despite mtime reset")
+        self.assertIn("Persistent cache", content)
+        self.assertIn("return 42", content)
+
+    def test_cache_invalidates_on_content_change(self):
+        """A REAL edit (hash mismatch) invalidates the entry, mtime aside."""
+        session = "swarm_session_3"
+        file_path = self.tmp.name
+
+        AgentFirewall.record_cache(session, file_path, "v1 content", tracker=self.tracker)
+
+        with open(file_path, "w") as f:
+            f.write("def worker():\n    return 43\n")  # real content change
+        future_time = os.path.getmtime(file_path) + 10
+        os.utime(file_path, (future_time, future_time))
+
+        hit, content, saved = AgentFirewall.check_cache(session, file_path, tracker=self.tracker)
+        self.assertFalse(hit, "changed content must MISS even with fresh mtime")
+
+    def test_oversized_content_not_persisted(self):
+        session = "swarm_session_4"
+        AgentFirewall.record_cache(session, self.tmp.name, "x" * (AgentFirewall._MAX_CONTENT_CHARS + 1), tracker=self.tracker)
+        hit, _, _ = AgentFirewall.check_cache(session, self.tmp.name, tracker=self.tracker)
         self.assertFalse(hit)
 
 if __name__ == "__main__":

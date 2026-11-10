@@ -164,3 +164,101 @@ class ContextGovernor:
             "saved_tokens": saved,
             "actions": actions_taken
         }
+
+
+class ContextBudget:
+    """Context Budget HUD: estimates how much of the model's context window the
+    current session has consumed, based on TokenSafe-instrumented flows.
+
+    Honesty (METRICS.md): only bytes that flowed through TokenSafe instruments
+    are counted (tool slices, skeletons, compacted prompts, folded history).
+    Un-instrumented traffic (agent reasoning, output tokens) is invisible here,
+    so `used_estimated` is a FLOOR, not an exact figure — always labeled
+    estimated."""
+
+    # Conservative defaults by model family substring (tokens)
+    WINDOW_DEFAULTS = [
+        ("gemini", 1_000_000),
+        ("claude", 200_000),
+        ("gpt", 128_000),
+        ("codex", 128_000),
+        ("o1", 200_000),
+        ("o3", 200_000),
+    ]
+    DEFAULT_WINDOW = 200_000
+
+    @classmethod
+    def resolve_window(cls, model: str = "", window_tokens: Optional[int] = None) -> int:
+        """Explicit window > env override > model-family default."""
+        if window_tokens and int(window_tokens) > 0:
+            return int(window_tokens)
+        env = os.environ.get("TOKENSAFE_CONTEXT_WINDOW", "")
+        if env.strip().isdigit() and int(env) > 0:
+            return int(env)
+        model_l = (model or "").lower()
+        for family, window in cls.WINDOW_DEFAULTS:
+            if family in model_l:
+                return window
+        return cls.DEFAULT_WINDOW
+
+    # Category mapping for the HUD breakdown (event_type -> bucket)
+    CATEGORY_MAP = {
+        "TOOL_READ": "tools", "GRAPH_SKELETON": "tools", "AST_SKELETON": "tools",
+        "SCOPED_SEARCH": "tools", "DIR_LIST": "tools", "COMMAND_FILTER": "tools",
+        "TEAM_CACHE_HIT": "tools", "SUBAGENT_DEDUP": "tools",
+        "HISTORY_FOLD": "history",
+        "PROMPT": "prompts",
+        "CONTEXT_GOVERNOR": "other", "OUTPUT_GUARD": "other", "SECRET_GUARD": "other",
+        "GRAPH_TOPOLOGY": "other",
+    }
+
+    @classmethod
+    def estimate(cls, tracker: MetricsTracker, session_id: str = "mcp_session",
+                 model: str = "", window_tokens: Optional[int] = None) -> Dict[str, Any]:
+        window = cls.resolve_window(model, window_tokens)
+        breakdown = {"tools": 0, "history": 0, "prompts": 0, "other": 0}
+        instrumented_events = 0
+        try:
+            with tracker._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT event_type, COALESCE(SUM(optimized_tokens), 0) AS received, COUNT(*) AS cnt "
+                    "FROM events WHERE session_id = ? GROUP BY event_type;",
+                    (session_id or "",)
+                )
+                for row in cursor.fetchall():
+                    ev_type = row["event_type"]
+                    bucket = cls.CATEGORY_MAP.get(ev_type, "other")
+                    breakdown[bucket] += int(row["received"] or 0)
+                    instrumented_events += int(row["cnt"] or 0)
+        except Exception:
+            pass
+
+        used = sum(breakdown.values())
+        pct = round(used / window * 100.0, 1) if window > 0 else 0.0
+        if pct >= 95:
+            threshold, recommendation = "critical", (
+                "Context nearly exhausted. Call tokensafe:compact_conversation on the "
+                "session transcript now, or start a fresh session carrying the ledger.")
+        elif pct >= 80:
+            threshold, recommendation = "warning", (
+                "Context is heavy. Prefer tokensafe:smart_read_file with symbol= for "
+                "further reads and consider tokensafe:compact_conversation.")
+        elif pct >= 50:
+            threshold, recommendation = "notice", (
+                "Half the estimated window is used. Keep reads surgical (symbol=, include_deps=false).")
+        else:
+            threshold, recommendation = "healthy", "Context budget healthy."
+
+        return {
+            "window_tokens": window,
+            "used_estimated": used,
+            "used_pct": pct,
+            "breakdown": breakdown,
+            "instrumented_events": instrumented_events,
+            "threshold": threshold,
+            "recommendation": recommendation,
+            "caveat": "Floor estimate: only TokenSafe-instrumented flows are counted "
+                      "(agent reasoning/output is invisible to local hooks).",
+            "measurement": "estimated",
+        }

@@ -83,6 +83,41 @@ Beyond MCP, TokenSafe ships **lifecycle-hook adapters** that run natively inside
 
 All adapters **fail open**: a crash never blocks the host agent (Cursor's block-on-invalid-JSON contract is explicitly honored — every error path prints valid allow-JSON).
 
+## 🧠 Context Budget HUD
+
+Agents (and humans) usually discover context exhaustion by quality degradation — too late. TokenSafe exposes the remaining budget as a first-class MCP tool:
+
+```json
+{ "tool": "tokensafe:context_budget", "args": { "model": "claude-x" } }
+```
+
+```json
+{
+  "window_tokens": 200000,
+  "used_estimated": 168000,
+  "used_pct": 84.0,
+  "breakdown": { "tools": 165000, "history": 2300, "prompts": 700, "other": 0 },
+  "threshold": "warning",
+  "recommendation": "Context is heavy. Prefer tokensafe:smart_read_file ... and consider tokensafe:compact_conversation."
+}
+```
+
+- Window resolution: explicit arg → `TOKENSAFE_CONTEXT_WINDOW` env → model-family default (Gemini 1M, Claude 200k, GPT 128k).
+- **80% warning injected into the agent automatically** by the Antigravity/ZCode `pre_invocation` hook — once per session (marker-event guarded).
+- Honesty: counts only TokenSafe-instrumented flows (tool slices, skeletons, compacted prompts) — labeled `estimated`, a floor, never a fabricated total (see [METRICS.md](METRICS.md)).
+
+## 💰 Per-Seat ROI (Team)
+
+Team owners pay per seat — now they see the return per seat. The dashboard's Team Seats table carries an **ROI column** per developer: saved tokens, USD equivalent, and the `metered/estimated` honesty split, computed in a single grouped query. Seats without activity render `—`, never a fabricated number.
+
+## 💾 Persistent Diff-Aware Read-Cache
+
+The subagent dedup cache (per-session) now has a persistent layer keyed by **sha256 of the file's raw bytes**:
+
+- Survives MCP-server restarts **and** `git checkout` (which resets mtime but not content — content is the only truth).
+- Any real edit changes the hash and invalidates the entry instantly.
+- Bounded: artifacts >256k chars are never cached; the layer prunes itself to the latest 500 entries (hourly amortized).
+
 ## 🔌 Universal MCP Server Configuration
 
 Connect TokenSafe directly to **Claude Desktop** (`claude_desktop_config.json`) or **Cursor** MCP Settings:

@@ -1004,5 +1004,139 @@ class TestReleaseVersionConsistency(unittest.TestCase):
         self.assertTrue(ok, f"version drift detected:\n" + "\n".join(problems))
 
 
+class TestContextBudgetHUD(unittest.TestCase):
+    """Context Budget HUD: window resolution, estimate math, thresholds,
+    MCP tool dispatch and the once-per-session 80% hook warning."""
+
+    def setUp(self):
+        from src import metrics as metrics_mod
+        self._tmp = tempfile.mkdtemp(prefix="tokensafe_budget_")
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        os.environ["TOKENSAFE_DB_PATH"] = os.path.join(self._tmp, "metrics.db")
+        os.environ["TOKENSAFE_TELEMETRY_DISABLED"] = "1"
+        metrics_mod._INITIALIZED_METRICS_DBS.clear()
+        self.addCleanup(os.environ.pop, "TOKENSAFE_DB_PATH", None)
+        self.addCleanup(os.environ.pop, "TOKENSAFE_TELEMETRY_DISABLED", None)
+        os.environ.pop("TOKENSAFE_CONTEXT_WINDOW", None)
+        self.addCleanup(os.environ.pop, "TOKENSAFE_CONTEXT_WINDOW", None)
+        from src.metrics import MetricsTracker
+        self.tracker = MetricsTracker()
+
+    def test_window_resolution_priority(self):
+        from src.governor import ContextBudget
+        self.assertEqual(ContextBudget.resolve_window("gemini-3.8-flash"), 1_000_000)
+        self.assertEqual(ContextBudget.resolve_window("claude-x"), 200_000)
+        self.assertEqual(ContextBudget.resolve_window("", window_tokens=777), 777)
+        os.environ["TOKENSAFE_CONTEXT_WINDOW"] = "90000"
+        self.assertEqual(ContextBudget.resolve_window("gemini"), 90000, "env overrides model default")
+        self.assertEqual(ContextBudget.resolve_window("gemini", window_tokens=111), 111, "explicit wins over env")
+
+    def test_estimate_math_and_thresholds(self):
+        from src.governor import ContextBudget
+        self.tracker.record_event("s", "TOOL_READ", 1000, 600)        # tools +600
+        self.tracker.record_event("s", "HISTORY_FOLD", 5000, 300)     # history +300
+        self.tracker.record_event("s", "PROMPT", 200, 100)            # prompts +100
+        b = ContextBudget.estimate(self.tracker, session_id="s", window_tokens=1000)
+        self.assertEqual(b["used_estimated"], 1000)
+        self.assertEqual(b["used_pct"], 100.0)
+        self.assertEqual(b["breakdown"], {"tools": 600, "history": 300, "prompts": 100, "other": 0})
+        self.assertEqual(b["threshold"], "critical")
+        self.assertEqual(b["measurement"], "estimated")
+        self.assertIn("Floor estimate", b["caveat"])
+
+    def test_mcp_tool_dispatch(self):
+        from src import mcp_server
+        mcp_server.handle_tool_call("context_budget", {"model": "claude-x", "session_id": "s"})
+        res = mcp_server.handle_tool_call("context_budget", {"model": "claude-x", "session_id": "s"})
+        text = "".join(p.get("text", "") for p in res.get("content", []))
+        import json as _json
+        d = _json.loads(text)
+        self.assertIn("used_pct", d)
+        self.assertIn("breakdown", d)
+        self.assertEqual(d["window_tokens"], 200_000)
+
+    def test_hook_warns_once_at_80pct(self):
+        # Seed the session beyond 80% of the 200k default window (>=3 events)
+        for i in range(3):
+            self.tracker.record_event("warn_sess", "TOOL_READ", 60000, 55000 + i * 1000)
+        payload = json.dumps({
+            "lastUserInput": "hello",
+            "conversationId": "warn_sess",
+            "invocationNum": 5,
+            "transcriptPath": ""
+        })
+        env = {**os.environ, "AGY_MODEL": "claude-x"}
+
+        res1 = subprocess.run(
+            [sys.executable, os.path.join(PROJECT_ROOT, "hooks", "pre_invocation.py")],
+            input=payload, capture_output=True, text=True, timeout=60, env=env
+        )
+        self.assertEqual(res1.returncode, 0, res1.stderr)
+        self.assertIn("Context Budget", res1.stdout)
+
+        res2 = subprocess.run(
+            [sys.executable, os.path.join(PROJECT_ROOT, "hooks", "pre_invocation.py")],
+            input=payload, capture_output=True, text=True, timeout=60, env=env
+        )
+        self.assertEqual(res2.returncode, 0, res2.stderr)
+        self.assertNotIn("Context Budget", res2.stdout, "warning must fire only once per session")
+
+
+class TestPerSeatRoi(unittest.TestCase):
+    """Owner dashboard seats carry per-member ROI with measured/estimated split."""
+
+    def setUp(self):
+        from src.cloud_backend import CloudBackendService, init_cloud_db, get_db_connection
+        self.svc = CloudBackendService
+        init_cloud_db()
+        self._conn_ctx = get_db_connection
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM telemetry WHERE customer_email LIKE '%@roi-test.com'")
+            conn.execute("DELETE FROM licenses WHERE customer_email LIKE '%@roi-test.com' OR parent_email LIKE '%@roi-test.com'")
+            conn.execute("DELETE FROM customers WHERE email LIKE '%@roi-test.com'")
+            conn.commit()
+
+    def tearDown(self):
+        with self._conn_ctx() as conn:
+            conn.execute("DELETE FROM telemetry WHERE customer_email LIKE '%@roi-test.com'")
+            conn.execute("DELETE FROM licenses WHERE customer_email LIKE '%@roi-test.com' OR parent_email LIKE '%@roi-test.com'")
+            conn.execute("DELETE FROM customers WHERE email LIKE '%@roi-test.com'")
+            conn.commit()
+
+    def test_seat_roi_in_owner_dashboard(self):
+        owner = "boss@roi-test.com"
+        member = "dev@roi-test.com"
+        self.svc.handle_stripe_checkout(email=owner, tier="team", seats=2, is_trial=False)
+        seat = self.svc.generate_team_seat(owner, member)
+        self.assertTrue(seat["success"])
+
+        # Member telemetry: mixed measured/estimated events
+        self.svc.record_telemetry(member, seat["license_key"], [
+            {"event_type": "TOOL_READ", "original_tokens": 1000, "saved_tokens": 700, "usd_saved": 0.001},
+            {"event_type": "HISTORY_FOLD", "original_tokens": 5000, "saved_tokens": 4000, "usd_saved": 0.006},
+        ])
+
+        data = self.svc.get_dashboard_data(owner)
+        seats = data.get("seats", [])
+        self.assertEqual(len(seats), 1)
+        roi = seats[0]["roi"]
+        self.assertEqual(roi["saved_tokens"], 4700)
+        self.assertEqual(roi["saved_tokens_measured"], 700)
+        self.assertEqual(roi["saved_tokens_estimated"], 4000)
+        self.assertEqual(roi["events"], 2)
+        self.assertAlmostEqual(roi["usd_saved"], 0.01, places=2)
+
+    def test_seat_roi_zero_state(self):
+        owner = "boss2@roi-test.com"
+        member = "idle@roi-test.com"
+        self.svc.handle_stripe_checkout(email=owner, tier="team", seats=2, is_trial=False)
+        self.svc.generate_team_seat(owner, member)
+        data = self.svc.get_dashboard_data(owner)
+        seats = data.get("seats", [])
+        self.assertEqual(len(seats), 1)
+        self.assertEqual(seats[0]["roi"]["saved_tokens"], 0)
+        self.assertEqual(seats[0]["roi"]["usd_saved"], 0.0)
+
+
 if __name__ == "__main__":
     unittest.main()

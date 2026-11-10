@@ -30,6 +30,7 @@ from src.graph_engine import GraphEngine
 from src.tokenizer import count_tokens
 from src.history_compactor import HistoryCompactor
 from src.team_cache import TeamCache
+from src.governor import ContextBudget
 from src.agent_firewall import AgentFirewall
 from src.diff_slicer import DiffSlicer
 from src.guard import TokenSafeGuard
@@ -85,6 +86,18 @@ TOOLS = [
                 "prompt": {"type": "string", "description": "Natural language request from developer"}
             },
             "required": ["prompt"]
+        }
+    },
+    {
+        "name": "context_budget",
+        "description": "Context Budget HUD: estimates how much of the model's context window this session has consumed (tools/history/prompts breakdown, 50/80/95% thresholds). Call when deciding whether to compact or start fresh.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "model": {"type": "string", "description": "Optional: model name to resolve window size (default: env TOKENSAFE_CONTEXT_WINDOW or 200k)"},
+                "window_tokens": {"type": "integer", "description": "Optional: explicit context window size in tokens"},
+                "session_id": {"type": "string", "description": "Optional: session identifier (default: mcp_session)"}
+            }
         }
     },
     {
@@ -571,6 +584,18 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         prompt = args.get("prompt", "")
         res = PromptCompactor.compact(prompt, enable_deepseek=True)
         return {"content": [{"type": "text", "text": json.dumps(res, indent=2, ensure_ascii=False)}]}
+
+    elif name == "context_budget":
+        model = str(args.get("model") or "")
+        window_tokens = args.get("window_tokens")
+        session_id = str(args.get("session_id") or "mcp_session")
+        try:
+            if window_tokens is not None:
+                window_tokens = int(window_tokens)
+        except (TypeError, ValueError):
+            window_tokens = None
+        budget = ContextBudget.estimate(tracker, session_id=session_id, model=model, window_tokens=window_tokens)
+        return {"content": [{"type": "text", "text": json.dumps(budget, indent=2, ensure_ascii=False)}]}
 
     elif name == "compact_conversation":
         transcript_path = args.get("transcript_path", "")

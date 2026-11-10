@@ -19,6 +19,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from src.compactor import PromptCompactor
 from src.history_compactor import HistoryCompactor
 from src.metrics import MetricsTracker
+from src.governor import ContextBudget
 from src.environment_auditor import EnvironmentAuditor
 from src.license_manager import LicenseManager
 
@@ -218,6 +219,40 @@ def main():
         })
 
     response = {}
+    if inject_steps:
+        response["injectSteps"] = inject_steps
+
+    # 4. Context Budget HUD warning: inject once per session when the
+    #    instrumented context crosses 80% of the estimated window.
+    try:
+        budget = ContextBudget.estimate(
+            tracker, session_id=conversation_id,
+            model=payload.get("model") or os.environ.get("AGY_MODEL") or os.environ.get("MODEL") or ""
+        )
+        if budget["used_pct"] >= 80 and budget["instrumented_events"] >= 3:
+            already = tracker.get_last_event(conversation_id, "BUDGET_WARNING")
+            if not already:
+                warn = (
+                    f"🧠 **Context Budget:** ~{budget['used_pct']}% of the estimated window used "
+                    f"({budget['used_estimated']:,}/{budget['window_tokens']:,} tokens, instrumented floor). "
+                    f"{budget['recommendation']}"
+                )
+                inject_steps.append({
+                    "systemMessage": {
+                        "systemMessage": "",
+                        "metadata": {"user_markdown": warn}
+                    }
+                })
+                tracker.record_event(
+                    session_id=conversation_id,
+                    event_type="BUDGET_WARNING",
+                    original_tokens=0,
+                    optimized_tokens=0,
+                    details={"used_pct": budget["used_pct"], "window": budget["window_tokens"]}
+                )
+    except Exception:
+        pass
+
     if inject_steps:
         response["injectSteps"] = inject_steps
 
