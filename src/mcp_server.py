@@ -9,6 +9,7 @@ import os
 import stat
 import time
 import json
+import re
 import threading
 import traceback
 import fnmatch
@@ -40,6 +41,19 @@ SERVER_INFO = {
     "name": "tokensafe-mcp",
     "version": "1.9.0"
 }
+
+# MCP client attribution: the initialize handshake carries clientInfo, which
+# lets every session-scoped metric name the REAL agent instead of a shared
+# anonymous bucket (see METRICS.md by_agent).
+_MCP_CLIENT_NAME = ""
+
+def _set_mcp_client(name: str):
+    global _MCP_CLIENT_NAME
+    clean = re.sub(r"[^a-z0-9_-]", "", str(name or "").lower())[:30]
+    _MCP_CLIENT_NAME = clean
+
+def _mcp_session_id() -> str:
+    return f"mcp:{_MCP_CLIENT_NAME}" if _MCP_CLIENT_NAME else "mcp_session"
 
 TOOLS = [
     {
@@ -454,7 +468,7 @@ def handle_tool_call(name: str, args: dict) -> dict:
             if text_out:
                 try:
                     AgentFirewall.record_cache(
-                        session_id="mcp_session",
+                        session_id=_mcp_session_id(),
                         file_path=args.get("path", ""),
                         content=text_out,
                         symbol=(args.get("symbol") or "").strip(),
@@ -494,12 +508,12 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             return _fallback_error("smart_read_file", f"cannot stat path: {e}")
 
         # Check Subagent Firewall dedup cache
-        is_hit, cached_text, saved_dedup = AgentFirewall.check_cache("mcp_session", path, symbol=symbol or "", tracker=tracker)
+        is_hit, cached_text, saved_dedup = AgentFirewall.check_cache(_mcp_session_id(), path, symbol=symbol or "", tracker=tracker)
         if is_hit and cached_text:
             return {"content": [{"type": "text", "text": cached_text}]}
 
         # Check loop detector
-        is_loop, repeats, msg = LoopDetector.check_loop("mcp_session", "smart_read_file", args)
+        is_loop, repeats, msg = LoopDetector.check_loop(_mcp_session_id(), "smart_read_file", args)
         if is_loop:
             return {"isError": True, "content": [{"type": "text", "text": f"⚠️ {msg}"}]}
 
@@ -525,7 +539,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                 orig_t = count_tokens(raw_code)
                 skel_t = count_tokens(team_skel)
                 tracker.record_event(
-                    session_id="mcp_session",
+                    session_id=_mcp_session_id(),
                     event_type="TEAM_CACHE_HIT",
                     original_tokens=orig_t,
                     optimized_tokens=skel_t,
@@ -545,7 +559,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                     skel_t = count_tokens(graph_skel)
                     saved = max(0, orig_t - skel_t)
                     tracker.record_event(
-                        session_id="mcp_session",
+                        session_id=_mcp_session_id(),
                         event_type="GRAPH_SKELETON",
                         original_tokens=orig_t,
                         optimized_tokens=skel_t,
@@ -588,7 +602,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
     elif name == "context_budget":
         model = str(args.get("model") or "")
         window_tokens = args.get("window_tokens")
-        session_id = str(args.get("session_id") or "mcp_session")
+        session_id = str(args.get("session_id") or _mcp_session_id())
         try:
             if window_tokens is not None:
                 window_tokens = int(window_tokens)
@@ -613,7 +627,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             }, indent=2)}]}
         saved = max(0, orig_t - folded_t)
         tracker.record_event(
-            session_id="mcp_session",
+            session_id=_mcp_session_id(),
             event_type="HISTORY_FOLD",
             original_tokens=orig_t,
             optimized_tokens=folded_t,
@@ -635,7 +649,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         guard_res = TokenSafeGuard.inspect_command(cmd)
         if guard_res.blocked:
             tracker.record_event(
-                session_id="mcp_session",
+                session_id=_mcp_session_id(),
                 event_type=f"GUARD_{guard_res.check_name}",
                 original_tokens=count_tokens(cmd),
                 optimized_tokens=0,
@@ -683,7 +697,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             })
             if c_res.blocked:
                 tracker.record_event(
-                    session_id="mcp_session",
+                    session_id=_mcp_session_id(),
                     event_type=f"GUARD_{c_res.check_name}",
                     original_tokens=count_tokens(cmd),
                     optimized_tokens=0,
@@ -703,7 +717,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             })
             if w_res.blocked:
                 tracker.record_event(
-                    session_id="mcp_session",
+                    session_id=_mcp_session_id(),
                     event_type=f"GUARD_{w_res.check_name}",
                     original_tokens=count_tokens(code),
                     optimized_tokens=0,
@@ -731,7 +745,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         saved = max(0, orig_t - opt_t)
         if saved > 0:
             tracker.record_event(
-                session_id="mcp_session",
+                session_id=_mcp_session_id(),
                 event_type="DIFF_SLICER",
                 original_tokens=orig_t,
                 optimized_tokens=opt_t,
@@ -765,7 +779,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         est_crawl_tokens = min(50000, max(5000, capped_files * 600))
         topo_tokens = 250
         tracker.record_event(
-            session_id="mcp_session",
+            session_id=_mcp_session_id(),
             event_type="GRAPH_TOPOLOGY",
             original_tokens=est_crawl_tokens,
             optimized_tokens=topo_tokens,
@@ -787,7 +801,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         capped_files = min(100, len(graph.file_symbols))
         est_orig_tokens = min(60000, max(10000, capped_files * 600))
         tracker.record_event(
-            session_id="mcp_session",
+            session_id=_mcp_session_id(),
             event_type="GRAPH_TOPOLOGY",
             original_tokens=est_orig_tokens,
             optimized_tokens=surface_tokens,
@@ -814,7 +828,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         # Estimate equivalent tokens from multiple verbose ls -la calls (at least ~800 tokens)
         est_orig_tokens = max(800, tree_tokens * 6)
         tracker.record_event(
-            session_id="mcp_session",
+            session_id=_mcp_session_id(),
             event_type="DIR_LIST",
             original_tokens=est_orig_tokens,
             optimized_tokens=tree_tokens,
@@ -858,7 +872,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         res_tokens = count_tokens(md_text)
         est_orig = max(1500, res_tokens * 8)
         tracker.record_event(
-            session_id="mcp_session",
+            session_id=_mcp_session_id(),
             event_type="SCOPED_SEARCH",
             original_tokens=est_orig,
             optimized_tokens=res_tokens,
@@ -940,6 +954,11 @@ def run_mcp_server():
         response = {"jsonrpc": "2.0", "id": msg_id}
 
         if method == "initialize":
+            try:
+                client_info = (params or {}).get("clientInfo") or {}
+                _set_mcp_client(str(client_info.get("name") or ""))
+            except Exception:
+                pass
             try:
                 from src.telemetry_sync import TelemetrySync
                 TelemetrySync.sync_background()

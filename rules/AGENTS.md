@@ -34,7 +34,7 @@ Execute the specified action directly based on these extracted parameters.
 6. **Directory Navigation**: Never run verbose `ls -la` or `ls -l`; use `tokensafe:list_dir(path, depth=2)` to inspect directory trees without permissions, timestamps, or lockfiles (-90% tokens).
 7. **Style & Design Tokens**: When inspecting CSS/SCSS/LESS/Tailwind, `tokensafe:smart_read_file` automatically preserves all design tokens (`:root`, `@theme`, CSS variables) in full while folding component selectors.
 
-### 4. Turn Token Savings Footer (Proof-of-Savings)
+### 4. Turn Token Savings Footer (Proof-of-Savings — always in English)
 At the end of your response for any turn where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer:
 `⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens (≈$<usd> approx)`
 Example:

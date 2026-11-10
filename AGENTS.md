@@ -28,7 +28,7 @@ Before submitting changes, ensure no new external runtime dependencies are intro
 - **Symbol Inspection**: Always call `tokensafe:smart_read_file` with `symbol` specified to retrieve graph-guided slices with 1-hop dependencies.
 - **Raw Grep**: Strictly prohibited for architectural surveys. Use `tokensafe-out/API_SURFACE.md` or `get_architecture_graph`.
 
-## Response Formatting Directive (Proof-of-Savings Footer)
+## Response Formatting Directive (Proof-of-Savings Footer — always in English)
 At the end of your response for any turn where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer:
 `⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens`
 
@@ -44,7 +44,7 @@ Always prioritize `tokensafe` MCP tools over default raw file reads or high-outp
 6. **Secret Leak Prevention Directive (Zero Hardcoded Fallbacks)**:
 Never hardcode real private keys, API secrets, access tokens, or webhook secrets as default fallback arguments in `os.environ.get()`, `os.getenv()`, or `process.env`. If an environment variable is absent, raise an explicit configuration error or use an empty string / test mock. Whenever a secret fallback attempt is blocked, state:
 `🛡️ **TokenSafe Security Guard**: Prevented secret / private key leak into git (<target_file>: <details>)`
-7. **Proof-of-Savings Turn Footer (English default)**:
+7. **Proof-of-Savings Turn Footer (always in English)**:
 At the end of your response for any turn where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer in English:
 `⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens (≈$<usd> approx)`
 <!-- /tokensafe -->

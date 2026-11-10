@@ -262,6 +262,8 @@ class MetricsTracker:
             return "proxy"
         if sid.startswith("hook_"):
             return sid[len("hook_"):] or "hook"
+        if sid.startswith("mcp:"):
+            return sid[4:] or "mcp"
         return "antigravity"
 
     def get_by_agent(self) -> Dict[str, Dict[str, Any]]:

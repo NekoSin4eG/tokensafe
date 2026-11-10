@@ -122,6 +122,51 @@ class TestClaudeCodeAdapter(AdapterBase):
         self.assertEqual(json.loads(res.stdout or "{}"), {})
 
 
+class TestMcpClientAttribution(AdapterBase):
+    """MCP initialize clientInfo routes session-scoped metrics to the REAL agent."""
+
+    def _run_server(self, messages):
+        import subprocess
+        proc = subprocess.Popen(
+            [sys.executable, os.path.join(PROJECT_ROOT, "src", "mcp_server.py")],
+            stdin=subprocess.PIPE, stdout=subprocess.PIPE, text=True, env={**os.environ}
+        )
+        out, _ = proc.communicate("\n".join(json.dumps(m) for m in messages) + "\n", timeout=30)
+        return [json.loads(l) for l in out.strip().split("\n") if l.strip()]
+
+    def test_events_attributed_to_declared_client(self):
+        import sqlite3
+        demo = os.path.join(self._tmp, "demo.py")
+        with open(demo, "w") as f:
+            f.write("def handler(x):\n" + "    y = x * 2\n" * 25 + "    return y\n")
+        msgs = [
+            {"jsonrpc": "2.0", "id": 1, "method": "initialize",
+             "params": {"clientInfo": {"name": "ZCode"}}},
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+             "params": {"name": "smart_read_file", "arguments": {"path": demo, "symbol": "handler"}}},
+        ]
+        self._run_server(msgs)
+        conn = sqlite3.connect(os.environ["TOKENSAFE_DB_PATH"])
+        rows = conn.execute("SELECT DISTINCT session_id FROM events").fetchall()
+        conn.close()
+        self.assertTrue(any(r[0] == "mcp:zcode" for r in rows), f"expected mcp:zcode, got {rows}")
+
+    def test_no_initialize_falls_back_to_mcp_session(self):
+        import sqlite3
+        demo = os.path.join(self._tmp, "demo2.py")
+        with open(demo, "w") as f:
+            f.write("def beta():\n    return 1\n")
+        msgs = [
+            {"jsonrpc": "2.0", "id": 2, "method": "tools/call",
+             "params": {"name": "smart_read_file", "arguments": {"path": demo, "symbol": "beta"}}},
+        ]
+        self._run_server(msgs)
+        conn = sqlite3.connect(os.environ["TOKENSAFE_DB_PATH"])
+        rows = conn.execute("SELECT DISTINCT session_id FROM events").fetchall()
+        conn.close()
+        self.assertTrue(any(r[0] == "mcp_session" for r in rows), f"expected mcp_session fallback, got {rows}")
+
+
 class TestCursorAdapter(AdapterBase):
     def _run_hook(self, payload: dict) -> dict:
         import subprocess
