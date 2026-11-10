@@ -31,7 +31,7 @@ from src.guard import TokenSafeGuard
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
-    "version": "1.4.7"
+    "version": "1.4.8"
 }
 
 TOOLS = [

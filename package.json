@@ -1,6 +1,6 @@
 {
   "name": "tokensafe",
-  "version": "1.4.7",
+  "version": "1.4.8",
   "description": "Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents",
   "main": "bin/tokensafe.js",
   "bin": {
