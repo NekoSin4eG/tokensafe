@@ -1,0 +1,62 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "dev.tokensafe/tokensafe",
+  "title": "TokenSafe",
+  "description": "Cut AI coding agent token usage up to 90% via AST slicing, dependency graphs & security guards.",
+  "version": "1.9.0",
+  "websiteUrl": "https://tokensafe.dev",
+  "repository": {
+    "url": "https://github.com/NekoSin4eG/tokensafe",
+    "source": "github"
+  },
+  "icons": [
+    {
+      "src": "https://tokensafe.dev/favicon-96x96.png",
+      "mimeType": "image/png",
+      "sizes": [
+        "96x96"
+      ]
+    },
+    {
+      "src": "https://tokensafe.dev/logo.svg",
+      "mimeType": "image/svg+xml",
+      "sizes": [
+        "any"
+      ]
+    }
+  ],
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "tokensafe",
+      "version": "1.9.0",
+      "runtimeHint": "npx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    },
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "tokensafe",
+      "version": "1.9.0",
+      "runtimeHint": "uvx",
+      "transport": {
+        "type": "stdio"
+      },
+      "packageArguments": [
+        {
+          "type": "positional",
+          "value": "mcp"
+        }
+      ]
+    }
+  ]
+}

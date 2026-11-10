@@ -1,0 +1,36 @@
+{
+  "version": "1.3.0",
+  "name": "tokensafe",
+  "description": "Zero-Loss Token Economy & Context Optimizer for AI Agents. Compresses prompts, slices AST/tool outputs, and prevents stuck loops.",
+  "author": {
+    "name": "Oleg Savelev",
+    "url": "https://github.com/NekoSin4eG"
+  },
+  "homepage": "https://github.com/NekoSin4eG/tokensafe-cloud",
+  "repository": "https://github.com/NekoSin4eG/tokensafe-cloud",
+  "license": "Apache-2.0",
+  "keywords": [
+    "tokensafe",
+    "token-optimizer",
+    "mcp",
+    "compression",
+    "ast-slicer",
+    "context-window"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "TokenSafe",
+    "shortDescription": "Save 60-90% AI coding tokens without quality loss",
+    "longDescription": "TokenSafe provides autonomous token compression, AST code skeletonization, and stuck-loop prevention for AI coding agents.",
+    "developerName": "TokenSafe",
+    "category": "Engineering",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Analyze"
+    ],
+    "websiteURL": "https://tokensafe.dev",
+    "brandColor": "#10B981",
+    "logo": "./assets/logo.svg"
+  }
+}

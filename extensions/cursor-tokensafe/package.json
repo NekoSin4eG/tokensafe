@@ -1,0 +1,30 @@
+{
+  "name": "tokensafe",
+  "displayName": "TokenSafe",
+  "description": "Zero-Loss Token Economy & Context Optimizer for AI Agents",
+  "version": "1.0.0",
+  "publisher": "tokensafe",
+  "engines": {
+    "vscode": "^1.80.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages"
+  ],
+  "main": "./extension.js",
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "contributes": {
+    "commands": [
+      {
+        "command": "tokensafe.showStats",
+        "title": "TokenSafe: Show Token Savings"
+      },
+      {
+        "command": "tokensafe.openDashboard",
+        "title": "TokenSafe: Open HTML Analytics Dashboard"
+      }
+    ]
+  }
+}

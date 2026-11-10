@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions & Documentation
+    url: https://tokensafe.dev
+    about: Please consult the documentation and FAQ before submitting a bug.
+  - name: 🔒 Security Advisories
+    url: https://github.com/NekoSin4eG/tokensafe/security/advisories/new
+    about: Report security vulnerabilities privately.

@@ -1,0 +1,61 @@
+services:
+  tokensafe-proxy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: tokensafe/proxy:latest
+    container_name: tokensafe-enterprise-proxy
+    restart: unless-stopped
+    ports:
+      - "8765:8765"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8765
+      - TOKENSAFE_DATA_DIR=/app/data
+      - TOKENSAFE_LICENSE_KEY=${TOKENSAFE_LICENSE_KEY:-}
+      - TOKENSAFE_SELF_HOSTED=${TOKENSAFE_SELF_HOSTED:-0}
+      - PREFERRED_PROVIDER=${PREFERRED_PROVIDER:-gemini}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
+      - TOKENSAFE_UPSTREAM_KEY=${TOKENSAFE_UPSTREAM_KEY:-}
+      - TOKENSAFE_UPSTREAM_URL=${TOKENSAFE_UPSTREAM_URL:-}
+      - TOKENSAFE_MAX_TURN_TOKENS=${TOKENSAFE_MAX_TURN_TOKENS:-16000}
+      - TOKENSAFE_ALLOWED_ORIGINS=${TOKENSAFE_ALLOWED_ORIGINS:-}
+    volumes:
+      - tokensafe_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8765/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  tokensafe-cloud:
+    build:
+      context: .
+      dockerfile: Dockerfile.cloud
+    image: tokensafe/cloud:latest
+    container_name: tokensafe-cloud-backend
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - TOKENSAFE_DATA_DIR=/app/data
+      - ADMIN_SECRET_KEY=${ADMIN_SECRET_KEY:-}
+      - JWT_SECRET=${JWT_SECRET:-}
+      - TOKENSAFE_PRIVATE_KEY=${TOKENSAFE_PRIVATE_KEY:-}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
+      - BUNNY_DATABASE_URL=${BUNNY_DATABASE_URL:-}
+      - BUNNY_DATABASE_AUTH_TOKEN=${BUNNY_DATABASE_AUTH_TOKEN:-}
+    volumes:
+      - tokensafe_data:/app/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://127.0.0.1:8080/api/version/check"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  tokensafe_data:
