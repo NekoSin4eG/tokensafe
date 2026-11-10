@@ -248,9 +248,20 @@ def build_packages() -> bool:
 
 def verify_version_consistency(expected: Optional[str] = None) -> Tuple[bool, List[str]]:
     """Checks that every file the bumper touches actually carries `expected`
-    (defaults to package.json version). Returns (ok, problems)."""
+    (defaults to package.json version). Returns (ok, problems).
+
+    Server-side files (src/cloud/*, cloud tests) are OPTIONAL: the public
+    export (bin/sync-public.sh) strips them, and the consistency gate runs
+    there too. Missing optional files are skipped silently; a missing
+    required file is drift."""
     version = expected or get_current_version()
     problems: List[str] = []
+    optional_files = {
+        "src/cloud/config.py",
+        "src/cloud/services.py",
+        "src/cloud/stripe.py",
+        "tests/test_cloud_backend.py",
+    }
 
     def check(path: str, snippet: str, label: str):
         try:
@@ -259,7 +270,8 @@ def verify_version_consistency(expected: Optional[str] = None) -> Tuple[bool, Li
             if snippet not in content:
                 problems.append(f"{path}: expected '{snippet}' ({label})")
         except FileNotFoundError:
-            problems.append(f"{path}: file missing ({label})")
+            if path not in optional_files:
+                problems.append(f"{path}: file missing ({label})")
 
     check("package.json", f'"version": "{version}"', "npm version")
     check("pyproject.toml", f'version = "{version}"', "python version")
@@ -604,6 +616,21 @@ def run_release(target: str, otp: Optional[str] = None):
     print(f"  {'✔' if pypi_version_published(next_v) else '⚠'} PyPI {next_v}")
     print(f"  {'✔' if npm_version_published(next_v) else '⚠'} npm {next_v}")
     print(f"  {'✔' if registry_version_published(next_v) else '⚠'} MCP Registry {next_v} active")
+
+    # Public repo CI (sync-public.sh just force-pushed there)
+    public_ci_ok = False
+    for _ in range(4):
+        code, out = _sh(["gh", "run", "list", "-R", "tokensafe-dev/tokensafe",
+                         "--limit", "1", "--json", "conclusion,databaseId",
+                         "-q", ".[0].conclusion"], timeout=30)
+        concl = out.strip()
+        if concl in ("success", "failure"):
+            public_ci_ok = (concl == "success")
+            break
+        time.sleep(30)
+    print(f"  {'✔' if public_ci_ok else '⚠'} public repo CI: {concl if concl in ('success', 'failure') else 'pending'}")
+    if not public_ci_ok and concl == "failure":
+        pending.append("public repo CI failed — inspect gh run logs (tokensafe-dev/tokensafe)")
 
     print("\n════════════════════════════════════════")
     if pending:
