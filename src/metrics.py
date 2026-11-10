@@ -34,8 +34,12 @@ class MetricsTracker:
 
     @contextmanager
     def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
-        conn = sqlite3.connect(self.db_path)
+        conn = sqlite3.connect(self.db_path, timeout=2.0)
         conn.row_factory = sqlite3.Row
+        try:
+            conn.execute("PRAGMA busy_timeout=1500;")
+        except sqlite3.Error:
+            pass
         try:
             yield conn
             conn.commit()
@@ -45,6 +49,10 @@ class MetricsTracker:
     def _init_db(self):
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            try:
+                cursor.execute("PRAGMA journal_mode=WAL;")
+            except sqlite3.Error:
+                pass
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS sessions (
                     session_id TEXT PRIMARY KEY,

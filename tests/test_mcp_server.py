@@ -1,6 +1,9 @@
 import unittest
 import json
-from src.mcp_server import handle_tool_call, TOOLS
+import io
+import time
+from unittest.mock import patch
+from src.mcp_server import handle_tool_call, _execute_with_timeout, run_mcp_server, TOOLS
 
 class TestMCPServer(unittest.TestCase):
     def test_tools_list_has_all_schemas(self):
@@ -58,6 +61,40 @@ class TestMCPServer(unittest.TestCase):
         self.assertIn("📁 **src/**", text)
         self.assertIn("skeletonizer.py", text)
         self.assertIn("command_sanitizer.py", text)
+
+    def test_tool_exception_returns_fallback_guidance(self):
+        with patch("src.mcp_server._dispatch_tool_call", side_effect=RuntimeError("boom")):
+            res = handle_tool_call("list_dir", {"path": "src"})
+        self.assertTrue(res.get("isError"))
+        text = res["content"][0]["text"]
+        self.assertIn("Try an alternative approach", text)
+        self.assertIn("RuntimeError: boom", text)
+
+    def test_execute_with_timeout_recovers_without_hanging(self):
+        def _slow_handler(*args, **kwargs):
+            time.sleep(0.5)
+            return {"content": [{"type": "text", "text": "ok"}]}
+
+        with patch("src.mcp_server.handle_tool_call", side_effect=_slow_handler):
+            res = _execute_with_timeout("scoped_search", {"query": "test"}, timeout=0.05)
+        self.assertTrue(res.get("isError"))
+        self.assertIn("timeout", res["content"][0]["text"])
+        self.assertIn("Try an alternative approach", res["content"][0]["text"])
+
+    def test_notifications_cancelled_ignored_without_error_response(self):
+        stdin_data = (
+            json.dumps({"jsonrpc": "2.0", "method": "notifications/cancelled", "params": {"requestId": 1}}) + "\n" +
+            json.dumps({"jsonrpc": "2.0", "id": 99, "method": "tools/list"}) + "\n"
+        )
+        fake_in = io.StringIO(stdin_data)
+        fake_out = io.StringIO()
+        with patch("sys.stdin", fake_in), patch("sys.stdout", fake_out):
+            run_mcp_server()
+        lines = [line for line in fake_out.getvalue().strip().splitlines() if line]
+        self.assertEqual(len(lines), 1)
+        resp = json.loads(lines[0])
+        self.assertEqual(resp["id"], 99)
+        self.assertIn("tools", resp["result"])
 
 if __name__ == "__main__":
     unittest.main()

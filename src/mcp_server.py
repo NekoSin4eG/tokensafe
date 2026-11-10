@@ -8,6 +8,7 @@ import sys
 import os
 import time
 import json
+import threading
 import traceback
 import fnmatch
 from typing import Tuple, Optional
@@ -33,7 +34,7 @@ from src.scoped_search import ScopedSearch
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
-    "version": "1.4.11"
+    "version": "1.4.12"
 }
 
 TOOLS = [
@@ -322,8 +323,71 @@ def _resolve_project_root(args: dict) -> Tuple[Optional[str], Optional[str]]:
 
     return None, "Error: Invalid or root project_path. Please specify an explicit 'project_path' pointing to your project directory (e.g. project_path='/path/to/project')."
 
+MCP_TOOL_TIMEOUT = float(os.environ.get("TOKENSAFE_MCP_TIMEOUT", "8.0"))
+
+
+def _fallback_error(tool_name: str, reason: str) -> dict:
+    """Returns a non-blocking, actionable error telling the AI model to try another approach."""
+    clean_reason = (reason or "unknown error").strip()
+    return {
+        "isError": True,
+        "content": [{
+            "type": "text",
+            "text": (
+                f"⚠️ TokenSafe MCP tool '{tool_name}' could not complete ({clean_reason}). "
+                "Try an alternative approach instead of repeating this exact call: "
+                "narrow the target 'path'/'project_path' or 'depth', inspect a specific file with 'smart_read_file', "
+                "or fall back to standard 'read_file' / bounded 'run_command'."
+            )
+        }]
+    }
+
+
+class _NoOpTracker:
+    """Fallback metrics tracker if SQLite DB is temporarily unavailable or locked."""
+    db_path = ""
+    def record_event(self, *args, **kwargs):
+        return 0
+    def get_summary(self, *args, **kwargs):
+        return {}
+    def get_last_event(self, *args, **kwargs):
+        return None
+
+
+class _SafeTrackerProxy:
+    """Wraps MetricsTracker so transient SQLite errors never interrupt MCP tool output."""
+    def __init__(self, inner):
+        self._inner = inner
+        self.db_path = getattr(inner, "db_path", "")
+
+    def record_event(self, *args, **kwargs):
+        try:
+            return self._inner.record_event(*args, **kwargs)
+        except Exception:
+            return 0
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+def _get_safe_tracker():
+    try:
+        return _SafeTrackerProxy(MetricsTracker())
+    except Exception:
+        return _NoOpTracker()
+
+
 def handle_tool_call(name: str, args: dict) -> dict:
-    tracker = MetricsTracker()
+    if args is None or not isinstance(args, dict):
+        args = {}
+    try:
+        return _dispatch_tool_call(name, args)
+    except Exception as e:
+        return _fallback_error(name, f"{type(e).__name__}: {str(e)}")
+
+
+def _dispatch_tool_call(name: str, args: dict) -> dict:
+    tracker = _get_safe_tracker()
 
     if name == "smart_read_file":
         path = args.get("path", "")
@@ -572,9 +636,9 @@ def handle_tool_call(name: str, args: dict) -> dict:
         return {"content": [{"type": "text", "text": surface_md}]}
 
     elif name == "list_dir":
-        path = args.get("path", "")
+        path = args.get("path") or args.get("project_path") or args.get("directory") or args.get("root_dir") or ""
         if not path:
-            return {"isError": True, "content": [{"type": "text", "text": "Error: 'path' argument is required for list_dir."}]}
+            return _fallback_error("list_dir", "missing required 'path' argument")
 
         # Resolve path relative to current working directory or absolute
         abs_path = os.path.abspath(path)
@@ -601,7 +665,7 @@ def handle_tool_call(name: str, args: dict) -> dict:
     elif name == "scoped_search":
         query = args.get("query", "")
         if not query:
-            return {"isError": True, "content": [{"type": "text", "text": "Error: 'query' argument is required for scoped_search."}]}
+            return _fallback_error("scoped_search", "missing required 'query' argument")
 
         scope = args.get("scope", "all")
         raw_path = args.get("project_path") or args.get("path") or args.get("root_dir") or args.get("directory")
@@ -612,10 +676,7 @@ def handle_tool_call(name: str, args: dict) -> dict:
         else:
             resolved_path, err = _resolve_project_root(args)
             if err or not resolved_path:
-                return {
-                    "isError": True,
-                    "content": [{"type": "text", "text": err or "Error: Invalid or unspecified project_path."}]
-                }
+                return _fallback_error("scoped_search", err or "unspecified project_path")
             target_path = resolved_path
 
         max_res = args.get("max_results", 25)
@@ -632,7 +693,7 @@ def handle_tool_call(name: str, args: dict) -> dict:
         )
         md_text = res["markdown"]
         if not res.get("success", True):
-            return {"isError": True, "content": [{"type": "text", "text": md_text}]}
+            return _fallback_error("scoped_search", md_text)
 
         res_tokens = count_tokens(md_text)
         est_orig = max(1500, res_tokens * 8)
@@ -645,12 +706,39 @@ def handle_tool_call(name: str, args: dict) -> dict:
         )
         return {"content": [{"type": "text", "text": md_text}]}
 
-    return {"isError": True, "content": [{"type": "text", "text": f"Unknown tool: {name}"}]}
+    return _fallback_error(name, f"unknown tool '{name}'")
+
+
+def _execute_with_timeout(tool_name: str, tool_args: dict, timeout: float = MCP_TOOL_TIMEOUT) -> dict:
+    """Runs handle_tool_call inside a daemon thread with hard timeout so stdio MCP never freezes."""
+    box = {"result": None, "error": None}
+
+    def _runner():
+        try:
+            box["result"] = handle_tool_call(tool_name, tool_args)
+        except Exception as exc:
+            box["error"] = f"{type(exc).__name__}: {str(exc)}"
+
+    worker = threading.Thread(target=_runner, daemon=True)
+    worker.start()
+    worker.join(timeout=timeout)
+
+    if worker.is_alive():
+        return _fallback_error(tool_name, f"execution exceeded {timeout:.1f}s timeout")
+    if box["error"] is not None:
+        return _fallback_error(tool_name, box["error"])
+    if box["result"] is None:
+        return _fallback_error(tool_name, "empty result returned")
+    return box["result"]
+
 
 def run_mcp_server():
-    """Runs stdio JSON-RPC 2.0 loop."""
+    """Runs stdio JSON-RPC 2.0 loop with per-call timeout & resilient error recovery."""
     while True:
-        line = sys.stdin.readline()
+        try:
+            line = sys.stdin.readline()
+        except Exception:
+            break
         if not line:
             break
         line = line.strip()
@@ -666,6 +754,10 @@ def run_mcp_server():
         method = req.get("method")
         params = req.get("params", {})
 
+        # Notifications (no id, or notifications/*) must never receive JSON-RPC responses
+        if msg_id is None or (isinstance(method, str) and method.startswith("notifications/")):
+            continue
+
         response = {"jsonrpc": "2.0", "id": msg_id}
 
         if method == "initialize":
@@ -679,21 +771,15 @@ def run_mcp_server():
                 "capabilities": {"tools": {}},
                 "serverInfo": SERVER_INFO
             }
-        elif method == "notifications/initialized":
-            continue
         elif method == "tools/list":
             response["result"] = {"tools": TOOLS}
         elif method == "tools/call":
             tool_name = params.get("name", "")
             tool_args = params.get("arguments", {})
             try:
-                result = handle_tool_call(tool_name, tool_args)
-                response["result"] = result
+                response["result"] = _execute_with_timeout(tool_name, tool_args)
             except Exception as e:
-                response["result"] = {
-                    "isError": True,
-                    "content": [{"type": "text", "text": f"Error: {str(e)}\n{traceback.format_exc()}"}]
-                }
+                response["result"] = _fallback_error(tool_name, f"{type(e).__name__}: {str(e)}")
             finally:
                 try:
                     from src.telemetry_sync import TelemetrySync
@@ -703,8 +789,11 @@ def run_mcp_server():
         else:
             response["error"] = {"code": -32601, "message": f"Method not found: {method}"}
 
-        sys.stdout.write(json.dumps(response) + "\n")
-        sys.stdout.flush()
+        try:
+            sys.stdout.write(json.dumps(response) + "\n")
+            sys.stdout.flush()
+        except Exception:
+            break
 
 def main():
     run_mcp_server()
