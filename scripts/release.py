@@ -8,15 +8,20 @@ Capabilities:
 2. clean: Recursively purges build artifacts, *.pyc caches, and stale distribution tarballs.
 3. build: Performs pre-publish clean, builds sdist & wheel, validates twine check, and tests npm packaging.
 4. current: Prints the current canonical project version.
+5. verify: Checks every version location carries the canonical version.
+6. release: Full pipeline — preflight, tests, bump, build, git tag, GitHub release,
+   PyPI, npm (2FA-aware), MCP Registry (auto DNS re-login), public repo sync and
+   rollout verification. Idempotent: re-running resumes past completed phases.
 """
 
 import sys
 import os
 import re
 import json
+import time
 import shutil
 import subprocess
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Dict
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -241,6 +246,375 @@ def build_packages() -> bool:
     return True
 
 
+def verify_version_consistency(expected: Optional[str] = None) -> Tuple[bool, List[str]]:
+    """Checks that every file the bumper touches actually carries `expected`
+    (defaults to package.json version). Returns (ok, problems)."""
+    version = expected or get_current_version()
+    problems: List[str] = []
+
+    def check(path: str, snippet: str, label: str):
+        try:
+            with open(os.path.join(PROJECT_ROOT, path), "r", encoding="utf-8") as f:
+                content = f.read()
+            if snippet not in content:
+                problems.append(f"{path}: expected '{snippet}' ({label})")
+        except FileNotFoundError:
+            problems.append(f"{path}: file missing ({label})")
+
+    check("package.json", f'"version": "{version}"', "npm version")
+    check("pyproject.toml", f'version = "{version}"', "python version")
+    check("plugin.json", f'"version": "{version}"', "plugin version")
+    check("src/version_checker.py", f'CURRENT_VERSION = "{version}"', "client version")
+    check("src/cloud/config.py", f'HARDCODED_VERSION = "{version}"', "backend version")
+    check("src/cloud/services.py", f"TokenSafe-Backend/{version}", "services UA")
+    check("src/cloud/stripe.py", f"TokenSafe-Backend/{version}", "stripe UA")
+    check("src/mcp_server.py", f'"version": "{version}"', "mcp server version")
+    check("src/telemetry_sync.py", f"TokenSafe-Sync/{version}", "sync UA")
+    check("tests/test_cloud_backend.py", f'client_version="{version}"', "tests client_version")
+
+    try:
+        with open(os.path.join(PROJECT_ROOT, "server.json"), "r", encoding="utf-8") as f:
+            server = json.load(f)
+        if server.get("version") != version:
+            problems.append(f"server.json: root version {server.get('version')} != {version}")
+        for pkg in server.get("packages", []):
+            if pkg.get("version") != version:
+                problems.append(f"server.json: package {pkg.get('registryType')} version {pkg.get('version')} != {version}")
+    except FileNotFoundError:
+        problems.append("server.json: file missing")
+
+    return (len(problems) == 0), problems
+
+
+def generate_release_notes(new_version: str) -> str:
+    """Drafts release notes from conventional commits since the previous tag."""
+    try:
+        last_tag = subprocess.run(
+            ["git", "describe", "--tags", "--abbrev=0", "HEAD^"],
+            capture_output=True, text=True, cwd=PROJECT_ROOT, timeout=10
+        ).stdout.strip()
+    except Exception:
+        last_tag = ""
+    if not last_tag:
+        last_tag = subprocess.run(
+            ["git", "rev-list", "--max-parents=0", "HEAD"],
+            capture_output=True, text=True, cwd=PROJECT_ROOT, timeout=10
+        ).stdout.strip().split("\n")[0]
+    res = subprocess.run(
+        ["git", "log", f"{last_tag}..HEAD", "--pretty=%s"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT, timeout=10
+    )
+    subjects = [s.strip() for s in res.stdout.split("\n") if s.strip()]
+    buckets: Dict[str, List[str]] = {}
+    for s in reversed(subjects):  # chronological
+        parts = s.split(":", 1)
+        kind = parts[0].split("(")[0].strip() if len(parts) == 2 else "chore"
+        buckets.setdefault(kind, []).append(s)
+    labels = {"feat": "Features", "fix": "Fixes", "docs": "Docs",
+              "perf": "Performance", "refactor": "Refactoring", "ci": "CI"}
+    lines = [f"### Changes in v{new_version}", ""]
+    for kind in ("feat", "fix", "perf", "refactor", "docs", "ci"):
+        if kind in buckets:
+            lines.append(f"**{labels.get(kind, kind)}**")
+            lines.extend(f"- {s}" for s in buckets[kind])
+            lines.append("")
+    other = [s for k, items in buckets.items() if k not in ("feat", "fix", "perf", "refactor", "docs", "ci") for s in items]
+    if other:
+        lines.append("**Other**")
+        lines.extend(f"- {s}" for s in other)
+    lines.append("")
+    lines.append("_Full methodology for any metrics referenced: [METRICS.md](https://github.com/tokensafe-dev/tokensafe/blob/main/METRICS.md)._")
+    return "\n".join(lines)
+
+
+def _sh(args: List[str], timeout: int = 120) -> Tuple[int, str]:
+    res = subprocess.run(args, cwd=PROJECT_ROOT, capture_output=True, text=True, timeout=timeout)
+    return res.returncode, (res.stdout or "") + (res.stderr or "")
+
+
+def pypi_version_published(version: str) -> bool:
+    try:
+        res = subprocess.run(
+            [sys.executable, "-c",
+             f"import urllib.request;urllib.request.urlopen('https://pypi.org/pypi/tokensafe/{version}/json', timeout=10)"],
+            capture_output=True, timeout=20)
+        return res.returncode == 0
+    except Exception:
+        return False
+
+
+def npm_version_published(version: str) -> bool:
+    code, out = _sh(["npm", "view", f"tokensafe@{version}", "version"], timeout=30)
+    return code == 0 and version in out
+
+
+def registry_version_published(version: str) -> bool:
+    try:
+        import urllib.request
+        url = f"https://registry.modelcontextprotocol.io/v0.1/servers/dev.tokensafe%2Ftokensafe/versions/{version}"
+        with urllib.request.urlopen(url, timeout=10) as r:
+            data = json.load(r)
+        meta = data.get("_meta", {}).get("io.modelcontextprotocol.registry/official", {})
+        return meta.get("status") == "active"
+    except Exception:
+        return False
+
+
+def mcp_registry_login() -> Tuple[bool, str]:
+    """Re-authenticates with the MCP Registry via the DNS method.
+    The Ed25519 private key never leaves this process unprinted."""
+    key_path = os.path.expanduser("~/.ssh/mcp_tokensafe.pem")
+    if not os.path.exists(key_path):
+        return False, f"private key not found at {key_path}"
+    try:
+        code = (
+            "from cryptography.hazmat.primitives.serialization import load_pem_private_key;"
+            "import sys;"
+            "k = load_pem_private_key(open(sys.argv[1],'rb').read(), password=None);"
+            "sys.stdout.write(k.private_bytes_raw().hex())"
+        )
+        res = subprocess.run([sys.executable, "-c", code, key_path],
+                             capture_output=True, text=True, timeout=15)
+        if res.returncode != 0:
+            return False, "failed to read private key (cryptography package?)"
+        priv = res.stdout.strip()
+        code, out = _sh([os.path.expanduser("~/.local/bin/mcp-publisher"),
+                         "login", "dns", "--domain", "tokensafe.dev",
+                         "--private-key", priv], timeout=60)
+        if code != 0:
+            return False, out.strip()[:200]
+        return True, "logged in"
+    finally:
+        priv = None
+
+
+def wait_for_prod_version(version: str, attempts: int = 12, delay: int = 15) -> bool:
+    """Polls the production /health until it reports the released version."""
+    for _ in range(attempts):
+        try:
+            import urllib.request
+            with urllib.request.urlopen("https://api.tokensafe.dev/health", timeout=10) as r:
+                data = json.load(r)
+            if data.get("version") == version:
+                return True
+        except Exception:
+            pass
+        time.sleep(delay)
+    return False
+
+
+def run_release(target: str, otp: Optional[str] = None):
+    """Full release pipeline. Every phase is idempotent: re-running after a
+    failure or an interactive gate (npm OTP) resumes where it stopped."""
+    import glob as _glob
+
+    v = get_current_version()
+    next_v = calculate_next_version(v, target)
+    tag = f"v{next_v}"
+    pending: List[str] = []
+
+    print(f"🚀 Release pipeline: {v} ➜ {next_v}\n")
+
+    # Phase 0: preflight -------------------------------------------------
+    print("── Phase 0: preflight")
+    branch = subprocess.run(["git", "rev-parse", "--abbrev-ref", "HEAD"],
+                            cwd=PROJECT_ROOT, capture_output=True, text=True).stdout.strip()
+    if branch != "main":
+        print("❌ Must be on main. Aborting.")
+        sys.exit(1)
+    status = subprocess.run(["git", "status", "--porcelain"],
+                            cwd=PROJECT_ROOT, capture_output=True, text=True).stdout.strip()
+    # data/ runtime artifacts don't block
+    blocking = [l for l in status.split("\n") if l.strip() and not l.startswith("?? data/")]
+    if blocking:
+        print("❌ Working tree has uncommitted changes (commit first):")
+        for l in blocking[:10]:
+            print(f"   {l}")
+        sys.exit(1)
+    ok, problems = verify_version_consistency(v)
+    if not ok:
+        print("❌ Current version files are inconsistent (run 'bump' or fix):")
+        for p in problems:
+            print(f"   {p}")
+        sys.exit(1)
+    print(f"  ✔ main, clean tree, v{v} consistent\n")
+
+    # Phase 1: tests + bump + tests + verify ------------------------------
+    print("── Phase 1: tests, bump, tests")
+    code, out = _sh([sys.executable, "-m", "unittest", "discover", "tests"], timeout=300)
+    if code != 0:
+        print(out[-1500:])
+        print("❌ Test suite failed. Aborting.")
+        sys.exit(1)
+    if v == next_v:
+        print(f"  ℹ version already {v} — skipping bump (resume run)")
+    else:
+        bump_version(next_v)
+    code, out = _sh([sys.executable, "-m", "unittest", "discover", "tests"], timeout=300)
+    if code != 0:
+        print(out[-1500:])
+        print("❌ Post-bump test suite failed. Aborting.")
+        sys.exit(1)
+    ok, problems = verify_version_consistency(next_v)
+    if not ok:
+        for p in problems:
+            print(f"   {p}")
+        print("❌ Version inconsistency after bump. Aborting.")
+        sys.exit(1)
+    print(f"  ✔ tests green, v{next_v} consistent across all files\n")
+
+    # Phase 2: build -------------------------------------------------------
+    print("── Phase 2: build packages")
+    if not build_packages():
+        print("❌ Build failed. Aborting.")
+        sys.exit(1)
+
+    # Phase 3: commit, push, tag ------------------------------------------
+    print("── Phase 3: commit bump, push, tag")
+    if subprocess.run(["git", "status", "--porcelain"], cwd=PROJECT_ROOT,
+                      capture_output=True, text=True).stdout.strip():
+        subprocess.run(["git", "add", "-A"], cwd=PROJECT_ROOT, check=True)
+        subprocess.run(["git", "commit", "-m", f"chore(release): bump version to {next_v}"],
+                       cwd=PROJECT_ROOT, check=True)
+        print("  ✔ bump committed")
+    else:
+        print("  ℹ nothing to commit (resume run)")
+    code, out = _sh(["git", "push", "origin", "main"])
+    if code != 0:
+        print(out[-500:]); print("❌ push failed."); sys.exit(1)
+    code, _ = _sh(["git", "rev-parse", tag])
+    if code == 0:
+        print(f"  ℹ tag {tag} already exists")
+    else:
+        subprocess.run(["git", "tag", tag], cwd=PROJECT_ROOT, check=True)
+        print(f"  ✔ tag {tag} created")
+    code, out = _sh(["git", "push", "origin", tag])
+    if code != 0 and "already exists" not in out:
+        print(out[-500:]); print("❌ tag push failed."); sys.exit(1)
+    print("  ✔ pushed\n")
+
+    # Phase 4: GitHub release ----------------------------------------------
+    print("── Phase 4: GitHub release")
+    code, _ = _sh(["gh", "release", "view", tag])
+    if code == 0:
+        print(f"  ℹ {tag} release already exists")
+    else:
+        notes = generate_release_notes(next_v)
+        gh_args = ["gh", "release", "create", tag, "--title",
+                   f"v{next_v}: {next_v} release", "--notes", notes]
+        code, out = _sh(gh_args, timeout=60)
+        if code != 0:
+            print(out[-400:]); pending.append(f"gh release create {tag}")
+        else:
+            print(f"  ✔ {tag} published")
+
+    # Phase 5: PyPI ---------------------------------------------------------
+    print("── Phase 5: PyPI")
+    if pypi_version_published(next_v):
+        print(f"  ℹ {next_v} already on PyPI")
+    else:
+        dists = sorted(_glob.glob(os.path.join(PROJECT_ROOT, "dist", f"*{next_v}*")))
+        if not dists:
+            print("❌ dist artifacts missing."); sys.exit(1)
+        code, out = _sh([sys.executable, "-m", "twine", "upload", "--non-interactive", *dists], timeout=300)
+        if code != 0:
+            print(out[-400:]); pending.append("twine upload")
+        else:
+            print("  ✔ PyPI uploaded")
+
+    # Phase 6: npm ------------------------------------------------------------
+    print("── Phase 6: npm (2FA)")
+    if npm_version_published(next_v):
+        print(f"  ℹ {next_v} already on npm")
+    elif otp:
+        code, out = _sh(["npm", "publish", "--otp", otp], timeout=180)
+        if code != 0:
+            print(out[-400:]); pending.append("npm publish (otp rejected?)")
+        else:
+            print("  ✔ npm published")
+    else:
+        code, out = _sh(["npm", "publish"], timeout=180)
+        if code == 0:
+            print("  ✔ npm published")
+        elif "EOTP" in out:
+            import re as _re
+            m = _re.search(r"(https://www\.npmjs\.com/auth/cli/\S+)", out)
+            print("  ⚠ npm requires 2FA. Complete auth, then re-run:")
+            if m:
+                print(f"      {m.group(1)}")
+            print("      python3 scripts/release.py release --resume  (or: npm publish)")
+            pending.append("npm publish (waiting for your 2FA)")
+        else:
+            print(out[-400:]); pending.append("npm publish")
+
+    # Phase 7: MCP Registry -----------------------------------------------------
+    print("── Phase 7: MCP Registry")
+    if registry_version_published(next_v):
+        print(f"  ℹ {next_v} already active in the registry")
+    else:
+        publisher = os.path.expanduser("~/.local/bin/mcp-publisher")
+        code, out = _sh([publisher, "publish", "server.json"], timeout=120)
+        if code == 0:
+            print("  ✔ registry published")
+        elif "token is expired" in out or "Unauthorized" in out:
+            print("  ℹ registry JWT expired — re-authenticating via DNS key...")
+            ok, msg = mcp_registry_login()
+            if not ok:
+                print(f"  ⚠ login failed: {msg}")
+                pending.append("mcp-publisher publish (login failed)")
+            else:
+                code, out = _sh([publisher, "publish", "server.json"], timeout=120)
+                if code == 0:
+                    print("  ✔ registry published after re-login")
+                else:
+                    print(out[-300:]); pending.append("mcp-publisher publish")
+        else:
+            # Packages must exist on npm/PyPI before the registry accepts them.
+            print(out[-300:])
+            if not npm_version_published(next_v):
+                print("  ⚠ npm package not published yet — registry needs it. Re-run after npm.")
+            pending.append("mcp-publisher publish")
+
+    # Phase 8: public repo ---------------------------------------------------------
+    print("── Phase 8: public repo sync")
+    sync_sh = os.path.join(PROJECT_ROOT, "bin", "sync-public.sh")
+    stale_lock = os.path.join(PROJECT_ROOT, "data", ".sync.lock")
+    if os.path.exists(stale_lock):
+        try:
+            pid = int(open(stale_lock).read().strip())
+            import signal as _signal
+            os.kill(pid, 0)
+            print("  ⚠ telemetry sync is running; skipping public sync")
+            pending.append("bin/sync-public.sh (sync lock busy)")
+        except (ValueError, ProcessLookupError, PermissionError, OSError):
+            os.remove(stale_lock)
+    if not pending or not any("sync-public" in p for p in pending):
+        if os.path.exists(sync_sh):
+            code, out = _sh(["bash", sync_sh], timeout=300)
+            if code != 0:
+                print(out[-400:]); pending.append("bin/sync-public.sh")
+            else:
+                print("  ✔ public repo synced + tag pushed")
+
+    # Phase 9: rollout verification --------------------------------------------------
+    print("── Phase 9: rollout verification")
+    health_ok = wait_for_prod_version(next_v, attempts=8, delay=15)
+    print(f"  {'✔' if health_ok else '⚠'} prod /health: "
+          f"{'v' + next_v if health_ok else 'still rolling — check https://api.tokensafe.dev/health'}")
+    print(f"  {'✔' if pypi_version_published(next_v) else '⚠'} PyPI {next_v}")
+    print(f"  {'✔' if npm_version_published(next_v) else '⚠'} npm {next_v}")
+    print(f"  {'✔' if registry_version_published(next_v) else '⚠'} MCP Registry {next_v} active")
+
+    print("\n════════════════════════════════════════")
+    if pending:
+        print(f"⏳ Pending ({len(pending)}) — resolve, then re-run the same command to continue:")
+        for p in pending:
+            print(f"   • {p}")
+    else:
+        print(f"🎉 Release {tag} shipped everywhere.")
+    print("════════════════════════════════════════")
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -250,6 +624,8 @@ def main():
         print("  python3 scripts/release.py clean")
         print("  python3 scripts/release.py bump [patch|minor|major|X.Y.Z]")
         print("  python3 scripts/release.py build")
+        print("  python3 scripts/release.py verify [X.Y.Z]        # version consistency across files")
+        print("  python3 scripts/release.py release [patch|minor|major|X.Y.Z] [--otp=CODE]")
         sys.exit(0)
 
     cmd = sys.argv[1].lower().strip()
@@ -263,6 +639,23 @@ def main():
     elif cmd == "build":
         ok = build_packages()
         sys.exit(0 if ok else 1)
+    elif cmd == "verify":
+        expected = sys.argv[2] if len(sys.argv) > 2 else None
+        ok, problems = verify_version_consistency(expected)
+        if ok:
+            print(f"✅ All version locations consistent at {expected or get_current_version()}")
+        else:
+            for p in problems:
+                print(f"❌ {p}")
+            sys.exit(1)
+    elif cmd == "release":
+        args = sys.argv[2:]
+        otp = None
+        if args and args[-1].startswith("--otp="):
+            otp = args[-1].split("=", 1)[1]
+            args = args[:-1]
+        target = args[0] if args else "patch"
+        run_release(target, otp=otp)
     else:
         print(f"Unknown command: {cmd}")
         sys.exit(1)

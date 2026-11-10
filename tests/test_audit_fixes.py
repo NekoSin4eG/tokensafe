@@ -989,5 +989,20 @@ class TestUpdaterNpmDiscovery(unittest.TestCase):
             self.assertIsNone(AgentInstaller._find_npm(home=tmp))
 
 
+class TestReleaseVersionConsistency(unittest.TestCase):
+    """Every file the release bumper touches must agree with package.json —
+    catches 'forgotten' version locations (like the post-split cloud package)."""
+
+    def test_all_version_locations_consistent(self):
+        import importlib.util
+        script = os.path.join(PROJECT_ROOT, "scripts", "release.py")
+        spec = importlib.util.spec_from_file_location("release_tool", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        expected = mod.get_current_version()
+        ok, problems = mod.verify_version_consistency(expected)
+        self.assertTrue(ok, f"version drift detected:\n" + "\n".join(problems))
+
+
 if __name__ == "__main__":
     unittest.main()
