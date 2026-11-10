@@ -56,6 +56,7 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
 | `tokensafe:sanitize_command` | Intercepts shell commands to strip lockfiles, cap unbounded git logs, and quiet test tracebacks. | Saves **10k-50k tokens** per run |
 | `tokensafe:slice_diff` | Slices unified git diffs, eliminating lockfiles and minimizing hunk context lines. | **-50% to -80%** diff size |
 | `tokensafe:compress_prompt` | Compresses verbose user instructions into lean TOCP S-expressions via DeepSeek/Regex. | **-40% to -65%** prompt tokens |
+| `tokensafe:compact_conversation` | On-demand context compaction: folds a long JSONL session transcript into a lean Consolidated State Ledger (`transcript_path`, optional `invocation_num`). Call when the context window feels heavy or before a new subtask. | **-80% to -95%** history tokens |
 | `tokensafe:guard_inspect` | Pre-flight security & hygiene audit for commands or code snippets (secrets, TLS, SQLi, raw grep). | **Zero-Risk** pre-flight gate |
 | `tokensafe:get_token_savings_metrics` | Returns cumulative analytics: tokens saved, context ratio, USD value, and optimization source breakdown. | Persistent SQLite analytics |
 
@@ -168,6 +169,7 @@ For long-running autonomous sessions, TokenSafe actively manages context bloat:
 1. **Multi-Turn History Compaction**:
    - At conversation turn >= 3, automatically compiles past turns into a lean **Consolidated State Ledger**.
    - Preserves active file paths, modified symbols, and pending tasks while discarding transient tool output noise.
+   - **Manual trigger**: call `tokensafe:compact_conversation` with the session's `transcript_path` any time you need to shed context between subtasks — it returns the ledger JSON plus exact original/folded token counts.
 2. **Subagent Deduplication Firewall**:
    - Caches file reads across subagents. If subagent B attempts to read a file already inspected by subagent A, returns the cached skeleton instantly.
 3. **Loop Guard**:

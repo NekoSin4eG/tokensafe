@@ -173,7 +173,8 @@ class Skeletonizer:
     @classmethod
     def skeletonize_code(cls, code: str, file_ext: str, keep_symbols: Optional[Set[str]] = None) -> str:
         """Skeletons source code based on file extension, optionally preserving keep_symbols."""
-        ext = file_ext.lower()
+        ext = file_ext.lower().lstrip(".")
+        ext = f".{ext}" if ext else ""
         if ext == ".py":
             return cls._skeletonize_python(code, keep_symbols=keep_symbols)
         elif ext in (

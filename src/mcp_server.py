@@ -28,6 +28,8 @@ from src.metrics import MetricsTracker
 from src.dashboard import Dashboard
 from src.graph_engine import GraphEngine
 from src.tokenizer import count_tokens
+from src.history_compactor import HistoryCompactor
+from src.team_cache import TeamCache
 from src.agent_firewall import AgentFirewall
 from src.diff_slicer import DiffSlicer
 from src.guard import TokenSafeGuard
@@ -83,6 +85,18 @@ TOOLS = [
                 "prompt": {"type": "string", "description": "Natural language request from developer"}
             },
             "required": ["prompt"]
+        }
+    },
+    {
+        "name": "compact_conversation",
+        "description": "On-demand context compaction: folds a long agent conversation transcript into a compact Consolidated State Ledger. Use when the context window feels heavy or before starting a new subtask inside the same session.",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "transcript_path": {"type": "string", "description": "Path to the JSONL transcript of the current session"},
+                "invocation_num": {"type": "integer", "description": "Optional: current turn number (default 3; folding requires >= 3 turns)"}
+            },
+            "required": ["transcript_path"]
         }
     },
     {
@@ -378,6 +392,42 @@ def _get_safe_tracker():
         return _NoOpTracker()
 
 
+def _team_skeleton_lookup(path: str, symbol: str) -> Optional[str]:
+    """Team cache pre-warm lookup: returns a teammate's cached skeleton or None.
+
+    Never blocks the caller for more than ~250ms: the network fetch runs in a
+    daemon thread with a short join. Non-team installs skip the network entirely."""
+    try:
+        is_team, _ = TeamCache._is_team_tier()
+        if not is_team:
+            return None
+        box: dict = {}
+
+        def _fetch():
+            try:
+                box["value"] = TeamCache.get("SKELETON", f"{path}::{symbol or ''}")
+            except Exception:
+                pass
+
+        t = threading.Thread(target=_fetch, daemon=True)
+        t.start()
+        t.join(0.25)
+        return box.get("value")
+    except Exception:
+        return None
+
+
+def _team_skeleton_prewarm(path: str, symbol: str, skeleton_text: str, tokens_saved: int):
+    """Publishes a freshly built skeleton to the team cache (async, team tier only).
+
+    Teammate B's later smart_read_file on the same symbol hits the cache instead
+    of re-reading and re-skeletonizing the file."""
+    try:
+        TeamCache.put("SKELETON", f"{path}::{symbol or ''}", skeleton_text, tokens_saved=tokens_saved)
+    except Exception:
+        pass
+
+
 def handle_tool_call(name: str, args: dict) -> dict:
     if args is None or not isinstance(args, dict):
         args = {}
@@ -454,6 +504,23 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             return {"content": [{"type": "text", "text": (prefetch_block or "") + content}]}
 
         if symbol:
+            # Team pre-warm hit: a teammate already skeletonized this symbol
+            team_skel = _team_skeleton_lookup(path, symbol)
+            if team_skel:
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    raw_code = f.read()
+                orig_t = count_tokens(raw_code)
+                skel_t = count_tokens(team_skel)
+                tracker.record_event(
+                    session_id="mcp_session",
+                    event_type="TEAM_CACHE_HIT",
+                    original_tokens=orig_t,
+                    optimized_tokens=skel_t,
+                    details={"file": os.path.basename(path), "symbol": symbol, "source": "team_cache"}
+                )
+                header = f"// [TokenSafe Team-Cached Skeleton for '{symbol}' | shared by a teammate]\n"
+                return {"content": [{"type": "text", "text": (prefetch_block or "") + header + team_skel}]}
+
             try:
                 graph, rel_path = GraphEngine.for_file(path)
                 inc_deps = bool(args.get("include_deps", True))
@@ -473,6 +540,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                     )
                     dep_label = "Full body + 1-hop dependencies" if inc_deps else "Surgical single-symbol isolation"
                     header = f"// [TokenSafe Graph-Guided Skeleton for '{symbol}' | {dep_label}]\n"
+                    _team_skeleton_prewarm(path, symbol, graph_skel, saved)
                     return {"content": [{"type": "text", "text": (prefetch_block or "") + header + graph_skel}]}
             except Exception:
                 pass
@@ -503,6 +571,38 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         prompt = args.get("prompt", "")
         res = PromptCompactor.compact(prompt, enable_deepseek=True)
         return {"content": [{"type": "text", "text": json.dumps(res, indent=2, ensure_ascii=False)}]}
+
+    elif name == "compact_conversation":
+        transcript_path = args.get("transcript_path", "")
+        try:
+            invocation_num = max(3, int(args.get("invocation_num", 3) or 3))
+        except (TypeError, ValueError):
+            invocation_num = 3
+        if not transcript_path or not os.path.exists(transcript_path):
+            return {"isError": True, "content": [{"type": "text", "text": f"Transcript not found: {transcript_path}"}]}
+        ledger, orig_t, folded_t, stats = HistoryCompactor.fold_transcript(transcript_path, invocation_num)
+        if not ledger:
+            return {"content": [{"type": "text", "text": json.dumps({
+                "compactable": False,
+                "reason": "Transcript too short to fold (needs >= 4 steps and >= 1000 history tokens)"
+            }, indent=2)}]}
+        saved = max(0, orig_t - folded_t)
+        tracker.record_event(
+            session_id="mcp_session",
+            event_type="HISTORY_FOLD",
+            original_tokens=orig_t,
+            optimized_tokens=folded_t,
+            details={"mode": "manual_compact_conversation", "turns": invocation_num, **stats}
+        )
+        return {"content": [{"type": "text", "text": json.dumps({
+            "compactable": True,
+            "ledger": ledger,
+            "original_tokens": orig_t,
+            "folded_tokens": folded_t,
+            "saved_tokens": saved,
+            "note": "Inject this ledger as a system message and start fresh context from it; savings are labeled estimated (digest injected, history not removed).",
+            "stats": stats
+        }, indent=2, ensure_ascii=False)}]}
 
     elif name == "sanitize_command":
         cmd = args.get("command", "")

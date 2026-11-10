@@ -136,33 +136,47 @@ class BenchmarkSuite:
             # 2. Measure Tool / Command Execution
             t_base_tokens = 0
             t_opt_tokens = 0
+            # Honesty bookkeeping (see METRICS.md): which optimized-side tokens are
+            # produced live by the real tools vs. taken from modeled constants.
+            opt_measured_tokens = 0
+            opt_modeled_tokens = 0
             opt_turns = task.get("baseline_turns", 1)
 
             if "raw_tool_tokens" in task:
                 t_base_tokens += task["raw_tool_tokens"]
                 if task.get("is_graph_discovery"):
+                    opt_modeled_tokens += task.get("graph_opt_tokens", 220)
                     t_opt_tokens += task.get("graph_opt_tokens", 220)
                 elif task.get("is_graph_slicer"):
+                    opt_modeled_tokens += task.get("slicer_opt_tokens", 340)
                     t_opt_tokens += task.get("slicer_opt_tokens", 340)
                 else:
+                    opt_modeled_tokens += 280
                     t_opt_tokens += 280
 
             if "raw_command_tokens" in task:
                 cmd = task["command"]
                 new_cmd, saved, _ = CommandSanitizer.sanitize(cmd)
                 t_base_tokens += task["raw_command_tokens"]
+                # NOTE: `saved` is the sanitizer's downstream output ESTIMATE, not a
+                # live token delta, so it stays out of the measured bucket.
                 if task.get("is_git_grep"):
+                    opt_modeled_tokens += task.get("sanitized_tokens", 180)
                     t_opt_tokens += task.get("sanitized_tokens", 180)
                 elif task.get("id") == "SWE-03":
+                    opt_modeled_tokens += 350
                     t_opt_tokens += 350
                 elif task.get("id") == "SWE-04":
+                    opt_modeled_tokens += 320
                     t_opt_tokens += 320
                 else:
+                    opt_modeled_tokens += max(150, task["raw_command_tokens"] - saved)
                     t_opt_tokens += max(150, task["raw_command_tokens"] - saved)
 
             if "accumulated_history_tokens" in task:
                 t_base_tokens += task["accumulated_history_tokens"]
                 # History fold CSL is ~120 tokens
+                opt_modeled_tokens += 120
                 t_opt_tokens += 120
 
             # 3. Measure Output Guard
@@ -171,10 +185,13 @@ class BenchmarkSuite:
                 # Baseline rewrites whole file (1600-2200 output tokens)
                 # Optimized Output Guard enforces edit_file (80-120 diff tokens)
                 out_opt_tokens = 95
+                opt_modeled_tokens += out_opt_tokens
             elif "opt_output_tokens" in task:
                 out_opt_tokens = task["opt_output_tokens"]
+                opt_modeled_tokens += out_opt_tokens
             else:
                 out_opt_tokens = out_base_tokens
+                opt_modeled_tokens += out_opt_tokens  # no guard win: mass is still modeled
 
             # 4. Measure Turn Savings
             if "opt_turns" in task:
@@ -204,6 +221,8 @@ class BenchmarkSuite:
                 "name": name,
                 "base_tokens": task_base_total,
                 "opt_tokens": task_opt_total,
+                "opt_measured_tokens": opt_measured_tokens + p_opt_tokens,  # prompt compaction is always live
+                "opt_modeled_tokens": opt_modeled_tokens,
                 "saved_tokens": task_saved,
                 "reduction_pct": round(task_pct, 1),
                 "base_turns": task.get("baseline_turns", 1),
@@ -222,6 +241,8 @@ class BenchmarkSuite:
             "tasks": results,
             "total_base_tokens": total_base_tokens,
             "total_opt_tokens": total_opt_tokens,
+            "total_opt_measured_tokens": sum(t["opt_measured_tokens"] for t in results),
+            "total_opt_modeled_tokens": sum(t["opt_modeled_tokens"] for t in results),
             "total_saved_tokens": net_saved,
             "net_reduction_pct": round(net_pct, 1),
             "base_cost_usd": round(base_cost, 4),
@@ -245,6 +266,12 @@ class BenchmarkSuite:
         out.append(f"  {BOLD}Cost Comparison:{RESET}        ${data['base_cost_usd']:.4f} ➔ {GREEN}${data['opt_cost_usd']:.4f} USD{RESET} (Saved: ${data['cost_saved_usd']:.4f})")
         out.append(f"  {BOLD}Agent Latency / Turns:{RESET}  {data['total_base_turns']} turns ➔ {GREEN}{data['total_opt_turns']} turns{RESET} ({data['speedup_pct']}% faster via Prefetching)\n")
 
+        # SIMULATION DISCLOSURE — honest provenance of every number (METRICS.md)
+        out.append(f"  {BOLD}Evidence Breakdown:{RESET}")
+        out.append(f"    • {GREEN}Measured live{RESET}:  {data['total_opt_measured_tokens']:,} optimized tokens (real tool outputs produced during this run)")
+        out.append(f"    • {YELLOW}Modeled{RESET}:        {data['total_opt_modeled_tokens']:,} optimized tokens (constants for typical production sizes)")
+        out.append(f"    • All baseline sizes and turn counts are {YELLOW}modeled{RESET}; this is a simulation harness, not a metered production run.\n")
+
         out.append(f"{BOLD}── Task Breakdown ───────────────────────────────────────────────────{RESET}")
         for t in data["tasks"]:
             out.append(f"  • {BOLD}{t['id']}: {t['name']:<48}{RESET}")
@@ -258,6 +285,11 @@ class BenchmarkSuite:
         md = []
         md.append("# 🏆 Zero-Loss SWE-bench Benchmark Report\n")
         md.append("> **Objective Proof of 80%+ Cost Reduction with 100% Accuracy Retention.**\n")
+        md.append("> **SIMULATION DISCLOSURE:** this is a simulated harness. All *baseline* sizes and turn")
+        md.append("> counts are **modeled** from typical production values. On the optimized side,")
+        md.append(f"> **{data['total_opt_measured_tokens']:,} tokens are measured live** by running the real tools during this run,")
+        md.append(f"> while **{data['total_opt_modeled_tokens']:,} tokens are modeled constants**. Task success is self-verified.")
+        md.append("> Production savings are tracked separately with measured/estimated labels — see [METRICS.md](METRICS.md).\n")
         md.append("| Metric | Baseline (Standard Agent) | Optimized (`agy-token-optimizer`) | Gain |")
         md.append("| :--- | :--- | :--- | :--- |")
         md.append(f"| **Context Tokens** | `{data['total_base_tokens']:,}` | `{data['total_opt_tokens']:,}` | **-{data['net_reduction_pct']}%** |")

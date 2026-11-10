@@ -587,6 +587,10 @@ class TestMetricsHonestySplit(unittest.TestCase):
         self.assertEqual(s["total_saved_tokens_measured"], 0)
 
 
+@unittest.skipIf(
+    not os.path.exists(os.path.join(PROJECT_ROOT, "src", "cloud_backend.py")),
+    "cloud backend not distributed"
+)
 class TestCloudTelemetryMeasurementSplit(unittest.TestCase):
     """Cloud record_telemetry labels + dashboard/admin split (shared local cloud.db pattern)."""
 
@@ -639,6 +643,10 @@ class TestCloudTelemetryMeasurementSplit(unittest.TestCase):
             self.assertNotEqual(lic["client_version"], "1.3.4")
 
 
+@unittest.skipIf(
+    not os.path.exists(os.path.join(PROJECT_ROOT, "src", "cloud_backend.py")),
+    "cloud backend not distributed"
+)
 class TestPublicRateLimit(unittest.TestCase):
     """Sliding-window limiter on public endpoints; /health must stay exempt."""
 
@@ -674,6 +682,10 @@ class TestPublicRateLimit(unittest.TestCase):
         self.assertNotIn("_is_rate_limited", m.group(0))
 
 
+@unittest.skipIf(
+    not os.path.exists(os.path.join(PROJECT_ROOT, "src", "cloud_backend.py")),
+    "cloud backend not distributed"
+)
 class TestTS1SunsetMigration(unittest.TestCase):
     """check_version transparently reissues TS1 keys as TS2 and the client swaps them."""
 
@@ -854,6 +866,48 @@ class TestProxyReplaceModeDedup(unittest.TestCase):
         self.assertEqual(res.returncode, 0, res.stderr)
         out = json.loads(res.stdout or "{}")
         self.assertIn("[TOCP Compressed Intent]", json.dumps(out))
+
+
+class TestTeamCachePrewarm(unittest.TestCase):
+    """smart_read_file serves teammate skeletons from the team cache and republishes fresh ones."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp(prefix="tokensafe_prewarm_")
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.py_file = os.path.join(self._tmp, "svc.py")
+        with open(self.py_file, "w", encoding="utf-8") as f:
+            f.write("def alpha(x):\n" + "    y = x + 1\n" * 30 + "    return y\n\n\ndef beta():\n    return alpha(1)\n")
+
+    def test_lookup_skips_network_for_non_team(self):
+        from unittest.mock import patch
+        from src import mcp_server
+        with patch.object(mcp_server.TeamCache, "_is_team_tier", return_value=(False, "")), \
+             patch.object(mcp_server.TeamCache, "get") as fake_get:
+            self.assertIsNone(mcp_server._team_skeleton_lookup(self.py_file, "alpha"))
+            fake_get.assert_not_called()  # non-team: no network call at all
+
+    def test_hit_returns_teammate_skeleton(self):
+        from unittest.mock import patch
+        from src import mcp_server
+        teammate_skel = "def alpha(x):\n    ..."
+        with patch.object(mcp_server.TeamCache, "_is_team_tier", return_value=(True, "TS2.x")), \
+             patch.object(mcp_server.TeamCache, "get", return_value=teammate_skel):
+            res = mcp_server.handle_tool_call("smart_read_file", {"path": self.py_file, "symbol": "alpha"})
+        text = "".join(p.get("text", "") for p in res.get("content", []))
+        self.assertIn("Team-Cached Skeleton", text)
+        self.assertIn("def alpha", text)
+        # Cache-hit is metered in local metrics as its own event type
+        summary = mcp_server._get_safe_tracker().get_summary()
+        self.assertGreaterEqual(summary["breakdown"].get("TEAM_CACHE_HIT", {}).get("count", 0), 1)
+
+    def test_prewarm_never_blocks_or_raises(self):
+        from unittest.mock import patch
+        from src import mcp_server
+        with patch.object(mcp_server.TeamCache, "_is_team_tier", side_effect=RuntimeError("boom")):
+            # must swallow the error and return quickly
+            self.assertIsNone(mcp_server._team_skeleton_lookup(self.py_file, "alpha"))
+        with patch.object(mcp_server.TeamCache, "put", side_effect=RuntimeError("boom")):
+            mcp_server._team_skeleton_prewarm(self.py_file, "alpha", "def alpha: ...", 100)  # no raise
 
 
 if __name__ == "__main__":

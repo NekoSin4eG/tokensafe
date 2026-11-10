@@ -4,8 +4,8 @@
 
 | Metric | Baseline (Standard Agent) | Optimized (`agy-token-optimizer`) | Gain |
 | :--- | :--- | :--- | :--- |
-| **Context Tokens** | `131,604` | `7,251` | **-94.5%** |
-| **Inference Cost** | `$0.3290` | `$0.0181` | **-$0.3109 USD** |
+| **Context Tokens** | `131,552` | `7,263` | **-94.5%** |
+| **Inference Cost** | `$0.3289` | `$0.0182` | **-$0.3107 USD** |
 | **Agent Turns (Latency)** | `32 turns` | `23 turns` | **+28.1% Faster** |
 | **SWE Task Accuracy** | `100%` | `100%` | **Zero-Loss (100% Verified)** |
 
@@ -13,8 +13,8 @@
 
 | Scenario ID | Description | Tokens (Before ➔ After) | Turns | Accuracy |
 | :--- | :--- | :--- | :--- | :--- |
-| **SWE-01** | Race Condition / Distributed Lock (order_service.py) | 5,074 ➔ 404 (-92.0%) | 4 ➔ 3 | **100% (Passed)** |
-| **SWE-02** | OAuth JWT Expiration Triage (auth.controller.ts) | 3,757 ➔ 401 (-89.3%) | 3 ➔ 2 | **100% (Passed)** |
+| **SWE-01** | Race Condition / Distributed Lock (order_service.py) | 5,046 ➔ 414 (-91.8%) | 4 ➔ 3 | **100% (Passed)** |
+| **SWE-02** | OAuth JWT Expiration Triage (auth.controller.ts) | 3,733 ➔ 403 (-89.2%) | 3 ➔ 2 | **100% (Passed)** |
 | **SWE-03** | Monorepo Lockfile Git Diff (git diff HEAD~1) | 18,911 ➔ 761 (-96.0%) | 2 ➔ 2 | **100% (Passed)** |
 | **SWE-04** | CI Test Failure Extraction (npm test / pytest) | 5,009 ➔ 1,127 (-77.5%) | 3 ➔ 3 | **100% (Passed)** |
 | **SWE-05** | Multi-Turn History Compaction (8-turn session) | 31,010 ➔ 3,130 (-89.9%) | 8 ➔ 8 | **100% (Passed)** |
