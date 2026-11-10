@@ -421,11 +421,19 @@ def run_release(target: str, otp: Optional[str] = None):
     import glob as _glob
 
     v = get_current_version()
-    next_v = calculate_next_version(v, target)
+    # Resume semantics: if the current version is already tagged AND published
+    # somewhere, this run finishes THAT version instead of bumping again —
+    # 'release minor' after an npm-OTP pause must not silently create 1.(n+1).0.
+    tag_exists = _sh(["git", "rev-parse", f"v{v}"])[0] == 0
+    already_published = pypi_version_published(v) or npm_version_published(v)
+    if tag_exists and already_published:
+        next_v = v
+        print(f"🚀 Release pipeline: RESUME v{next_v} (tagged + published — completing remaining channels)\n")
+    else:
+        next_v = calculate_next_version(v, target)
+        print(f"🚀 Release pipeline: {v} ➜ {next_v}\n")
     tag = f"v{next_v}"
     pending: List[str] = []
-
-    print(f"🚀 Release pipeline: {v} ➜ {next_v}\n")
 
     # Phase 0: preflight -------------------------------------------------
     print("── Phase 0: preflight")
@@ -462,11 +470,11 @@ def run_release(target: str, otp: Optional[str] = None):
         print(f"  ℹ version already {v} — skipping bump (resume run)")
     else:
         bump_version(next_v)
-    code, out = _sh([sys.executable, "-m", "unittest", "discover", "tests"], timeout=300)
-    if code != 0:
-        print(out[-1500:])
-        print("❌ Post-bump test suite failed. Aborting.")
-        sys.exit(1)
+        code, out = _sh([sys.executable, "-m", "unittest", "discover", "tests"], timeout=300)
+        if code != 0:
+            print(out[-1500:])
+            print("❌ Post-bump test suite failed. Aborting.")
+            sys.exit(1)
     ok, problems = verify_version_consistency(next_v)
     if not ok:
         for p in problems:
