@@ -635,8 +635,8 @@ def run_release(target: str, otp: Optional[str] = None):
     public_ci_ok = False
     for _ in range(4):
         code, out = _sh(["gh", "run", "list", "-R", "tokensafe-dev/tokensafe",
-                         "--limit", "1", "--json", "conclusion,databaseId",
-                         "-q", ".[0].conclusion"], timeout=30)
+                         "--limit", "10", "--json", "conclusion,workflowName",
+                         "-q", '[.[] | select(.workflowName == "Tests & Lint")][0].conclusion'], timeout=30)
         concl = out.strip()
         if concl in ("success", "failure"):
             public_ci_ok = (concl == "success")
