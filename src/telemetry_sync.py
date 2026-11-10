@@ -115,8 +115,8 @@ class TelemetrySync:
         license_key: Optional[str] = None,
         email: Optional[str] = None,
         force: bool = False,
-        batch_size: int = 500,
-        timeout: float = 2.5,
+        batch_size: int = 200,
+        timeout: float = 10.0,
         verbose: bool = False
     ) -> Dict[str, Any]:
         """
@@ -192,14 +192,13 @@ class TelemetrySync:
                     "message": "All metrics are already up to date."
                 }
 
-            formatted_events: List[Dict[str, Any]] = list(synthetic_events)
-            max_id = last_id
+            formatted_items: List[Tuple[Optional[int], Dict[str, Any]]] = [
+                (None, ev) for ev in synthetic_events
+            ]
+            current_last_id = last_id
 
             for r in rows:
-                ev_id = r["id"]
-                if ev_id > max_id:
-                    max_id = ev_id
-
+                ev_id = int(r["id"])
                 raw_ts = r["timestamp"]
                 ts_int = int(time.time())
                 if isinstance(raw_ts, (int, float)):
@@ -224,16 +223,18 @@ class TelemetrySync:
                     except Exception:
                         pass
 
-                formatted_events.append({
+                formatted_items.append((ev_id, {
                     "event_type": str(r["event_type"] or "PROMPT"),
                     "original_tokens": int(r["original_tokens"] or 0),
                     "saved_tokens": int(r["saved_tokens"] or 0),
                     "usd_saved": float(r["est_usd_saved"] or 0.0),
                     "model": model_name,
                     "timestamp": ts_int
-                })
+                }))
 
             total_sent = 0
+            cumulative_synced = state.get("total_synced_events", 0)
+            rollup_synced = bool(state.get("lifetime_rollup_synced", False))
             headers = {
                 "Content-Type": "application/json",
                 "User-Agent": "TokenSafe-Sync/1.4.12"
@@ -241,8 +242,24 @@ class TelemetrySync:
             if active_key:
                 headers["Authorization"] = f"Bearer {active_key}"
 
-            for i in range(0, len(formatted_events), batch_size):
-                chunk = formatted_events[i:i + batch_size]
+            def _record_failure(err_msg: str) -> Dict[str, Any]:
+                fail_state = {
+                    "last_synced_event_id": current_last_id,
+                    "last_synced_at": state.get("last_synced_at", 0) if total_sent == 0 else int(time.time()),
+                    "last_attempt_at": int(time.time()),
+                    "total_synced_events": cumulative_synced,
+                    "lifetime_rollup_synced": rollup_synced
+                }
+                cls.save_state(fail_state)
+                return {
+                    "success": False,
+                    "synced_events": total_sent,
+                    "error": err_msg
+                }
+
+            for i in range(0, len(formatted_items), batch_size):
+                batch_items = formatted_items[i:i + batch_size]
+                chunk = [item[1] for item in batch_items]
                 body_dict = {
                     "email": target_email,
                     "license_key": active_key,
@@ -255,37 +272,32 @@ class TelemetrySync:
                     with urllib.request.urlopen(req, timeout=timeout) as resp:
                         if resp.status == 200:
                             total_sent += len(chunk)
+                            cumulative_synced += len(chunk)
+                            for ev_id, ev_payload in batch_items:
+                                if ev_id is not None and ev_id > current_last_id:
+                                    current_last_id = ev_id
+                                if ev_payload.get("event_type") == "ROLLUP_LIFETIME":
+                                    rollup_synced = True
+                            if not synthetic_events:
+                                rollup_synced = True
+                            cls.save_state({
+                                "last_synced_event_id": current_last_id,
+                                "last_synced_at": int(time.time()),
+                                "last_attempt_at": int(time.time()),
+                                "total_synced_events": cumulative_synced,
+                                "lifetime_rollup_synced": rollup_synced
+                            })
                         else:
-                            return {
-                                "success": False,
-                                "synced_events": total_sent,
-                                "error": f"Server returned HTTP {resp.status}"
-                            }
+                            return _record_failure(f"Server returned HTTP {resp.status}")
                 except urllib.error.HTTPError as he:
-                    return {
-                        "success": False,
-                        "synced_events": total_sent,
-                        "error": f"Cloud API error: {he.code} {he.reason}"
-                    }
+                    return _record_failure(f"Cloud API error: {he.code} {he.reason}")
                 except Exception as ex:
-                    return {
-                        "success": False,
-                        "synced_events": total_sent,
-                        "error": f"Network error during sync: {str(ex)}"
-                    }
-
-            new_state = {
-                "last_synced_event_id": max_id,
-                "last_synced_at": int(time.time()),
-                "total_synced_events": state.get("total_synced_events", 0) + total_sent,
-                "lifetime_rollup_synced": True
-            }
-            cls.save_state(new_state)
+                    return _record_failure(f"Network error during sync: {str(ex)}")
 
             return {
                 "success": True,
                 "synced_events": total_sent,
-                "total_synced": new_state["total_synced_events"],
+                "total_synced": cumulative_synced,
                 "message": f"Successfully synchronized {total_sent:,} events to TokenSafe Cloud."
             }
 
@@ -299,7 +311,7 @@ class TelemetrySync:
         """
         now = time.time()
         state = cls.get_state()
-        last_synced = state.get("last_synced_at", 0)
+        last_synced = max(state.get("last_synced_at", 0), state.get("last_attempt_at", 0))
         if not force and (now - last_synced) < throttle_seconds:
             return
 
@@ -342,7 +354,7 @@ if __name__ == "__main__":
     try:
         with open(SYNC_LOCK_PATH, "w", encoding="utf-8") as f:
             f.write(str(os.getpid()))
-        res = TelemetrySync.sync(timeout=5.0 if is_bg else 10.0, verbose=not is_bg)
+        res = TelemetrySync.sync(timeout=10.0, verbose=not is_bg)
         if not is_bg:
             print(json.dumps(res, indent=2))
     finally:

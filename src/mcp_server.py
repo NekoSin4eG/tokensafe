@@ -6,6 +6,7 @@ Exposes tools for smart file reading, dependency prefetching, prompt compression
 
 import sys
 import os
+import stat
 import time
 import json
 import threading
@@ -397,6 +398,11 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
 
         if not path or not os.path.exists(path):
             return {"isError": True, "content": [{"type": "text", "text": f"File not found: {path}"}]}
+        try:
+            if not stat.S_ISREG(os.stat(path).st_mode):
+                return _fallback_error("smart_read_file", f"path is not a regular file: {path}")
+        except OSError as e:
+            return _fallback_error("smart_read_file", f"cannot stat path: {e}")
 
         # Check Subagent Firewall dedup cache
         is_hit, cached_text, saved_dedup = AgentFirewall.check_cache("mcp_session", path, symbol=symbol or "", tracker=tracker)

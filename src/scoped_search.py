@@ -5,6 +5,7 @@ Replaces uncontrolled grep/find commands with bounded, clean, token-efficient re
 """
 import os
 import re
+import stat
 import fnmatch
 import time
 from typing import Dict, List, Optional, Any, Tuple
@@ -165,9 +166,10 @@ class ScopedSearch:
                 if not cls.is_match_file(fname, rel_path, scope):
                     continue
 
-                # Skip files larger than 1MB to prevent memory exhaustion
+                # Skip non-regular files (FIFOs/pipes/devices) and files larger than 1MB
                 try:
-                    if os.path.getsize(full_path) > 1024 * 1024:
+                    st = os.stat(full_path)
+                    if not stat.S_ISREG(st.st_mode) or st.st_size > 1024 * 1024:
                         continue
                 except OSError:
                     continue

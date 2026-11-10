@@ -12,6 +12,7 @@ import os
 import ast
 import re
 import json
+import stat
 import time
 from typing import Dict, Set, List, Optional, Tuple, Any
 
@@ -146,6 +147,9 @@ class CodeGraph:
         """Indexes a single code file using standard AST or regex tokenizers."""
         self._purge_file(rel_path)
         try:
+            st = os.stat(full_path)
+            if not stat.S_ISREG(st.st_mode) or st.st_size > 2 * 1024 * 1024:
+                return
             with open(full_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
         except OSError:

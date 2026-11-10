@@ -7,11 +7,14 @@ Uses SQLite for persistent, fast, zero-dependency storage.
 import os
 import json
 import sqlite3
+import threading
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Generator
 
 USD_PER_TOKEN = 1.50 / 1_000_000.0
+_METRICS_INIT_LOCK = threading.Lock()
+_INITIALIZED_METRICS_DBS: set = set()
 
 
 class MetricsTracker:
@@ -26,7 +29,7 @@ class MetricsTracker:
             os.makedirs(data_dir, exist_ok=True)
             db_path = os.environ.get("TOKENSAFE_DB_PATH", os.path.join(data_dir, "metrics.db"))
 
-        self.db_path = db_path
+        self.db_path = os.path.abspath(db_path)
         self.retention_days = int(os.environ.get("TOKENSAFE_RETENTION_DAYS", "30"))
         self.max_events = int(os.environ.get("TOKENSAFE_MAX_EVENTS", "5000"))
         self._event_counter = 0
@@ -34,10 +37,10 @@ class MetricsTracker:
 
     @contextmanager
     def _get_connection(self) -> Generator[sqlite3.Connection, None, None]:
-        conn = sqlite3.connect(self.db_path, timeout=2.0)
+        conn = sqlite3.connect(self.db_path, timeout=5.0)
         conn.row_factory = sqlite3.Row
         try:
-            conn.execute("PRAGMA busy_timeout=1500;")
+            conn.execute("PRAGMA busy_timeout=3000;")
         except sqlite3.Error:
             pass
         try:
@@ -47,56 +50,60 @@ class MetricsTracker:
             conn.close()
 
     def _init_db(self):
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            try:
-                cursor.execute("PRAGMA journal_mode=WAL;")
-            except sqlite3.Error:
-                pass
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS sessions (
-                    session_id TEXT PRIMARY KEY,
-                    created_at TEXT NOT NULL,
-                    last_updated TEXT NOT NULL,
-                    total_original_tokens INTEGER DEFAULT 0,
-                    total_optimized_tokens INTEGER DEFAULT 0,
-                    total_saved_tokens INTEGER DEFAULT 0,
-                    total_usd_saved REAL DEFAULT 0.0
-                )
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS events (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    session_id TEXT NOT NULL,
-                    timestamp TEXT NOT NULL,
-                    event_type TEXT NOT NULL,
-                    original_tokens INTEGER NOT NULL,
-                    optimized_tokens INTEGER NOT NULL,
-                    saved_tokens INTEGER NOT NULL,
-                    reduction_pct REAL NOT NULL,
-                    est_usd_saved REAL NOT NULL,
-                    details TEXT
-                )
-            """)
-            cursor.execute("""
-                CREATE TABLE IF NOT EXISTS lifetime_aggregates (
-                    id INTEGER PRIMARY KEY CHECK (id = 1),
-                    total_events INTEGER DEFAULT 0,
-                    total_original_tokens INTEGER DEFAULT 0,
-                    total_optimized_tokens INTEGER DEFAULT 0,
-                    total_saved_tokens INTEGER DEFAULT 0,
-                    total_usd_saved REAL DEFAULT 0.0,
-                    breakdown TEXT DEFAULT '{}'
-                )
-            """)
-            cursor.execute("""
-                INSERT OR IGNORE INTO lifetime_aggregates (
-                    id, total_events, total_original_tokens, total_optimized_tokens,
-                    total_saved_tokens, total_usd_saved, breakdown
-                ) VALUES (1, 0, 0, 0, 0, 0.0, '{}')
-            """)
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)")
-            cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id)")
+        with _METRICS_INIT_LOCK:
+            if self.db_path in _INITIALIZED_METRICS_DBS and os.path.exists(self.db_path) and os.path.getsize(self.db_path) > 0:
+                return
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                try:
+                    cursor.execute("PRAGMA journal_mode=WAL;")
+                except sqlite3.Error:
+                    pass
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS sessions (
+                        session_id TEXT PRIMARY KEY,
+                        created_at TEXT NOT NULL,
+                        last_updated TEXT NOT NULL,
+                        total_original_tokens INTEGER DEFAULT 0,
+                        total_optimized_tokens INTEGER DEFAULT 0,
+                        total_saved_tokens INTEGER DEFAULT 0,
+                        total_usd_saved REAL DEFAULT 0.0
+                    )
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS events (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        session_id TEXT NOT NULL,
+                        timestamp TEXT NOT NULL,
+                        event_type TEXT NOT NULL,
+                        original_tokens INTEGER NOT NULL,
+                        optimized_tokens INTEGER NOT NULL,
+                        saved_tokens INTEGER NOT NULL,
+                        reduction_pct REAL NOT NULL,
+                        est_usd_saved REAL NOT NULL,
+                        details TEXT
+                    )
+                """)
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS lifetime_aggregates (
+                        id INTEGER PRIMARY KEY CHECK (id = 1),
+                        total_events INTEGER DEFAULT 0,
+                        total_original_tokens INTEGER DEFAULT 0,
+                        total_optimized_tokens INTEGER DEFAULT 0,
+                        total_saved_tokens INTEGER DEFAULT 0,
+                        total_usd_saved REAL DEFAULT 0.0,
+                        breakdown TEXT DEFAULT '{}'
+                    )
+                """)
+                cursor.execute("""
+                    INSERT OR IGNORE INTO lifetime_aggregates (
+                        id, total_events, total_original_tokens, total_optimized_tokens,
+                        total_saved_tokens, total_usd_saved, breakdown
+                    ) VALUES (1, 0, 0, 0, 0, 0.0, '{}')
+                """)
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id)")
+            _INITIALIZED_METRICS_DBS.add(self.db_path)
 
     def record_event(
         self,
