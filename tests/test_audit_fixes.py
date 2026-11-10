@@ -1082,6 +1082,10 @@ class TestContextBudgetHUD(unittest.TestCase):
         self.assertNotIn("Context Budget", res2.stdout, "warning must fire only once per session")
 
 
+@unittest.skipIf(
+    not os.path.exists(os.path.join(PROJECT_ROOT, 'src', 'cloud_backend.py')),
+    'cloud backend stripped from public export'
+)
 class TestUpdaterHonestAdvertisement(unittest.TestCase):
     """The updater never offers a version npm cannot deliver (npm-OTP lag)."""
 
