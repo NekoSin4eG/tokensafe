@@ -53,13 +53,13 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
 | `tokensafe:list_dir` | Token-efficient directory tree without lockfiles, timestamps, or ignored folders (node_modules, .git, dist, .env). Replaces `ls -la`. | **-90%** vs verbose `ls` |
 | `tokensafe:get_architecture_graph` | Computes dependency topology, hub centrality, and identifies top God Nodes for `project_path`. | **~200 tokens** (replaces 50k crawl) |
 | `tokensafe:get_api_surface` | Generates a compact markdown map of all exported types, interfaces, and classes. | **~500 tokens** for entire project |
-| `tokensafe:sanitize_command` | Intercepts shell commands to strip lockfiles, cap unbounded git logs, and quiet test tracebacks. | Saves **10k-50k tokens** per run |
+| `tokensafe:sanitize_command` | Per-stage command rewrites: lockfile diffs, unbounded `git log`/`git show`/`git blame`/`rg`, docker/kubectl log caps, quiet npm/pip installs, bounded `cat`/`curl` output. Compound commands (`a && b ; c`) are optimized per stage without breaking operators. | Saves **10k-50k tokens** per run |
 | `tokensafe:slice_diff` | Slices unified git diffs, eliminating lockfiles and minimizing hunk context lines. | **-50% to -80%** diff size |
 | `tokensafe:compress_prompt` | Compresses verbose user instructions into lean TOCP S-expressions via DeepSeek/Regex. | **-40% to -65%** prompt tokens |
 | `tokensafe:compact_conversation` | On-demand context compaction: folds a long JSONL session transcript into a lean Consolidated State Ledger (`transcript_path`, optional `invocation_num`). Call when the context window feels heavy or before a new subtask. | **-80% to -95%** history tokens |
 | `tokensafe:context_budget` | Context Budget HUD: estimated window usage (`model`/`window_tokens`/`session_id`) with tools/history/prompts breakdown and 50/80/95% thresholds. Call before deciding to compact. | Floor estimate, always labeled estimated |
-| `tokensafe:guard_inspect` | Pre-flight security & hygiene audit for commands or code snippets (secrets, TLS, SQLi, raw grep). | **Zero-Risk** pre-flight gate |
-| `tokensafe:get_token_savings_metrics` | Returns cumulative analytics: tokens saved, context ratio, USD value, and optimization source breakdown. | Persistent SQLite analytics |
+| `tokensafe:guard_inspect` | Pre-flight security & hygiene audit: denies literal secrets/destructive commands in shell lines (secrets, TLS, SQLi, raw grep); advisory for never-terminating streams (`tail -f`, `watch`, `docker attach`) and TLS bypasses. | **Zero-Risk** pre-flight gate |
+| `tokensafe:get_token_savings_metrics` | Returns cumulative analytics: tokens saved (measured/estimated split), context ratio, ≈USD value (derived), and optimization source breakdown. | Persistent SQLite analytics |
 
 ---
 
@@ -160,6 +160,9 @@ TokenSafe Guard automatically intercepts dangerous operations in `PreToolUse`:
 | **DESTRUCTIVE_RM** | `rm -rf /`, `rm -rf ~`, `rm -rf *` | **Blocked** (`decision: deny`), prevents catastrophic deletion |
 | **DATA_EXFILTRATION** | Piping `.env` or private keys to `curl`/`wget` | **Blocked** (`decision: deny`), prevents secret leakage |
 | **PACKAGE_TYPOSQUAT** | Installing known typosquatted packages | **Warning** injected into turn context |
+| **INFINITE_STREAM** (adapters) | Never-terminating commands: `tail -f`, `watch`, `docker attach`, `docker/kubectl logs -f` | **Asked** (`decision: ask`) — intentional runs proceed via confirmation |
+
+Adapter-level checks (Claude Code / Cursor / ZCode hooks) classify command-level TLS bypass (`curl -k`, `git -c http.sslVerify=false`, `GIT_SSL_NO_VERIFY=1`) and infinite streams as `ask` — TokenSafe Guard's code-level checks above remain `deny`.
 
 ---
 
@@ -185,10 +188,12 @@ For long-running autonomous sessions, TokenSafe actively manages context bloat:
 Run standalone in the terminal or invoke via agent:
 
 ```bash
+tokensafe --version           # Print version and exit (no metrics side effects)
+
 # Telemetry & Economics
 tokensafe stats               # View terminal report with tokens saved & USD ROI
 tokensafe html                # Launch interactive Apple-style HTML dashboard
-tokensafe benchmark           # Run zero-loss SWE-bench benchmark suite
+tokensafe benchmark           # Run the zero-context-loss benchmark suite (simulated SWE-bench harness; see BENCHMARK_REPORT.md)
 
 # Code Intelligence & Architecture
 tokensafe graph [path]        # Inspect God Nodes and centrality ranking
@@ -211,8 +216,10 @@ tokensafe test "<prompt>"     # Test TOCP S-expression prompt compaction
 
 ---
 
-## Proof-of-Savings Turn Footer
+## Proof-of-Savings Turn Footer (always in English)
 
-At the end of any response where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer:
-`⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens ($<usd>)`
+At the end of any response where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer in English:
+`⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens (≈$<usd> approx)`
+
+The USD figure is **derived** (tokens × $1.5/M blended rate) — an approximation for planning, never a bill. Cumulative analytics distinguish `measured` (metered I/O delta) from `estimated` (counterfactual baseline) savings — see METRICS.md.
 

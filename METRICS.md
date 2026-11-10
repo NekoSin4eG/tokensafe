@@ -24,12 +24,14 @@ Both labels appear in every surface that aggregates savings:
 | Event type | Label | What "original" means |
 |---|---|---|
 | `TOOL_READ` | measured | Full file content vs. the sliced window the model received |
-| `COMMAND_FILTER` | measured | Raw command output vs. the filtered/tail-clamped output the model received |
+| `COMMAND_FILTER` | estimated | The command is *rewritten before execution*; "original" is a heuristic estimate of the verbose output the original command would have printed (lockfile dumps, unbounded logs) |
 | `GRAPH_SKELETON` / `AST_SKELETON` | measured | Full source vs. the folded skeleton the model received |
 | `SCOPED_SEARCH` | measured | What a raw recursive search would have returned vs. the ranked matches |
 | `DIR_LIST` | measured | Verbose `ls -la`-style listing vs. the pruned tree |
 | `CONTEXT_GOVERNOR` | measured | Unmanaged context mass vs. governor-trimmed mass actually submitted |
-| `OUTPUT_GUARD`, `GUARD_*`, `SECRET_GUARD` | measured | Blocked content never reaches the model (100% reduction of blocked mass) |
+| `OUTPUT_GUARD` | measured | Write content the model produced and would have committed wholesale; the blocked bytes are real, generated output |
+| `GUARD_*`, `SECRET_GUARD` | estimated | Blocked commands/reads never run, so their "would-have-entered-context" mass is a heuristic (constant floor or `len/4`), not metered I/O |
+| `LOOP_GUARD` | estimated | Identical repeat call is paused; its duplicate output mass is a fixed 5,000-token estimate |
 | `GRAPH_TOPOLOGY` | estimated | A hypothetical full-file crawl the graph made unnecessary |
 | `HISTORY_FOLD` | estimated | The folded digest is **injected** as a system message; the raw history physically remains in the context window. "Saved" = history mass the model no longer needs to actively attend to. |
 | `PROMPT` | estimated | TOCP-compressed form of the prompt (injected alongside the original until replace-mode is verified end-to-end) |
