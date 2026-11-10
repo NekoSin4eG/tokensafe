@@ -135,6 +135,72 @@ class AgentInstaller:
             }
         return detected
 
+    @staticmethod
+    def _tokensafe_hook_command(script_name: str) -> str:
+        """Shell command string for a bundled hook adapter (space-safe)."""
+        script = os.path.join(PROJECT_ROOT, "hooks", script_name)
+        return f"{shlex.quote(PYTHON_BIN)} {shlex.quote(script)}"
+
+    @classmethod
+    def install_hooks_config(cls, agent_key: str) -> Tuple[bool, str]:
+        """Registers TokenSafe lifecycle-hook adapters with agents that support them.
+        Claude Code: UserPromptSubmit (TOCP injection) + PreToolUse (shell guard).
+        Cursor: beforeShellExecution / beforeReadFile guards.
+        Codex has no lifecycle hooks (MCP + AGENTS.md remain the integration)."""
+        if agent_key == "codex":
+            return False, "Codex CLI has no lifecycle hooks — MCP + AGENTS.md stay the integration"
+        if agent_key not in ("claude_code", "cursor"):
+            return False, "hooks not applicable for this agent"
+
+        claude_cmd = cls._tokensafe_hook_command("claude_code_hook.py")
+        cursor_cmd = cls._tokensafe_hook_command("cursor_hook.py")
+
+        if agent_key == "claude_code":
+            info = AGENTS_REGISTRY["claude_code"]
+            config_file = info.get("agents_md_path", "").replace("CLAUDE.md", "settings.json")
+            config_file = os.path.join(HOME, ".claude", "settings.json")
+            os.makedirs(os.path.dirname(config_file), exist_ok=True)
+            data: Dict[str, Any] = {}
+            if os.path.exists(config_file):
+                try:
+                    with open(config_file, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                except Exception:
+                    data = {}
+            hooks = data.get("hooks") if isinstance(data.get("hooks"), dict) else {}
+            blob = json.dumps(hooks)
+            if "claude_code_hook.py" in blob:
+                return True, "TokenSafe Claude Code hooks already registered"
+            prompt_entry = {"hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
+            bash_entry = {"matcher": "Bash", "hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
+            hooks.setdefault("UserPromptSubmit", []).append(prompt_entry)
+            hooks.setdefault("PreToolUse", []).append(bash_entry)
+            data["hooks"] = hooks
+            cls._write_file_safely(config_file, json.dumps(data, indent=2))
+            return True, "hooks registered (UserPromptSubmit + PreToolUse guard)"
+
+        # cursor
+        config_file = os.path.join(HOME, ".cursor", "hooks.json")
+        os.makedirs(os.path.dirname(config_file), exist_ok=True)
+        data = {}
+        if os.path.exists(config_file):
+            try:
+                with open(config_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+            except Exception:
+                data = {}
+        hooks = data.get("hooks") if isinstance(data.get("hooks"), dict) else {}
+        blob = json.dumps(hooks)
+        if "cursor_hook.py" in blob:
+            return True, "TokenSafe Cursor hooks already registered"
+        shell_entry = {"command": cursor_cmd, "timeout": 10}
+        hooks.setdefault("beforeShellExecution", []).append(dict(shell_entry))
+        hooks.setdefault("beforeReadFile", []).append(dict(shell_entry))
+        hooks.setdefault("beforeSubmitPrompt", []).append(dict(shell_entry))
+        data["hooks"] = hooks
+        cls._write_file_safely(config_file, json.dumps(data, indent=2))
+        return True, "guards registered (shell + junk-read + prompt pipeline)"
+
     @classmethod
     def install_mcp_config(cls, agent_key: str) -> Tuple[bool, str]:
         """Injects TokenSafe MCP config into target agent."""
@@ -489,6 +555,10 @@ class AgentInstaller:
         for key, info in agents.items():
             if info["installed"] or force:
                 ok, msg = cls.install_mcp_config(key)
+                if ok:
+                    h_ok, h_msg = cls.install_hooks_config(key)
+                    if h_ok:
+                        msg = f"{msg}; {h_msg}"
                 results[key] = {"name": info["name"], "success": ok, "message": msg}
         # Also configure project rules
         proj_res = cls.install_project(os.getcwd())
@@ -536,6 +606,10 @@ class AgentInstaller:
             if is_sel:
                 name = agents[key]["name"]
                 ok, msg = cls.install_mcp_config(key)
+                if ok:
+                    h_ok, h_msg = cls.install_hooks_config(key)
+                    if h_ok:
+                        msg = f"{msg}; {h_msg}"
                 if ok:
                     print(f"  \033[32m✔\033[0m \033[1m{name}\033[0m: {msg}")
                     installed_count += 1
@@ -743,6 +817,10 @@ class AgentInstaller:
         for key, info in agents.items():
             if info["installed"]:
                 ok, msg = cls.install_mcp_config(key)
+                if ok:
+                    h_ok, h_msg = cls.install_hooks_config(key)
+                    if h_ok:
+                        msg = f"{msg}; {h_msg}"
                 if ok:
                     print(f"    {GREEN}✔{RESET} {info['name']}: {msg}")
                     synced_count += 1

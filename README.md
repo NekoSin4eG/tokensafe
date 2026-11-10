@@ -69,6 +69,20 @@ pure-Python path adds no measurable latency after the first hook invocation.
 
 ---
 
+## 🪝 Universal Agent Hooks (Claude Code & Cursor)
+
+Beyond MCP, TokenSafe ships **lifecycle-hook adapters** that run natively inside your agent's loop — installed automatically by `tokensafe setup`:
+
+| Agent | Hook | What it does |
+|---|---|---|
+| **Claude Code** | `UserPromptSubmit` | Compacts the prompt into a TOCP S-expression and injects it as `additionalContext` (labeled *estimated* per [METRICS.md](METRICS.md)) |
+| **Claude Code** | `PreToolUse` (Bash) | Denies secret-bearing and destructive commands; asks on TLS-verification bypasses |
+| **Cursor** | `beforeShellExecution` | Same shell guard — deny secrets/destruction, ask on `-k`/`--insecure` |
+| **Cursor** | `beforeReadFile` | Blocks lockfile/bundle/`dist/` dumps that would burn ~50k context tokens |
+| **Codex CLI** | — | No lifecycle hooks yet; MCP + AGENTS.md remain the integration |
+
+All adapters **fail open**: a crash never blocks the host agent (Cursor's block-on-invalid-JSON contract is explicitly honored — every error path prints valid allow-JSON).
+
 ## 🔌 Universal MCP Server Configuration
 
 Connect TokenSafe directly to **Claude Desktop** (`claude_desktop_config.json`) or **Cursor** MCP Settings:
