@@ -234,7 +234,7 @@ class TestCursorAdapter(AdapterBase):
 
 
 class TestAdapterCoreGuards(unittest.TestCase):
-    def test_guard_command_saved_tokens_measured(self):
+    def test_guard_command_saved_tokens_estimated(self):
         tmp = tempfile.mkdtemp(prefix="tokensafe_core_guards_")
         self.addCleanup(__import__("shutil").rmtree, tmp, ignore_errors=True)
         os.environ["TOKENSAFE_DB_PATH"] = os.path.join(tmp, "metrics.db")
@@ -247,7 +247,10 @@ class TestAdapterCoreGuards(unittest.TestCase):
         self.assertEqual(v["decision"], "ask")
         s = self._summary_local(tmp)
         self.assertEqual(s["breakdown"].get("GUARD_TLS_VERIFY_BYPASS", {}).get("count", 0), 1)
-        self.assertGreater(s["total_saved_tokens_measured"], 0)  # blocked mass is measured
+        # Blocked-command mass is a heuristic guess (len/4), never metered I/O:
+        # honest label is estimated, and measured must stay untouched.
+        self.assertEqual(s["total_saved_tokens_measured"], 0)
+        self.assertGreater(s["total_saved_tokens_estimated"], 0)
 
     @staticmethod
     def _summary_local(db_dir):

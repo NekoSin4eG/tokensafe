@@ -24,11 +24,21 @@ USD_PER_TOKEN = 1.50 / 1_000_000.0
 #                   replace-mode is verified end-to-end.
 #   ROLLUP_LIFETIME: pruned-and-rolled-up historical mass of mixed provenance;
 #                   conservatively labelled estimated.
+# Counterfactual event types: their original_tokens are heuristic guesses of
+# output that WOULD have entered context (command rewrites, blocked calls,
+# prompt compaction), not metered I/O deltas. See METRICS.md.
 ESTIMATED_EVENT_TYPES = frozenset({
     "GRAPH_TOPOLOGY",
     "HISTORY_FOLD",
     "PROMPT",
     "ROLLUP_LIFETIME",
+    "COMMAND_FILTER",
+    "LOOP_GUARD",
+    "GUARD_SECRET",
+    "GUARD_DESTRUCTIVE",
+    "GUARD_TLS_VERIFY_BYPASS",
+    "GUARD_JUNK_READ",
+    "GUARD_INFINITE",
 })
 
 def resolve_measurement(event_type: str, explicit: Optional[str] = None) -> str:
@@ -163,7 +173,10 @@ class MetricsTracker:
                 cursor.execute(
                     "UPDATE events SET measurement = 'estimated' "
                     "WHERE measurement = 'measured' AND event_type IN "
-                    "('GRAPH_TOPOLOGY', 'HISTORY_FOLD', 'PROMPT', 'ROLLUP_LIFETIME');"
+                    "('GRAPH_TOPOLOGY', 'HISTORY_FOLD', 'PROMPT', 'ROLLUP_LIFETIME', "
+                    "'COMMAND_FILTER', 'LOOP_GUARD', 'GUARD_SECRET', "
+                    "'GUARD_DESTRUCTIVE', 'GUARD_TLS_VERIFY_BYPASS', "
+                    "'GUARD_JUNK_READ', 'GUARD_INFINITE');"
                 )
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS lifetime_aggregates (
