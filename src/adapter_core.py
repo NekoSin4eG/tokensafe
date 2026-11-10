@@ -2,9 +2,11 @@
 Shared core for cross-agent lifecycle-hook adapters (Claude Code, Cursor, ZCode).
 
 Design rules (see METRICS.md):
-- Savings are only recorded for REAL reductions: injected TOCP prompts are
-  labeled estimated; blocked reads/commands are measured (the model never
-  receives the blocked bytes).
+- Savings are only recorded for REAL reductions. Blocked reads/commands never
+  reach the model, but their "would-have-been" mass is a heuristic guess, so
+  PROMPT injections and GUARD_*/COMMAND_FILTER/LOOP_GUARD events are labeled
+  estimated; events whose original/optimized tokens come from real bytes or
+  metered I/O stay measured.
 - Adapters ALWAYS fail open: an adapter crash must never block the host agent.
   (Cursor additionally blocks on invalid JSON, so adapters return valid
   allow-JSON from the exception handler.)
@@ -41,6 +43,17 @@ _TLS_BYPASS_PATTERNS = [
     r"curl\s+.*--insecure",
     r"NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*0",
     r"wget\s+.*--no-check-certificate",
+    r"git\s+-c\s+[a-z.]*sslVerify\s*=\s*false",
+    r"GIT_SSL_NO_VERIFY\s*=\s*(?:true|1)",
+]
+# Commands that never terminate on their own — an agent burning a turn on them
+# stalls until timeout. Intentional runs can still proceed via the "ask" path.
+_INFINITE_PATTERNS = [
+    r"\btail\b[^|;&]*\s-f\b",
+    r"\bwatch\s+",
+    r"\bdocker\s+logs\b[^|;&]*\s(?:-f\b|--follow)",
+    r"\bkubectl\s+logs\b[^|;&]*\s-f\b",
+    r"\bdocker\s+attach\b",
 ]
 
 # Lockfiles/junk that must never be dumped into an agent context.
@@ -131,6 +144,10 @@ def guard_command(command: str, agent: str, session_id: str = "") -> Dict[str, A
     for pat in _TLS_BYPASS_PATTERNS:
         if re.search(pat, text):
             blocked("TLS_VERIFY_BYPASS", "Certificate verification disabled — confirm this is intentional", decision="ask")
+            return result
+    for pat in _INFINITE_PATTERNS:
+        if re.search(pat, text):
+            blocked("INFINITE", "Command never terminates on its own (follow/streaming) — run it in the background or confirm intent", decision="ask")
             return result
     return result
 

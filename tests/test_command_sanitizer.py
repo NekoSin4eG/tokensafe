@@ -46,7 +46,11 @@ class TestCommandSanitizer(unittest.TestCase):
         self.assertIsNotNone(new_cmd)
         self.assertIn("':!bun.lock'", new_cmd)
         self.assertIn("':!*.lock'", new_cmd)
-        self.assertIn("head -n 30", new_cmd)
+        # Excludes must stay on the git grep stage; the `|| true` no-op tail
+        # must be untouched and never receive a bogus mid-compound cap.
+        self.assertIn("|| true", new_cmd)
+        self.assertNotIn("|| true | head", new_cmd)
+        self.assertLess(new_cmd.index(":!*.lock"), new_cmd.index("|| true"))
 
     def test_piped_grep_places_excludes_before_pipe(self):
         cmd = "grep -rn 'func' . | head -n 30"

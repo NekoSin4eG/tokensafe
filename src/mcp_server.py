@@ -128,7 +128,9 @@ TOOLS = [
     },
     {
         "name": "sanitize_command",
-        "description": "Rewrites shell commands (git diff, git log, pytest, grep) to prune lockfiles and unbounded logs.",
+        "description": "Per-stage shell command rewrites: prunes lockfiles, caps unbounded git log/show/blame/rg "
+                     "and docker/kubectl logs, quiets npm/pip installs, bounds cat/curl output. Compound commands "
+                     "(a && b ; c) are optimized per stage without breaking operators.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -159,7 +161,7 @@ TOOLS = [
     },
     {
         "name": "guard_inspect",
-        "description": "Pre-flight security & hygiene audit for commands or code snippets. Detects secret leaks, SQL injection, TLS bypass, CORS wildcard, destructive commands, and raw grep.",
+        "description": "Pre-flight security & hygiene audit for commands or code snippets. Detects secret leaks, SQL injection, TLS bypass (incl. git-level), CORS wildcard, destructive commands, raw grep, and never-terminating streams (tail -f, watch, docker attach).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -703,6 +705,66 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                     optimized_tokens=0,
                     details={"cmd": cmd[:100], "reason": c_res.reason}
                 )
+            else:
+                # Adapter-level command checks (v2.1.0): TokenSafeGuard's
+                # command audit does not scan for literal credentials, so
+                # deny-level secrets/destruction come from the adapter core —
+                # the same patterns the Claude Code / Cursor shell guards use.
+                try:
+                    from src.adapter_core import (_SECRET_PATTERNS, _DESTRUCTIVE_PATTERNS,
+                                                  _INFINITE_PATTERNS, _TLS_BYPASS_PATTERNS)
+                    hit = None
+                    for pat in _SECRET_PATTERNS:
+                        if re.search(pat, cmd):
+                            hit = ("SECRET", "Blocked: command contains a hardcoded secret", True)
+                            break
+                    if hit is None:
+                        for pat in _DESTRUCTIVE_PATTERNS:
+                            if re.search(pat, cmd):
+                                hit = ("DESTRUCTIVE", "Blocked: irreversible/destructive operation", True)
+                                break
+                    if hit:
+                        results.append({
+                            "target": "command",
+                            "input": cmd,
+                            "allowed": False,
+                            "blocked": True,
+                            "check_name": hit[0],
+                            "reason": hit[1],
+                            "warning_only": False
+                        })
+                        tracker.record_event(
+                            session_id=_mcp_session_id(),
+                            event_type=f"GUARD_{hit[0]}",
+                            original_tokens=count_tokens(cmd),
+                            optimized_tokens=0,
+                            details={"cmd": cmd[:100], "reason": hit[1]}
+                        )
+                    else:
+                        # Advisory tier: infinite streams and TLS bypass never
+                        # block an inspection, and inspections write no events.
+                        advisory = None
+                        for pat in _INFINITE_PATTERNS:
+                            if re.search(pat, cmd):
+                                advisory = ("INFINITE_STREAM", "Command never terminates on its own (follow/streaming) — run it in the background or confirm intent")
+                                break
+                        if advisory is None:
+                            for pat in _TLS_BYPASS_PATTERNS:
+                                if re.search(pat, cmd):
+                                    advisory = ("TLS_VERIFY_BYPASS", "Certificate verification disabled — confirm this is intentional")
+                                    break
+                        if advisory:
+                            results.append({
+                                "target": "command",
+                                "input": cmd,
+                                "allowed": True,
+                                "blocked": False,
+                                "check_name": advisory[0],
+                                "reason": advisory[1],
+                                "warning_only": True
+                            })
+                except Exception:
+                    pass
 
         if code is not None:
             w_res = TokenSafeGuard.inspect_file_write(file_path, code)

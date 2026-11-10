@@ -458,8 +458,29 @@ def main():
             print("Reset cancelled.")
 
     else:
+        if command in ("--help", "-h", "help"):
+            print("TokenSafe CLI — usage: tokensafe <command> [args]\n")
+            print("Commands:")
+            print("  stats / markdown / html        Savings analytics (terminal / .md report / dashboard)")
+            print("  benchmark                      Zero-context-loss benchmark suite (simulated SWE-bench harness)")
+            print("  graph / map / skeleton         Architecture graph / API surface / AST skeleton of a file")
+            print("  test <prompt>                  Preview TOCP S-expression prompt compaction")
+            print("  digest [--send] [--email=...]  Compile (and optionally dispatch) the weekly team digest")
+            print("  guard <command>                Pre-flight safety check for a shell command")
+            print("  doctor                         Audit MCP tool overhead and token tax")
+            print("  prune [--days N | --max N]     Compact metrics database (roll old events)")
+            print("  vacuum                         Reclaim SQLite disk space")
+            print("  reset                          Reset all local token metrics")
+            print("  install | setup [--all]        Configure detected agent environments")
+            print("  update | upgrade               Self-update npm/PyPI package and re-sync agents")
+            print("  check-update                   Check for a newer published version")
+            print("  activate / license             License activation and status")
+            print("  sync                           Sync telemetry with the cloud backend")
+            print("  providers / proxy / mcp        Providers info / proxy server / MCP stdio server")
+            print("  --version                      Print version and exit")
+            sys.exit(0)
         print(f"Unknown command: {command}")
-        print("Available commands: stats, sync, html, test, doctor, providers, mcp, benchmark, proxy, graph, map, vacuum, prune, digest, activate, license, markdown, setup, reset")
+        print("Available commands: stats, sync, html, test, doctor, providers, mcp, benchmark, proxy, graph, map, skeleton, guard, vacuum, prune, digest, activate, license, markdown, install, setup, update, check-update, reset. Run 'tokensafe help' for details.")
         sys.exit(1)
 
 if __name__ == "__main__":

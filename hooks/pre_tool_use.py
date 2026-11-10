@@ -251,14 +251,19 @@ def main():
             print(json.dumps(response))
             return
 
-        # Check AST Diff Slicer first
+        # Check AST Diff Slicer first (per-stage rewrite of git diff stages),
+        # then run the Command Sanitizer on the result so other stages
+        # (git log, pytest, rg, ...) in the same compound command still
+        # get their rules applied.
         diff_cmd, diff_saved, diff_reason = DiffSlicer.optimize_git_diff_command(cmd)
         if diff_cmd:
-            new_cmd = diff_cmd
-            est_saved = diff_saved
-            reason = diff_reason
-        else:
-            new_cmd, est_saved, reason = CommandSanitizer.sanitize(cmd)
+            cmd = diff_cmd
+        new_cmd, san_saved, san_reason = CommandSanitizer.sanitize(cmd)
+        if new_cmd:
+            est_saved = san_saved + (diff_saved if diff_cmd else 0)
+            reason = (f"{diff_reason}; {san_reason}" if diff_cmd else san_reason)
+        elif diff_cmd:
+            new_cmd, est_saved, reason = diff_cmd, diff_saved, diff_reason
 
         if new_cmd and est_saved > 0:
             response["overwrite"] = {"CommandLine": new_cmd}

@@ -5,7 +5,7 @@ Prevents context window bloat from full-file reads (800+ lines) and noisy termin
 
 import os
 import re
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 from src.tokenizer import count_tokens
 
 class ToolSlicer:
@@ -13,6 +13,64 @@ class ToolSlicer:
 
     # Default max lines to read when no range is specified on large files
     DEFAULT_MAX_WINDOW = 350
+
+    # When a target symbol is found, the slice must contain the WHOLE
+    # enclosing definition — a fixed tail used to cut long function bodies in
+    # half. Definitions longer than this cap are better served by the AST
+    # skeleton path, so the window stays bounded.
+    MAX_SYMBOL_WINDOW = 400
+
+    @classmethod
+    def _find_definition_end(cls, lines: List[str], def_line_no: int) -> Optional[int]:
+        """
+        Returns the 1-based last line of the definition whose declaration sits
+        on def_line_no, or None when it cannot be determined reliably.
+
+        Python (def/class): the body ends at the last non-blank line before a
+        line dedented to <= the declaration's indent.
+        C-family (function/const/func/fn/impl/struct/...): brace balance from
+        the first '{' within the declaration or the next 10 lines. Naive
+        counting is safe here: a brace inside a string can only skew the end
+        within the cap, and the caller keeps the legacy tail as a floor.
+        """
+        if def_line_no < 1 or def_line_no > len(lines):
+            return None
+        def_line = lines[def_line_no - 1]
+
+        py_match = re.match(r"^(\s*)(?:async\s+)?(?:def|class)\b", def_line)
+        if py_match:
+            base_indent = len(py_match.group(1).expandtabs(8))
+            end = def_line_no
+            for idx in range(def_line_no, len(lines)):
+                line = lines[idx]
+                if not line.strip():
+                    continue
+                expanded = line.expandtabs(8)
+                indent = len(expanded) - len(expanded.lstrip())
+                if indent <= base_indent:
+                    break
+                end = idx + 1
+            return end
+
+        # C-family: locate the opening brace within the declaration head
+        # (first 10 lines), then balance braces across the capped window.
+        window_end = min(len(lines), def_line_no - 1 + cls.MAX_SYMBOL_WINDOW)
+        text = "".join(lines[def_line_no - 1:window_end])
+        head = "".join(lines[def_line_no - 1:min(len(lines), def_line_no + 10)])
+        offset = head.find("{")
+        if offset == -1:
+            return None
+
+        depth = 0
+        for i, ch in enumerate(text[offset:]):
+            if ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return def_line_no + text[:offset + i + 1].count("\n")
+        # Unbalanced within the cap: report the cap boundary as the end
+        return window_end
 
     @classmethod
     def optimize_read_file(cls, args: Dict[str, Any], context_hint: str = "") -> Tuple[Dict[str, Any], Dict[str, Any]]:
@@ -58,7 +116,7 @@ class ToolSlicer:
                 # regex scans per read_file hook call on large files).
                 unique_candidates = list(dict.fromkeys(candidates))
                 combined = re.compile(
-                    r'\b(?:def|function|class|const|let|var|type|interface)\s+('
+                    r'\b(?:def|function|class|const|let|var|type|interface|func|fn|impl|struct|enum|trait)\s+('
                     + "|".join(re.escape(c) for c in unique_candidates) + r')\b'
                 )
                 first_hit: Dict[str, int] = {}
@@ -77,9 +135,17 @@ class ToolSlicer:
         new_end = total_lines
 
         if found_line:
-            # Slice: 20 lines before, 80 lines after
+            # Slice: 20-line lead-in before the declaration, then enough tail
+            # to contain the WHOLE enclosing definition (short definitions keep
+            # the legacy 80-line tail; long ones extend to their real end).
             new_start = max(1, found_line - 20)
             new_end = min(total_lines, found_line + 80)
+            def_end = cls._find_definition_end(lines, found_line)
+            if def_end:
+                new_end = min(
+                    total_lines,
+                    max(new_end, min(def_end, found_line + cls.MAX_SYMBOL_WINDOW)),
+                )
 
         # If no symbol found and file is large (> 400 lines), apply safety window
         if not target_symbol and total_lines > 400 and (end_line is None or end_line > cls.DEFAULT_MAX_WINDOW):

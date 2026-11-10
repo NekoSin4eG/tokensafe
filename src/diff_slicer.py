@@ -106,6 +106,9 @@ class DiffSlicer:
     def optimize_git_diff_command(cls, cmd: str) -> Tuple[Optional[str], int, str]:
         """
         Rewrites git diff commands to enforce 2-line unified diffs and ignore lockfiles.
+        Per-stage: excludes are appended to each `git diff` stage itself, never
+        to the tail of a compound command (which would leak pathspecs into an
+        unrelated trailing command like `npm test`).
         """
         clean_cmd = cmd.strip()
         if not re.search(r"\bgit\s+diff\b", clean_cmd):
@@ -114,7 +117,20 @@ class DiffSlicer:
         if "--unified=" in clean_cmd or "-U" in clean_cmd:
             return None, 0, ""
 
+        from src.command_sanitizer import CommandSanitizer
+        pairs = CommandSanitizer.split_stages(clean_cmd)
         lockfile_excludes = " ':!*lock*' ':!*.min.*' ':!*.map'"
-        optimized = clean_cmd.replace("git diff", "git diff -U2", 1) + lockfile_excludes
+        changed = False
+        for i, (op, stage) in enumerate(pairs):
+            if not re.search(r"\bgit\s+diff\b", stage):
+                continue
+            if ":!" in stage:
+                continue  # caller already manages pathspec excludes
+            pairs[i] = (op, stage.replace("git diff", "git diff -U2", 1) + lockfile_excludes)
+            changed = True
+
+        if not changed:
+            return None, 0, ""
+
         est_saved = 4000
-        return optimized, est_saved, "Enforced 2-line AST diff window and excluded lockfiles"
+        return CommandSanitizer.join_stages(pairs), est_saved, "Enforced 2-line AST diff window and excluded lockfiles"
