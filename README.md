@@ -7,7 +7,7 @@
 
 <p align="center">
   <b>Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents</b><br>
-  Slashes LLM token costs by <b>up to 90%</b> with zero quality loss.<br>
+  Slashes LLM token costs by <b>up to [90%*](METRICS.md)</b> with zero context loss.<br>
   Built for <b>Cursor, Claude Desktop, Google Antigravity, Windsurf & Cline</b>.
 </p>
 

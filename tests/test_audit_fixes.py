@@ -937,5 +937,57 @@ class TestPublicSurfaceHygiene(unittest.TestCase):
         self.assertIn("not documented in the public API surface", readme)
 
 
+class TestUpdaterNpmDiscovery(unittest.TestCase):
+    """self_update must find npm without .zshrc/nvm in PATH (dialog context)."""
+
+    def _make_fake_npm(self, root: str, node_version: str) -> str:
+        bin_dir = os.path.join(root, ".nvm", "versions", "node", node_version, "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        npm_path = os.path.join(bin_dir, "npm")
+        with open(npm_path, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(npm_path, 0o755)
+        return npm_path
+
+    def test_falls_back_to_nvm_when_path_has_no_npm(self):
+        from unittest.mock import patch
+        from src.installer import AgentInstaller
+        tmp = tempfile.mkdtemp(prefix="tokensafe_npm_disc_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        npm_path = self._make_fake_npm(tmp, "v24.14.0")
+        with patch("src.installer.shutil.which", return_value=None):
+            self.assertEqual(AgentInstaller._find_npm(home=tmp), npm_path)
+
+    def test_prefers_newest_nvm_node_version(self):
+        from unittest.mock import patch
+        from src.installer import AgentInstaller
+        tmp = tempfile.mkdtemp(prefix="tokensafe_npm_order_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        self._make_fake_npm(tmp, "v20.10.0")
+        newest = self._make_fake_npm(tmp, "v24.14.0")
+        with patch("src.installer.shutil.which", return_value=None):
+            self.assertEqual(AgentInstaller._find_npm(home=tmp), newest)
+
+    def test_homebrew_and_system_candidates(self):
+        from unittest.mock import patch
+        from src.installer import AgentInstaller
+        tmp = tempfile.mkdtemp(prefix="tokensafe_npm_hb_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        with patch("src.installer.shutil.which", return_value=None), \
+             patch("os.path.isfile", side_effect=lambda p: p == "/usr/local/bin/npm"):
+            self.assertEqual(AgentInstaller._find_npm(home=tmp), "/usr/local/bin/npm")
+
+    def test_returns_none_when_nothing_exists(self):
+        from unittest.mock import patch
+        from src.installer import AgentInstaller
+        tmp = tempfile.mkdtemp(prefix="tokensafe_npm_none_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        # Simulate a machine with no npm anywhere (no PATH npm, no nvm,
+        # no homebrew/system candidates on disk).
+        with patch("src.installer.shutil.which", return_value=None), \
+             patch("os.path.isfile", return_value=False):
+            self.assertIsNone(AgentInstaller._find_npm(home=tmp))
+
+
 if __name__ == "__main__":
     unittest.main()

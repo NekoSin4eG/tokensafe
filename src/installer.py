@@ -643,6 +643,36 @@ class AgentInstaller:
 
         return restarted
 
+    @staticmethod
+    def _find_npm(home: Optional[str] = None) -> Optional[str]:
+        """Locates an npm executable even in a clean non-interactive environment.
+
+        The updater dialog runs via `do shell script` + login shell, where .zshrc
+        (and therefore nvm) is never sourced; PATH-only discovery made the npm
+        channel silently skip updates. Falls back to well-known locations."""
+        found = shutil.which("npm")
+        if found:
+            return found
+        base = home or HOME
+        candidates: List[str] = []
+        nvm_dir = os.path.join(base, ".nvm", "versions", "node")
+        try:
+            if os.path.isdir(nvm_dir):
+                # Newest installed node version wins.
+                for version_dir in sorted(os.listdir(nvm_dir), reverse=True):
+                    candidates.append(os.path.join(nvm_dir, version_dir, "bin", "npm"))
+        except OSError:
+            pass
+        candidates += [
+            "/opt/homebrew/bin/npm",
+            "/usr/local/bin/npm",
+            "/usr/bin/npm",
+        ]
+        for cand in candidates:
+            if os.path.isfile(cand) and os.access(cand, os.X_OK):
+                return cand
+        return None
+
     @classmethod
     def self_update(cls):
         """
@@ -668,29 +698,43 @@ class AgentInstaller:
                 print(f"  {YELLOW}⚠{RESET} Git pull skipped: {e}")
 
         # 2. Check npm global
-        if shutil.which("npm"):
+        # The updater dialog runs via `do shell script` + login shell, which skips
+        # .zshrc — nvm is NOT on PATH there, so PATH-only discovery silently
+        # downgraded the npm channel (the active one for many installs).
+        npm_bin = cls._find_npm()
+        if npm_bin:
             try:
-                res = subprocess.run(["npm", "list", "-g", "--depth=0", "tokensafe"], capture_output=True, text=True, timeout=5)
+                res = subprocess.run([npm_bin, "list", "-g", "--depth=0", "tokensafe"], capture_output=True, text=True, timeout=15)
                 if "tokensafe@" in res.stdout:
                     print(f"  {CYAN}→{RESET} Updating global npm package (npm install -g tokensafe@latest)...")
-                    up_res = subprocess.run(["npm", "install", "-g", "tokensafe@latest"], capture_output=True, text=True, timeout=30)
+                    up_res = subprocess.run([npm_bin, "install", "-g", "tokensafe@latest"], capture_output=True, text=True, timeout=120)
                     if up_res.returncode == 0:
                         print(f"  {GREEN}✔{RESET} npm package upgraded successfully.")
-            except Exception:
-                pass
+                    else:
+                        detail = (up_res.stderr or up_res.stdout or "").strip()[:200]
+                        print(f"  {YELLOW}⚠{RESET} npm upgrade failed: {detail}")
+                else:
+                    print(f"  {CYAN}ℹ{RESET} tokensafe not installed via npm — skipping npm channel.")
+            except Exception as e:
+                print(f"  {YELLOW}⚠{RESET} npm update skipped: {e}")
+        else:
+            print(f"  {YELLOW}⚠{RESET} npm not found — skipping npm channel.")
 
         # 3. Check pip
         pip_cmd = "pip3" if shutil.which("pip3") else ("pip" if shutil.which("pip") else None)
         if pip_cmd:
             try:
-                res = subprocess.run([pip_cmd, "list"], capture_output=True, text=True, timeout=5)
+                res = subprocess.run([pip_cmd, "list"], capture_output=True, text=True, timeout=15)
                 if "tokensafe" in res.stdout:
                     print(f"  {CYAN}→{RESET} Updating Python package ({pip_cmd} install --upgrade tokensafe)...")
-                    up_res = subprocess.run([pip_cmd, "install", "--upgrade", "tokensafe"], capture_output=True, text=True, timeout=30)
+                    up_res = subprocess.run([pip_cmd, "install", "--upgrade", "tokensafe"], capture_output=True, text=True, timeout=120)
                     if up_res.returncode == 0:
                         print(f"  {GREEN}✔{RESET} Python package upgraded successfully.")
-            except Exception:
-                pass
+                    else:
+                        detail = (up_res.stderr or up_res.stdout or "").strip()[:200]
+                        print(f"  {YELLOW}⚠{RESET} pip upgrade failed: {detail}")
+            except Exception as e:
+                print(f"  {YELLOW}⚠{RESET} pip update skipped: {e}")
 
         # 4. Re-synchronize all detected agents
         print(f"\n  {CYAN}→{RESET} Re-synchronizing AI Agent MCP configs & rules...")
@@ -722,7 +766,8 @@ class AgentInstaller:
 
         print(f"\n{BOLD}{GREEN}✅ Self-update complete!{RESET}")
         print(f"   Synchronized {synced_count} agent environments with zero-loss AST & God Nodes rules.")
-        print(f"   Run {BOLD}tokensafe stats{RESET} to view token savings.\n")
+        print(f"   Run {BOLD}tokensafe stats{RESET} to view token savings.")
+        print(f"   {CYAN}ℹ{RESET} If your terminal still shows the old version, open a new window or run {BOLD}hash -r{RESET}.")
 
 def main():
     args = sys.argv[1:]
