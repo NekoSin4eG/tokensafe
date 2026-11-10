@@ -6,9 +6,9 @@
 <!-- mcp-name: dev.tokensafe/tokensafe -->
 
 <p align="center">
-  <b>Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents</b><br>
-  Slashes LLM token costs by <b>up to [90%*](METRICS.md)</b> with zero context loss.<br>
-  Built for <b>Cursor, Claude Desktop, Google Antigravity, Windsurf & Cline</b>.
+  <b>Local-First AI Coding Guardrails, Context Precision &amp; Team ROI for Engineering Orgs</b><br>
+  Stop paying for AI hallucinations and secret leaks — cut context bloat by <b>up to [90%*](METRICS.md)</b> locally.<br>
+  Built for teams on <b>Cursor, Claude Code, Google Antigravity, Windsurf &amp; Codex</b>.
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@
 <p align="center">
   <a href="#-1-click-universal-install">Install</a> •
   <a href="#-universal-mcp-server-configuration">MCP Setup</a> •
-  <a href="#-the-breakthrough-how-it-saves-6090-tokens">How It Works</a> •
+  <a href="#-how-your-team-ships-cleaner-code-with-6090-less-bloat">How It Works</a> •
   <a href="#-tokensafe-guard-proactive-agent-security--hygiene-shield">TokenSafe Guard</a> •
   <a href="#-pricing--plans">Pricing</a> •
   <a href="https://tokensafe.dev">Official Website & Docs</a>
@@ -135,14 +135,14 @@ Connect TokenSafe directly to **Claude Desktop** (`claude_desktop_config.json`) 
 
 ---
 
-## 🚀 The Breakthrough: How It Saves 60%–90% Tokens
+## ⚡ How Your Team Ships Cleaner Code with 60%–90% Less Bloat
 
-Traditional AI code interactions suffer from massive context bloat:
-1. **The BPE Token Penalty:** Verbose natural language prompts and filler waste 40%–70% of ingress context.
-2. **Bulk Tool Dumps:** Reading whole 800+ line files burns 5,000+ tokens per turn when only 20 lines are needed.
-3. **Stuck Loops & Bloated Diffs:** Terminal `git diff` and repetitive failed commands spiral context into overflow.
+Giving coding agents raw access to entire repos creates three daily bottlenecks:
+1. **Hallucinations in Large Files:** Reading 2,000-line modules just to tweak a 10-line helper causes models to lose track of imports and break adjacent code.
+2. **Secret & Security Leaks:** Static text rules fade over multi-turn chats—agents hardcode secret fallbacks, skip TLS verification, or run `git add .` with `.env` files.
+3. **Mid-Sprint Quota Walls & Blind Spend:** Verbose prompts, lockfile diffs, and unused MCP tool schemas exhaust 5-hour limits while leadership lacks per-seat ROI visibility.
 
-### TokenSafe Solves All Three Autonomously:
+### TokenSafe Fixes All Three Locally:
 - **Graph-Guided AST Skeletonization:** Folds inactive function bodies into signatures, keeping target functions and 1-hop dependencies full while collapsing unrelated code (`-85% to -92%`).
 - **Prompt Cache Prefix Normalizer:** Strips volatile timestamps and aligns system prompts to 64-token boundaries. Injects Anthropic ephemeral breakpoints (`cache_control: {"type": "ephemeral"}`) and DeepSeek chunking for 100% provider cache hits and 90% cost discounts.
 - **Context Window Governor & Token Ceiling:** Enforces deterministic token budgets via 3-stage cascading autothrottling (AST skeletonization ➔ TOCP user message history compaction ➔ sliding state ledger) to prevent catastrophic context overflows.
@@ -395,14 +395,15 @@ Sums on the dashboard and landing page always show the split (`X metered · Y es
 
 ---
 
-## 💎 Pricing & 7-Day Free Trial
+## 💎 Pricing & 7-Day Team Trial
 
 | Tier | Price | Monthly Token Savings | Highlights |
 |---|---|---|---|
-| **Community (Free)** | **$0** (Free Forever) | **500,000 tokens / mo** | 9-Language Local Regex Compactor, Local AST Skeletonizer CLI, Secret Redactor, Local HTML & SQLite Dashboard |
-| **Solo Developer** | **$9 / month** | **Unlimited** | **7-Day Free Trial**, **Managed Cloud Distillation (Gemini Flash-Lite, Zero Keys Required)**, Subagent Swarm Firewall, Cascading Window Governor, Prompt Cache Normalizer |
-| **Engineering Team** | **$29 / seat / mo** | **Unlimited** | **7-Day Free Trial**, Everything in Solo + **Shared Team Cache (L3 Monorepo Cloud Cache)**, Friday Team ROI Digest & Leaderboards, Team Seat Quota Console, Self-Hosted Docker Proxy |
-| **Enterprise** | Custom | **Unlimited** | On-Premise Nuitka C-compiled Docker Proxy (Private BYOK), Custom Compliance, SAML SSO |
+| **Developer Sandbox (Community)** | **$0** (Free Forever) | **500,000 tokens / mo** | 9-Language Local Regex Compactor, Local AST Slicer CLI, Local Secret Guard, SQLite & Terminal Dashboard |
+| **Engineering Team** *(Recommended)* | **$29 / seat / mo** *(~$24 / seat / mo billed $290/yr)* | **Unlimited** | **7-Day Free Trial**, **Shared Team Cache (L3 Monorepo Pool)**, Org Guard & Git Leak Shield, Friday Per-Seat ROI Digest, Centralized Ed25519 Seat Control, Managed Cloud Distillation (Zero Keys), Self-Hosted Docker Proxy |
+| **Enterprise / VPC** | **Custom** | **Unlimited** | On-Premise Nuitka C-compiled Docker Proxy (Private BYOK), Zero-Telemetry / Air-Gapped Mode, SAML SSO, Custom Compliance & SLA |
+
+*Working solo? [Individual Solo plans](https://tokensafe.dev#pricing) are available from **$9 / mo** ($89 / yr).*
 
 👉 **[Start your 7-Day Free Trial on our website](https://tokensafe.dev#pricing)**
 
@@ -604,9 +605,10 @@ TokenSafe is built on an **Open-Core** model designed to give every developer im
 
 | Plan | Price | Monthly Token Savings | Capabilities |
 | :--- | :---: | :---: | :--- |
-| **Community (Free)** | **$0** forever | **500,000 tokens / mo** | Multilingual Local Regex Compactor (9 languages), AST Slicer, Output Guard, Loop Guard, Local SQLite & HTML Dashboard |
-| **Solo Developer** | **$9 / mo** | **Unlimited** | **Managed Cloud Distillation (Gemini Flash-Lite, Zero Keys Required)**, Subagent Swarm Firewall, Cascading Governor, Multi-turn History Fold |
-| **Engineering Team** | **$29 / seat / mo** | **Unlimited** | Everything in Solo + **Shared Team Cache (L3 Monorepo Cloud Cache)**, Friday Team ROI Digest, Cloud Organization Console, Seat Quota Management, Self-Hosted Docker Proxy |
+| **Developer Sandbox (Free)** | **$0** forever | **500,000 tokens / mo** | Multilingual Local Regex Compactor (9 languages), AST Slicer, Output Guard, Loop Guard, Local SQLite & HTML Dashboard |
+| **Engineering Team** *(Recommended)* | **$29 / seat / mo** *(~$24 / seat / mo billed $290/yr)* | **Unlimited** | **Shared Team Cache (L3 Monorepo Pool)**, Org Guard & Git Leak Shield, Friday Per-Seat ROI Digest, Seat Quota & Revoke Console, Managed Cloud Distillation, Self-Hosted Docker Proxy |
+| **Enterprise / VPC** | **Custom** | **Unlimited** | On-Premise Docker Proxy (Private BYOK), Zero-Telemetry / Air-Gapped Mode, SAML SSO, Custom SLA |
+| **Solo Developer** | **$9 / mo** *($89/yr)* | **Unlimited** | Individual Unlimited Compression, Managed Cloud Distillation, Subagent Firewall, Cascading Governor |
 
 > [!TIP]
 > **500,000 free tokens / month** are included out of the box with zero registration. When your monthly community limit is reached, basic regex compaction continues safely, and you can unlock unlimited Solo optimization anytime at [tokensafe.dev](https://tokensafe.dev/#pricing) or activate via `tokensafe activate <key>`.

@@ -1,5 +1,5 @@
 """
-TokenSafe: Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents.
+TokenSafe: Local-first AI coding guardrails, context slicing, and team ROI telemetry for AI coding agents.
 """
 
 __version__ = "1.3.12"

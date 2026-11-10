@@ -36,7 +36,7 @@ const firstArg = args[0] || '';
 
 if (firstArg === 'help' || firstArg === '--help' || firstArg === '-h') {
   console.log(`
-⚡ TokenSafe - Autonomous Zero-Loss Token Optimizer for AI Coding Agents
+⚡ TokenSafe - Local-First AI Coding Guardrails & Context Optimizer
 Website: https://tokensafe.dev
 
 Usage:

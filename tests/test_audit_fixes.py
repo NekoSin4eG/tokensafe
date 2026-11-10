@@ -547,12 +547,12 @@ class TestMetricsHonestySplit(unittest.TestCase):
 
     def test_summary_split_sums(self):
         self.tracker.record_event("s", "TOOL_READ", 100, 30)        # +70 measured
-        self.tracker.record_event("s", "COMMAND_FILTER", 400, 100)  # +300 measured
+        self.tracker.record_event("s", "COMMAND_FILTER", 400, 100)  # +300 estimated (heuristic output guess)
         self.tracker.record_event("s", "HISTORY_FOLD", 1000, 100)   # +900 estimated
         s = self.tracker.get_summary()
         self.assertEqual(s["total_saved_tokens"], 1270)
-        self.assertEqual(s["total_saved_tokens_measured"], 370)
-        self.assertEqual(s["total_saved_tokens_estimated"], 900)
+        self.assertEqual(s["total_saved_tokens_measured"], 70)
+        self.assertEqual(s["total_saved_tokens_estimated"], 1200)
 
     def test_prune_rollup_keeps_estimated_share(self):
         self.tracker.record_event("s", "HISTORY_FOLD", 1000, 100)   # 900 estimated (older id)
@@ -922,15 +922,19 @@ class TestPublicSurfaceHygiene(unittest.TestCase):
     def test_admin_docs_are_private_and_stripped_from_export(self):
         sync_path = os.path.join(PROJECT_ROOT, "bin", "sync-public.sh")
         admin_doc_path = os.path.join(PROJECT_ROOT, "docs", "ADMIN_API.md")
+        brand_doc_path = os.path.join(PROJECT_ROOT, "docs", "BRAND_IDENTITY_PRIVATE.md")
         if os.path.exists(sync_path):
-            # Private repo: ops doc exists and is excluded by the public exporter...
+            # Private repo: ops and brand docs exist and are excluded by the public exporter...
             self.assertTrue(os.path.exists(admin_doc_path))
+            self.assertTrue(os.path.exists(brand_doc_path))
             with open(sync_path, encoding="utf-8") as f:
                 sync_script = f.read()
             self.assertIn("docs/ADMIN_API.md", sync_script)
+            self.assertIn("docs/BRAND_IDENTITY_PRIVATE.md", sync_script)
         else:
-            # Public export: private ops doc and exporter script must be stripped.
+            # Public export: private docs and exporter script must be stripped.
             self.assertFalse(os.path.exists(admin_doc_path))
+            self.assertFalse(os.path.exists(brand_doc_path))
         # ...and README points admins to it without printing the surface.
         with open(os.path.join(PROJECT_ROOT, "README.md"), encoding="utf-8") as f:
             readme = f.read()

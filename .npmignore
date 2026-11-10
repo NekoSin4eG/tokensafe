@@ -5,4 +5,5 @@ tests/
 frontend/
 bin/sync-public.sh
 data/
+docs/
 .github/

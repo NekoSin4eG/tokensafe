@@ -314,7 +314,7 @@ class Dashboard:
     <div class="header">
       <div>
         <h1 class="title">⚡ TokenSafe</h1>
-        <p class="subtitle">Autonomous Zero-Loss Token Economy & Context Preservation</p>
+        <p class="subtitle">Local-First AI Coding Guardrails &amp; Context Telemetry</p>
       </div>
       <div id="live-pill" class="subtitle" style="display: flex; align-items: center; gap: 6px;">
         <span style="color: #10b981;">●</span> Live SQLite Tracking
