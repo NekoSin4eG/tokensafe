@@ -17,7 +17,7 @@ from src.license_manager import LicenseManager
 class TeamCache:
     """Distributed cross-developer cache client for TokenSafe Team tier."""
 
-    DEFAULT_TIMEOUT = 0.4  # Strict 400ms timeout to prevent blocking agent turns
+    DEFAULT_TIMEOUT = float(os.environ.get("TOKENSAFE_CACHE_TIMEOUT", "1.2"))  # Fast 1.2s timeout to prevent blocking agent turns
 
     @classmethod
     def _get_cloud_url(cls) -> str:
@@ -144,7 +144,7 @@ class TeamCache:
             headers={"Authorization": f"Bearer {lic_key}", "User-Agent": "TokenSafe-TeamCache/1.0"}
         )
         try:
-            with urllib.request.urlopen(req, timeout=1.0) as resp:
+            with urllib.request.urlopen(req, timeout=max(2.5, cls.DEFAULT_TIMEOUT)) as resp:
                 if resp.status == 200:
                     res = json.loads(resp.read().decode("utf-8"))
                     res["active"] = True
