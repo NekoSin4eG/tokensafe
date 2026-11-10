@@ -174,6 +174,11 @@ class VersionChecker:
 
         return None
 
+    @staticmethod
+    def _posix_single_quote(text: str) -> str:
+        """Quotes text for safe embedding inside a single-quoted shell string."""
+        return "'" + text.replace("'", "'\\''") + "'"
+
     @classmethod
     def show_os_dialog(
         cls,
@@ -189,16 +194,24 @@ class VersionChecker:
 
         if plat == "darwin":
             try:
-                # TCC-safe: driving Terminal.app via AppleScript requires an
-                # Automation permission prompt that background (hook-spawned)
-                # processes can never satisfy, which made "Update Now" silently fail.
-                # `do shell script` needs no such permission; prefer the explicit
-                # ~/.local/bin path because non-interactive shells lack the user PATH.
-                escaped_cmd = update_command.replace('"', '\\"')
+                # TCC-safe: driving Terminal.app via AppleScript requires an Automation
+                # permission prompt that background (hook-spawned) processes can never
+                # satisfy, which made "Update Now" silently fail. `do shell script` needs
+                # no such permission. The updater runs inside a LOGIN shell so that
+                # profile-managed PATH entries (nvm, homebrew, volta, ~/.local/bin…)
+                # resolve the `tokensafe` executable; a bare non-interactive shell
+                # would not see them and log "command not found".
+                inner_cmd = f"nohup {update_command} > /tmp/tokensafe-update.log 2>&1 &"
+                shell_cmd = (
+                    'SHELL_BIN=${SHELL:-/bin/zsh}; [ -x "$SHELL_BIN" ] || SHELL_BIN=/bin/zsh; '
+                    f'nohup "$SHELL_BIN" -lc {cls._posix_single_quote(inner_cmd)} >/dev/null 2>&1 &'
+                )
+                # Escape the shell command for embedding inside an AppleScript string literal
+                escaped_shell = shell_cmd.replace("\\", "\\\\").replace('"', '\\"')
                 apple_script = f'''
                 set dialogResult to display dialog "A new version of TokenSafe (v{latest_version}) is available.\\n\\nCurrent version: v{current_version}\\nLatest version: v{latest_version}\\n\\nWould you like to update now?" with title "TokenSafe Update Available" buttons {{"Later", "Update Now"}} default button "Update Now" with icon note
                 if button returned of dialogResult is "Update Now" then
-                    do shell script "if [ -x \\"$HOME/.local/bin/tokensafe\\" ]; then CMD=\\"$HOME/.local/bin/tokensafe\\"; else CMD=\\"{escaped_cmd}\\"; fi; nohup \\"$CMD\\" update > /tmp/tokensafe-update.log 2>&1 &"
+                    do shell script "{escaped_shell}"
                 end if
                 '''
                 subprocess.Popen(

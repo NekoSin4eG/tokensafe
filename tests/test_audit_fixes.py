@@ -443,5 +443,40 @@ class TestMcpFirewallWiring(unittest.TestCase):
             shutil.rmtree(tmp, ignore_errors=True)
 
 
+@unittest.skipUnless(sys.platform == "darwin", "macOS-only updater dialog")
+class TestMacOsUpdaterDialog(unittest.TestCase):
+    """The Update Now button must run via a login shell so profile PATHs (nvm etc.) resolve."""
+
+    def test_dialog_uses_login_shell_wrapper(self):
+        from unittest.mock import patch
+        from src.version_checker import VersionChecker
+
+        captured = {}
+        class FakePopen:
+            def __init__(self, args, **kwargs):
+                captured["args"] = args
+
+        with patch("src.version_checker.subprocess.Popen", FakePopen):
+            ok = VersionChecker.show_os_dialog(
+                current_version="1.4.13", latest_version="1.4.14", update_command="tokensafe update"
+            )
+        self.assertTrue(ok)
+        script = captured["args"][2]
+        self.assertIn("display dialog", script)
+        # login-shell wrapper resolves nvm/homebrew PATH profiles…
+        self.assertIn("-lc", script)
+        self.assertIn("${SHELL:-/bin/zsh}", script)
+        # …the update command and its log are preserved
+        self.assertIn("tokensafe update", script)
+        self.assertIn("/tmp/tokensafe-update.log", script)
+        # …and the command is safely single-quoted for the login shell
+        self.assertIn("'nohup tokensafe update", script)
+
+    def test_posix_single_quote_escapes(self):
+        from src.version_checker import VersionChecker
+        self.assertEqual(VersionChecker._posix_single_quote("plain"), "'plain'")
+        self.assertEqual(VersionChecker._posix_single_quote("it's"), "'it'\\''s'")
+
+
 if __name__ == "__main__":
     unittest.main()
