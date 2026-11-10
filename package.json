@@ -1,7 +1,7 @@
 {
   "name": "tokensafe",
   "mcpName": "dev.tokensafe/tokensafe",
-  "version": "1.9.0",
+  "version": "2.0.0",
   "description": "Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents",
   "main": "bin/tokensafe.js",
   "bin": {

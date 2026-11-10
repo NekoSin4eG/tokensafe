@@ -264,7 +264,7 @@ class TelemetrySync:
             rollup_synced = bool(state.get("lifetime_rollup_synced", False))
             headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "TokenSafe-Sync/1.9.0"
+                "User-Agent": "TokenSafe-Sync/2.0.0"
             }
             if active_key:
                 headers["Authorization"] = f"Bearer {active_key}"
