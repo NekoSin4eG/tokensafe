@@ -53,15 +53,25 @@ class ToolSlicer:
             words = re.findall(r'\b[a-zA-Z_][a-zA-Z0-9_]{2,}\b', context_hint)
             ignore_set = {"function", "method", "class", "async", "const", "return", "optimize", "refactor", "debug", "test", "check", "please", "code", "file"}
             candidates = [w for w in words if w.lower() not in ignore_set]
-            for candidate in candidates:
-                sym_regex = re.compile(r'\b(def|function|class|const|let|var|type|interface)\s+' + re.escape(candidate) + r'\b')
+            if candidates:
+                # Single pass over the file for ALL candidates (previously O(words x lines)
+                # regex scans per read_file hook call on large files).
+                unique_candidates = list(dict.fromkeys(candidates))
+                combined = re.compile(
+                    r'\b(?:def|function|class|const|let|var|type|interface)\s+('
+                    + "|".join(re.escape(c) for c in unique_candidates) + r')\b'
+                )
+                first_hit: Dict[str, int] = {}
                 for idx, line in enumerate(lines, 1):
-                    if sym_regex.search(line):
-                        found_line = idx
+                    m = combined.search(line)
+                    if m and m.group(1) not in first_hit:
+                        first_hit[m.group(1)] = idx
+                # Preserve original semantics: highest-priority candidate that has a match
+                for candidate in candidates:
+                    if candidate in first_hit:
                         target_symbol = candidate
+                        found_line = first_hit[candidate]
                         break
-                if found_line:
-                    break
 
         new_start = 1
         new_end = total_lines

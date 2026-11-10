@@ -18,7 +18,7 @@ class DeepSeekDistiller:
 
     DEFAULT_URL = "https://api.deepseek.com/chat/completions"
     DEFAULT_MODEL = "deepseek-flash"
-    DEFAULT_TIMEOUT = 3.5
+    DEFAULT_TIMEOUT = 2.5
 
     SYSTEM_PROMPT = """You are a multilingual semantic code intent compiler for the Token-Optimized Communication Protocol (TOCP). Your task is to compress verbose, conversational developer requests into an ultra-dense S-Expression with this exact syntax:
 (ACTION [filepath] [symbol] [[traits...]] ["minimal_intent"])

@@ -43,6 +43,11 @@ def _get_cloud_url() -> str:
     return base.rstrip("/")
 
 
+def _telemetry_disabled() -> bool:
+    """TOKENSAFE_TELEMETRY_DISABLED=1 fully turns off cloud telemetry (privacy / offline / CI)."""
+    return os.environ.get("TOKENSAFE_TELEMETRY_DISABLED", "").strip().lower() in ("1", "true", "yes")
+
+
 class TelemetrySync:
     """Manages secure telemetry synchronization between local metrics and cloud dashboard."""
 
@@ -123,6 +128,13 @@ class TelemetrySync:
         Synchronizes all un-synced events from data/metrics.db to the TokenSafe cloud server.
         Returns a dict with sync results and totals.
         """
+        if _telemetry_disabled():
+            return {
+                "success": True,
+                "synced_events": 0,
+                "total_synced": 0,
+                "message": "Telemetry disabled via TOKENSAFE_TELEMETRY_DISABLED."
+            }
         with cls._sync_lock:
             base_url = (cloud_url or _get_cloud_url()).rstrip("/")
             target_url = f"{base_url}/api/telemetry/sync"
@@ -309,6 +321,8 @@ class TelemetrySync:
         using persistent state from sync_state.json.
         Detached from parent process group so it survives the termination of short-lived CLI lifecycle hooks.
         """
+        if _telemetry_disabled():
+            return
         now = time.time()
         state = cls.get_state()
         last_synced = max(state.get("last_synced_at", 0), state.get("last_attempt_at", 0))
@@ -319,16 +333,32 @@ class TelemetrySync:
         if status.get("pending_events", 0) == 0:
             return
 
-        # Prevent overlapping sync runs via PID lock file
-        if os.path.exists(SYNC_LOCK_PATH):
+        # Prevent overlapping sync runs via PID lock file.
+        # Atomic O_EXCL claim closes the check-then-write race where two hook
+        # processes could both pass the liveness check and spawn duplicate syncs.
+        lock_claimed = False
+        for _ in range(2):
             try:
-                with open(SYNC_LOCK_PATH, "r", encoding="utf-8") as f:
-                    pid = int(f.read().strip())
-                # Check if PID is still alive
-                os.kill(pid, 0)
-                return
-            except (ValueError, OSError, ProcessLookupError):
-                pass
+                fd = os.open(SYNC_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode("utf-8"))
+                os.close(fd)
+                lock_claimed = True
+                break
+            except FileExistsError:
+                try:
+                    with open(SYNC_LOCK_PATH, "r", encoding="utf-8") as f:
+                        pid = int(f.read().strip())
+                    # Check if PID is still alive
+                    os.kill(pid, 0)
+                    return  # an active sync owns the lock
+                except (ValueError, OSError, ProcessLookupError):
+                    # Stale lock from a dead process: reclaim it once
+                    try:
+                        os.unlink(SYNC_LOCK_PATH)
+                    except OSError:
+                        return
+        if not lock_claimed:
+            return
 
         try:
             flags = 0
@@ -351,9 +381,29 @@ class TelemetrySync:
 if __name__ == "__main__":
     is_bg = "--background" in sys.argv
     os.makedirs(DATA_DIR, exist_ok=True)
+    # Claim the lock atomically; if another live process owns it, exit without syncing.
     try:
-        with open(SYNC_LOCK_PATH, "w", encoding="utf-8") as f:
-            f.write(str(os.getpid()))
+        fd = os.open(SYNC_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.write(fd, str(os.getpid()).encode("utf-8"))
+        os.close(fd)
+    except FileExistsError:
+        try:
+            with open(SYNC_LOCK_PATH, "r", encoding="utf-8") as f:
+                pid = int(f.read().strip())
+            os.kill(pid, 0)
+            sys.exit(0)  # live owner is syncing already
+        except (ValueError, OSError, ProcessLookupError):
+            try:
+                os.unlink(SYNC_LOCK_PATH)
+            except OSError:
+                sys.exit(0)
+            try:
+                fd = os.open(SYNC_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.write(fd, str(os.getpid()).encode("utf-8"))
+                os.close(fd)
+            except FileExistsError:
+                sys.exit(0)
+    try:
         res = TelemetrySync.sync(timeout=10.0, verbose=not is_bg)
         if not is_bg:
             print(json.dumps(res, indent=2))

@@ -21,7 +21,7 @@ Run unit tests with:
 ```bash
 python3 -m unittest discover tests
 ```
-Before submitting changes, ensure zero external runtime dependencies are introduced (standard library only for maximum portability).
+Before submitting changes, ensure no new external runtime dependencies are introduced (standard library only for maximum portability). The single sanctioned exception is the optional `cryptography` package (see `requirements.txt`): it accelerates Ed25519 license verification on clients and is required for fail-closed RS256 verification of Clerk session tokens on the cloud backend.
 
 ## Agent Code Inspection Protocol (TokenSafe MCP)
 - **Architecture Navigation**: Always call `tokensafe:get_architecture_graph` before grep or multi-file reading.

@@ -500,7 +500,9 @@ TokenSafe Cloud Backend enforces enterprise zero-trust security across all commu
 | `ADMIN_EMAILS` | Optional | Comma-separated admin emails (e.g. `nekosin4eg@gmail.com`). |
 | `STRIPE_WEBHOOK_SECRET` | Production | Webhook secret (`whsec_...`) used to verify Stripe webhooks. |
 | `SMTP_PASS` | Production | Password/token for transactional mail delivery via ImprovMX SMTP. |
-| `JWT_SECRET` | Optional | Shared HMAC secret for verifying custom JWT tokens. |
+| `JWT_SECRET` | Optional | Shared HMAC secret for verifying custom JWT tokens. Set a persistent value in production — otherwise sessions invalidate on every restart. |
+| `CLERK_JWT_KEY` | Production (web) | Clerk public key (PEM) or HMAC key for verifying Clerk session tokens. Without it — or without the `cryptography` package — Clerk tokens are rejected (fail-closed). |
+| `TOKENSAFE_TELEMETRY_DISABLED` | Optional | Set to `1` to fully disable cloud telemetry sync (privacy / offline / CI). |
 
 
 ---
@@ -510,7 +512,7 @@ TokenSafe Cloud Backend enforces enterprise zero-trust security across all commu
 ```bash
 python3 -m unittest discover tests
 ```
-*Zero external runtime dependencies — runs on standard Python 3.10+.*
+*Zero mandatory runtime dependencies — runs on standard Python 3.10+. The optional `cryptography` package (`requirements.txt`) accelerates Ed25519 license verification and enables fail-closed RS256 Clerk verification on the cloud backend.*
 
 ---
 

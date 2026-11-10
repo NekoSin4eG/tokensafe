@@ -5,10 +5,49 @@ and verbose test output.
 """
 
 import re
-from typing import Tuple, Dict, Any, Optional
+from typing import Tuple, Dict, Any, List, Optional
 
 class CommandSanitizer:
     """Optimizes terminal command lines to eliminate token waste."""
+
+    @staticmethod
+    def _split_pipeline_stages(cmd: str) -> List[str]:
+        """
+        Splits a shell command on single '|' pipe operators while respecting
+        quoting ('...', "...", `...`) and '||' logical OR, so regex patterns like
+        grep "foo|bar" are never torn apart mid-string.
+        """
+        stages: List[str] = []
+        buf: List[str] = []
+        quote = ""
+        i = 0
+        n = len(cmd)
+        while i < n:
+            ch = cmd[i]
+            if quote:
+                if ch == "\\" and quote != "`" and i + 1 < n:
+                    buf.append(ch)
+                    buf.append(cmd[i + 1])
+                    i += 2
+                    continue
+                if ch == quote:
+                    quote = ""
+                buf.append(ch)
+            elif ch in ("'", '"', "`"):
+                quote = ch
+                buf.append(ch)
+            elif ch == "|":
+                if i + 1 < n and cmd[i + 1] == "|":
+                    buf.append("||")
+                    i += 2
+                    continue
+                stages.append("".join(buf))
+                buf = []
+            else:
+                buf.append(ch)
+            i += 1
+        stages.append("".join(buf))
+        return [s for s in (st.strip() for st in stages) if s]
 
     # Lockfiles and binary patterns that should never be dumped in git diffs or searches
     LOCKFILE_EXCLUDES = [
@@ -88,7 +127,7 @@ class CommandSanitizer:
         if re.search(r"\bgit\b.*?\bgrep\b", cmd):
             if ":!*.lock" not in cmd and ":!bun.lock" not in cmd:
                 git_excludes = "':!*.lock' ':!bun.lock' ':!bun.lockb' ':!package-lock.json' ':!dist' ':!build' ':!node_modules'"
-                stages = [s.strip() for s in re.split(r'(?<!\|)\|(?!\|)', cmd)]
+                stages = cls._split_pipeline_stages(cmd)
                 for i, stage in enumerate(stages):
                     if re.search(r"\bgit\b.*?\bgrep\b", stage):
                         if "||" in stage:
@@ -115,7 +154,7 @@ class CommandSanitizer:
             is_recursive = bool(re.search(r"\b(grep|egrep)\b.*?\s-[a-zA-Z]*[rR]", cmd))
             if is_recursive and "--exclude-dir" not in cmd and "node_modules" not in cmd:
                 excludes = "--exclude='*.lock' --exclude='*.lockb' --exclude-dir={dist,build,node_modules,.git,coverage,__pycache__,.next,data}"
-                stages = [s.strip() for s in re.split(r'(?<!\|)\|(?!\|)', cmd)]
+                stages = cls._split_pipeline_stages(cmd)
                 for i, stage in enumerate(stages):
                     if re.search(r"\b(grep|egrep)\b", stage):
                         stages[i] = f"{stage} {excludes}"

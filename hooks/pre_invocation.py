@@ -125,6 +125,7 @@ def main():
             })
 
     # 2. Multi-turn History Compaction (Paused when community quota is exceeded)
+    folded_text = None
     if not quota.get("is_quota_exceeded", False) and invocation_num >= 3 and transcript_path:
         folded_text, orig_hist_tokens, folded_tokens, stats = HistoryCompactor.fold_transcript(
             transcript_path, invocation_num

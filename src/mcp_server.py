@@ -382,7 +382,24 @@ def handle_tool_call(name: str, args: dict) -> dict:
     if args is None or not isinstance(args, dict):
         args = {}
     try:
-        return _dispatch_tool_call(name, args)
+        result = _dispatch_tool_call(name, args)
+        # Populate the Subagent Firewall dedup cache with what we actually returned,
+        # so repeated reads of the same file within a session can be served from cache.
+        if name == "smart_read_file" and isinstance(result, dict) and not result.get("isError"):
+            content_parts = result.get("content") or []
+            text_out = "".join(p.get("text", "") for p in content_parts if isinstance(p, dict))
+            if text_out:
+                try:
+                    AgentFirewall.record_cache(
+                        session_id="mcp_session",
+                        file_path=args.get("path", ""),
+                        content=text_out,
+                        symbol=(args.get("symbol") or "").strip(),
+                        tracker=_get_safe_tracker()
+                    )
+                except Exception:
+                    pass
+        return result
     except Exception as e:
         return _fallback_error(name, f"{type(e).__name__}: {str(e)}")
 
@@ -395,6 +412,15 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         symbol = args.get("symbol", "")
         start_line = args.get("start_line")
         end_line = args.get("end_line")
+        # Clamp explicit line ranges to sane bounds so bad indices can never produce
+        # empty output or negative-index slicing artifacts.
+        try:
+            if start_line is not None:
+                start_line = max(1, int(start_line))
+            if end_line is not None:
+                end_line = int(end_line)
+        except (TypeError, ValueError):
+            return _fallback_error("smart_read_file", "start_line/end_line must be integers")
 
         if not path or not os.path.exists(path):
             return {"isError": True, "content": [{"type": "text", "text": f"File not found: {path}"}]}
@@ -421,6 +447,9 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         if start_line is not None and end_line is not None:
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 lines = f.readlines()
+            end_line = min(end_line, len(lines))
+            if start_line > end_line:
+                return _fallback_error("smart_read_file", f"start_line {start_line} is beyond end of file ({len(lines)} lines)")
             content = "".join(lines[start_line - 1 : end_line])
             return {"content": [{"type": "text", "text": (prefetch_block or "") + content}]}
 

@@ -8,6 +8,7 @@ Implemented with pure standard-library urllib (zero dependencies, strict timeout
 import os
 import json
 import re
+import time
 import urllib.request
 import urllib.error
 from typing import Optional, Dict, Any, Tuple
@@ -17,7 +18,46 @@ from src.license_manager import LicenseManager
 class UniversalDistiller:
     """Multi-provider semantic intent compiler supporting DeepSeek, OpenAI, and Google Gemini."""
 
-    DEFAULT_TIMEOUT = 3.5
+    DEFAULT_TIMEOUT = 2.5
+    # After a failed roundtrip, skip all remote distillation for this long.
+    # distill() runs synchronously inside the PreInvocation lifecycle hook, so a
+    # dead/slow provider must not add seconds of latency to every single prompt.
+    FAILURE_COOLDOWN_SECONDS = 180.0
+
+    @classmethod
+    def _failure_state_path(cls) -> str:
+        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        data_dir = os.environ.get("TOKENSAFE_DATA_DIR", os.path.join(base_dir, "data"))
+        return os.path.join(data_dir, "distill_failure_state.json")
+
+    @classmethod
+    def _cooldown_active(cls) -> bool:
+        """True when a recent provider failure put distillation into cooldown."""
+        try:
+            with open(cls._failure_state_path(), "r", encoding="utf-8") as f:
+                state = json.load(f)
+            return (time.time() - float(state.get("last_failure_ts", 0.0))) < cls.FAILURE_COOLDOWN_SECONDS
+        except Exception:
+            return False
+
+    @classmethod
+    def _record_failure(cls):
+        try:
+            path = cls._failure_state_path()
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump({"last_failure_ts": time.time()}, f)
+        except Exception:
+            pass
+
+    @classmethod
+    def _clear_failure(cls):
+        try:
+            path = cls._failure_state_path()
+            if os.path.exists(path):
+                os.remove(path)
+        except Exception:
+            pass
 
     SYSTEM_PROMPT = """You are a multilingual semantic code intent compiler for the Token-Optimized Communication Protocol (TOCP). Your task is to compress verbose, conversational developer requests into an ultra-dense S-Expression with this exact syntax:
 (ACTION [filepath] [symbol] [[traits...]] ["minimal_intent"])
@@ -162,6 +202,11 @@ Rules:
         if cached:
             return cached
 
+        # Circuit breaker: a recent provider failure suspends remote roundtrips so a
+        # dead endpoint cannot add seconds of latency to every prompt invocation.
+        if cls._cooldown_active():
+            return None
+
         providers = cls.get_configured_providers()
         if not providers:
             return None
@@ -185,7 +230,10 @@ Rules:
                     clean = cls._sanitize_s_expression(cloud_res)
                     if clean:
                         DistillationCache.set(raw_text, clean, provider="cloud-managed")
+                        cls._clear_failure()
                         return clean
+                # Failure (network/timeout/invalid shape): trip the cooldown breaker
+                cls._record_failure()
             return None
 
         # 2. Self-Hosted Docker Mode (BYOK local providers)
@@ -222,10 +270,13 @@ Rules:
                     clean = cls._sanitize_s_expression(result)
                     if clean:
                         DistillationCache.set(raw_text, clean, provider=p_key)
+                        cls._clear_failure()
                         return clean
             except Exception:
                 continue
 
+        # All providers failed: trip the cooldown breaker
+        cls._record_failure()
         return None
 
     @classmethod

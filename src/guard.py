@@ -14,6 +14,7 @@ Protects local workspaces and repository integrity by intercepting dangerous ope
 import os
 import re
 import fnmatch
+import subprocess
 from typing import Tuple, Optional, Dict, Any, List, NamedTuple
 from src.secret_redactor import SecretRedactor
 
@@ -237,23 +238,17 @@ class TokenSafeGuard:
         # Catch blanket 'git add .' or 'git add -A' when sensitive files exist in directory
         if re.search(r"""\bgit\s+(?:add\s+(?:\.|\-A|\*)|commit\s+-[a-zA-Z]*a)""", cmd):
             target_dir = cwd or os.getcwd()
-            for root, dirs, files in os.walk(target_dir):
-                # Prune common heavy/inert subtrees
-                dirs[:] = [d for d in dirs if d not in (".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", ".turbo")]
-                for f in files:
-                    if f in cls.SENSITIVE_GIT_FILES or (f.startswith(".env") and not f.endswith(".example")):
-                        rel_path = os.path.relpath(os.path.join(root, f), target_dir)
-                        # Check if explicitly ignored
-                        if not cls._is_git_ignored(os.path.join(root, f), target_dir):
-                            return GuardResult(
-                                blocked=True,
-                                check_name="GIT_SECRET_STAGING",
-                                reason=(
-                                    f"Blocked blanket git staging: '{cmd}'. "
-                                    f"Unignored sensitive file '{rel_path}' detected in working tree. "
-                                    f"Add '{rel_path}' to .gitignore or stage files explicitly to prevent credential leaks into git."
-                                )
-                            )
+            sensitive = cls._find_unignored_sensitive_file(target_dir)
+            if sensitive:
+                return GuardResult(
+                    blocked=True,
+                    check_name="GIT_SECRET_STAGING",
+                    reason=(
+                        f"Blocked blanket git staging: '{cmd}'. "
+                        f"Unignored sensitive file '{sensitive}' detected in working tree. "
+                        f"Add '{sensitive}' to .gitignore or stage files explicitly to prevent credential leaks into git."
+                    )
+                )
 
         # 3. Network Data Exfiltration Prevention (piping secrets to curl/wget)
         exfil_pattern = re.search(
@@ -361,6 +356,48 @@ class TokenSafeGuard:
                         f"instead of scanning directory trees."
                     )
 
+        return None
+
+    @classmethod
+    def _find_unignored_sensitive_file(cls, target_dir: str) -> Optional[str]:
+        """
+        Returns the repo-relative path of the first unignored sensitive file, or None.
+        Prefers `git status --porcelain -uall` (exact .gitignore semantics incl.
+        negation and nested ignore files) over crawling the tree with os.walk,
+        which was both slow on large repos and inaccurate about ignore rules.
+        """
+        def _is_sensitive_name(name: str) -> bool:
+            return name in cls.SENSITIVE_GIT_FILES or (name.startswith(".env") and not name.endswith(".example"))
+
+        # 1. Fast & exact: ask git itself (only lists non-ignored files).
+        try:
+            res = subprocess.run(
+                ["git", "-C", target_dir, "status", "--porcelain", "-uall"],
+                capture_output=True, text=True, timeout=5
+            )
+            if res.returncode == 0:
+                for line in res.stdout.splitlines():
+                    # Format: "XY PATH" (path may be quoted; renames use "old -> new")
+                    path_part = line[3:].strip() if len(line) > 3 else ""
+                    if path_part.startswith('"') and path_part.endswith('"'):
+                        path_part = path_part[1:-1]
+                    for candidate in (seg.strip() for seg in path_part.split("->")):
+                        if candidate and _is_sensitive_name(os.path.basename(candidate)):
+                            return candidate
+                return None
+        except Exception:
+            pass
+
+        # 2. Fallback: bounded manual walk with naive gitignore matching.
+        for root, dirs, files in os.walk(target_dir):
+            # Prune common heavy/inert subtrees
+            dirs[:] = [d for d in dirs if d not in (".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", ".turbo")]
+            for f in files:
+                if _is_sensitive_name(f):
+                    full = os.path.join(root, f)
+                    rel_path = os.path.relpath(full, target_dir)
+                    if not cls._is_git_ignored(full, target_dir):
+                        return rel_path
         return None
 
     @classmethod

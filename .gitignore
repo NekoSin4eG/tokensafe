@@ -21,3 +21,6 @@ data/*.html
 data/license.json
 data/sync_state.json
 tokensafe-out/
+data/loop_state.json.lock
+data/.metrics_last_prune*
+data/distill_failure_state.json

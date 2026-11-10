@@ -438,13 +438,16 @@ class GraphEngine:
     @classmethod
     def get_instance(cls, root_dir: str = ".") -> CodeGraph:
         root_abs = os.path.abspath(root_dir)
+        # Rescans are full AST crawls; a 3s TTL caused near-constant rescans on every
+        # smart_read_file(symbol=...) call. 60s keeps graphs fresh without the churn.
+        rescan_ttl = float(os.environ.get("TOKENSAFE_GRAPH_TTL", "60.0"))
         if root_abs not in cls._instances:
             graph = CodeGraph(root_abs)
             graph.scan()
             cls._instances[root_abs] = graph
         else:
             graph = cls._instances[root_abs]
-            if time.time() - graph.last_scanned > 3.0:
+            if time.time() - graph.last_scanned > rescan_ttl:
                 graph.scan()
         return graph
 

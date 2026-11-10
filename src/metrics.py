@@ -6,6 +6,7 @@ Uses SQLite for persistent, fast, zero-dependency storage.
 
 import os
 import json
+import time
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -15,6 +16,10 @@ from typing import Dict, List, Optional, Any, Generator
 USD_PER_TOKEN = 1.50 / 1_000_000.0
 _METRICS_INIT_LOCK = threading.Lock()
 _INITIALIZED_METRICS_DBS: set = set()
+# Retention / telemetry cadence is wall-clock based (marker file) rather than
+# instance-based counters: lifecycle hooks construct a fresh MetricsTracker per
+# invocation, so per-instance counters never reached the threshold in production.
+_AUTOPRUNE_INTERVAL = float(os.environ.get("TOKENSAFE_AUTOPRUNE_INTERVAL", "3600"))
 
 
 class MetricsTracker:
@@ -48,6 +53,42 @@ class MetricsTracker:
             conn.commit()
         finally:
             conn.close()
+
+    @classmethod
+    def _maybe_autoprune(cls, db_path: str):
+        """
+        Wall-clock-gated retention + telemetry trigger, safe across short-lived
+        hook processes. A marker file records the last run; an O_EXCL claim file
+        prevents stampedes when several hooks fire concurrently.
+        """
+        marker = os.path.join(os.path.dirname(db_path) or ".", ".metrics_last_prune")
+        claim = marker + ".claim"
+        try:
+            if os.path.exists(marker) and (time.time() - os.path.getmtime(marker)) < _AUTOPRUNE_INTERVAL:
+                return
+            try:
+                fd = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                os.close(fd)
+            except FileExistsError:
+                return  # another process is pruning right now
+            try:
+                tracker = cls(db_path)
+                tracker.prune(days=tracker.retention_days, max_events=tracker.max_events, vacuum=False)
+                try:
+                    from src.telemetry_sync import TelemetrySync
+                    TelemetrySync.sync_background()
+                except Exception:
+                    pass
+            finally:
+                try:
+                    with open(marker, "w", encoding="utf-8") as f:
+                        f.write(str(int(time.time())))
+                    if os.path.exists(claim):
+                        os.unlink(claim)
+                except Exception:
+                    pass
+        except Exception:
+            pass
 
     def _init_db(self):
         with _METRICS_INIT_LOCK:
@@ -146,20 +187,8 @@ class MetricsTracker:
             """, (session_id, now_iso, now_iso, original_tokens,
                   optimized_tokens, saved_tokens, est_usd))
 
-        # Periodic amortized auto-retention check (every 100 events)
-        self._event_counter += 1
-        if self._event_counter % 20 == 0:
-            try:
-                from src.telemetry_sync import TelemetrySync
-                TelemetrySync.sync_background()
-            except Exception:
-                pass
-        if self._event_counter >= 100:
-            self._event_counter = 0
-            try:
-                self.prune(days=self.retention_days, max_events=self.max_events, vacuum=False)
-            except Exception:
-                pass
+        # Wall-clock auto-retention (marker-file gated, cross-process safe)
+        self._maybe_autoprune(self.db_path)
 
         return {
             "saved_tokens": saved_tokens,
@@ -234,7 +263,9 @@ class MetricsTracker:
 
     def get_monthly_saved_tokens(self) -> int:
         """Returns total tokens saved in the trailing 30 days for quota calculations."""
-        thirty_days_ago = (datetime.utcnow() - timedelta(days=30)).isoformat()
+        # Events are written with local-time now(); compute the cutoff the same way
+        # (previously utcnow vs now mixed naive clocks and skewed the quota window).
+        thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
         with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""

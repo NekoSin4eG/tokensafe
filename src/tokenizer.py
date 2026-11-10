@@ -17,9 +17,12 @@ except Exception:
 class TokenCounter:
     """Estimates or calculates token counts across languages and code structures."""
 
-    # Robust regex splitting on words, contractions, numbers, punctuation, whitespace
+    # Robust regex splitting on words, contractions, numbers, punctuation, whitespace.
+    # CJK ideographs / kana / hangul are matched explicitly: they are Unicode word
+    # characters (\w) so the [^\w\s] branch never captures them, and without an
+    # explicit branch they silently disappeared from token counts entirely.
     _WORD_REGEX = re.compile(
-        r"""'s|'t|'re|'ve|'m|'ll|'d|[a-zA-Zа-яА-ЯёЁ_]+|\d{1,3}|[^\w\s]|\s+"""
+        r"""'s|'t|'re|'ve|'m|'ll|'d|[a-zA-Zа-яА-ЯёЁ_]+|\d{1,3}|[\u3400-\u4DBF\u4E00-\u9FFF\uF900-\uFAFF\u3040-\u30FF\u31F0-\u31FF\uAC00-\uD7AF]+|[^\w\s]|\s+"""
     )
 
     @classmethod
@@ -69,7 +72,13 @@ class TokenCounter:
 
             # Alphabetic words: Check script
             is_cyrillic = any('\u0400' <= char <= '\u04FF' for char in chunk)
-            is_cjk = any('\u4E00' <= char <= '\u9FFF' for char in chunk)
+            is_cjk = any(
+                '\u4E00' <= char <= '\u9FFF'      # CJK Unified Ideographs
+                or '\u3400' <= char <= '\u4DBF'   # CJK Extension A
+                or '\u3040' <= char <= '\u30FF'   # Hiragana / Katakana
+                or '\uAC00' <= char <= '\uD7AF'   # Hangul syllables
+                for char in chunk
+            )
 
             if is_cjk:
                 # CJK: typically ~1.8 tokens per character

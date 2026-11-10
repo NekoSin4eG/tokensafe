@@ -110,6 +110,64 @@ class BraceLexer:
 class Skeletonizer:
     """Generates structural AST skeletons without LLMs with incremental mtime caching."""
 
+    # Design-token selectors matched on word boundaries so class names like
+    # `.html-widget` or identifiers like `innerHTML` no longer masquerade as tokens.
+    TOKEN_SELECTOR_REGEX = re.compile(r'(?<![\w.#-])(?::root|@theme|html|body)(?![\w-])')
+
+    @staticmethod
+    def _find_unescaped(s: str, ch: str, start: int) -> int:
+        """Index of the next occurrence of ch not preceded by a backslash escape."""
+        i = start
+        while True:
+            i = s.find(ch, i)
+            if i == -1:
+                return -1
+            bs = 0
+            j = i - 1
+            while j >= 0 and s[j] == "\\":
+                bs += 1
+                j -= 1
+            if bs % 2 == 0:
+                return i
+            i += 1
+
+    @classmethod
+    def blank_template_literals(cls, lines):
+        """
+        Returns per-line copies with multi-line template-literal content blanked
+        (single-line `...` pairs collapse to ``). Stateless over the whole buffer, so
+        braces inside template strings can never corrupt the brace-depth tracker —
+        unlike per-line state, this composes safely with the lexer being invoked
+        more than once per line by the folding state machine.
+        """
+        out = []
+        in_tmpl = False
+        for line in lines:
+            if in_tmpl:
+                end = cls._find_unescaped(line, "`", 0)
+                if end == -1:
+                    out.append("")
+                    continue
+                in_tmpl = False
+                line = line[end + 1:]
+            res = []
+            pos = 0
+            while True:
+                start = cls._find_unescaped(line, "`", pos)
+                if start == -1:
+                    res.append(line[pos:])
+                    break
+                end = cls._find_unescaped(line, "`", start + 1)
+                if end == -1:
+                    res.append(line[pos:start])
+                    in_tmpl = True
+                    break
+                res.append(line[pos:start])
+                res.append("``")
+                pos = end + 1
+            out.append("".join(res))
+        return out
+
     CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "skeletons")
 
     @classmethod
@@ -212,6 +270,9 @@ class Skeletonizer:
         5. Multi-line comment & string immunity for brace depth tracking.
         """
         lines = code.splitlines()
+        # Pre-blank multi-line template literals once per buffer (stateless) so braces
+        # inside them cannot skew the folding depth tracker.
+        count_src_lines = cls.blank_template_literals(lines)
         out = []
 
         lexer = BraceLexer()
@@ -226,13 +287,12 @@ class Skeletonizer:
 
         comment_token = "/* ... */" if ext != ".py" else "..."
 
-        for line in lines:
-            raw_line = line
-            clean_line = lexer.clean_line(line).strip()
+        for raw_line, count_src in zip(lines, count_src_lines):
+            clean_line = lexer.clean_line(count_src).strip()
 
             # 1. If currently skipping a folded function body
             if in_folding:
-                open_b, close_b = lexer.count_braces(raw_line)
+                open_b, close_b = lexer.count_braces(count_src)
                 current_depth += open_b - close_b
                 if current_depth <= fold_depth:
                     in_folding = False
@@ -388,7 +448,7 @@ class Skeletonizer:
 
                 if "{" in raw_line:
                     should_keep = keep_symbols is not None and name in keep_symbols
-                    open_b, close_b = lexer.count_braces(raw_line)
+                    open_b, close_b = lexer.count_braces(count_src)
 
                     if should_keep:
                         out.append(raw_line)
@@ -398,7 +458,8 @@ class Skeletonizer:
                         if raw_line.rstrip().endswith(";"):
                             folded_line += ";"
                         out.append(folded_line)
-                        open_b_head, _ = lexer.count_braces(raw_line[:raw_line.find("{") + 1])
+                        head_src = count_src[:count_src.find("{") + 1] if "{" in count_src else count_src
+                        open_b_head, _ = lexer.count_braces(head_src)
                         fold_depth = current_depth + open_b_head - 1
                         current_depth += open_b - close_b
                         if current_depth > fold_depth:
@@ -407,7 +468,7 @@ class Skeletonizer:
 
             # 4. Normal line
             out.append(raw_line)
-            open_b, close_b = lexer.count_braces(raw_line)
+            open_b, close_b = lexer.count_braces(count_src)
             current_depth += open_b - close_b
 
         return "\n".join(out)
@@ -458,7 +519,7 @@ class Skeletonizer:
                     full_sel = " ".join(s.strip() for s in pending_sel)
                     brace_idx = raw_line.find("{")
                     is_container = any(full_sel.strip().startswith(c) for c in CONTAINER_RULES)
-                    is_token = any(ts in full_sel for ts in TOKEN_SELECTORS)
+                    is_token = bool(cls.TOKEN_SELECTOR_REGEX.search(full_sel))
 
                     matched_symbol = False
                     if keep_symbols:
@@ -497,7 +558,7 @@ class Skeletonizer:
 
             if "{" in clean_line:
                 is_container = any(clean_line.startswith(c) for c in CONTAINER_RULES)
-                is_token = any(ts in clean_line for ts in TOKEN_SELECTORS)
+                is_token = bool(cls.TOKEN_SELECTOR_REGEX.search(clean_line))
 
                 matched_symbol = False
                 if keep_symbols:
@@ -573,7 +634,8 @@ class Skeletonizer:
             try:
                 with open(meta_path, "r", encoding="utf-8") as mf:
                     meta = json.load(mf)
-                    if meta.get("mtime") == current_mtime:
+                    # mtime alone can miss a same-tick rewrite; size guards against it
+                    if meta.get("mtime") == current_mtime and meta.get("size") == file_size:
                         # Cache hit! Return immediately in 0.05ms
                         return skeleton_path, meta.get("orig_tokens", 0), meta.get("skel_tokens", 0)
             except Exception:
@@ -638,6 +700,7 @@ class Skeletonizer:
         with open(meta_path, "w", encoding="utf-8") as mf:
             json.dump({
                 "mtime": current_mtime,
+                "size": file_size,
                 "orig_tokens": orig_tokens,
                 "skel_tokens": skel_tokens,
                 "lines_count": lines_count

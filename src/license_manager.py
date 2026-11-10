@@ -11,6 +11,7 @@ import time
 import hmac
 import hashlib
 import base64
+import threading
 from typing import Dict, Any, Tuple, Optional
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -132,6 +133,15 @@ def _ed25519_verify_bytes(sig: bytes, msg: bytes, pub_bytes: bytes) -> bool:
 class LicenseManager:
     """Manages TokenSafe subscription tiers, offline signature verification, and 7-day trials."""
 
+    # Successful signature verifications are cached per license key (thread-safe).
+    # Rationale: the pure-Python Ed25519 fallback path costs ~0.6s per verification and
+    # validate_license() runs on every lifecycle hook invocation (check_quota). The cache
+    # TTL never outlives the license's own expiry window.
+    _VALIDATION_CACHE: Dict[str, Tuple[Dict[str, Any], float]] = {}
+    _VALIDATION_CACHE_LOCK = threading.Lock()
+    _VALIDATION_CACHE_TTL = 3600.0  # 1 hour
+    _VALIDATION_CACHE_MAX = 64
+
     TIERS = {
         "free": {"max_tokens_monthly": 500_000, "deepseek_cloud": False, "team_analytics": False},
         "solo": {"max_tokens_monthly": None, "deepseek_cloud": True, "team_analytics": False},
@@ -208,6 +218,16 @@ class LicenseManager:
             return False, {}, "Empty license key"
 
         license_key = license_key.strip()
+
+        # Fast path: recently verified signature (avoids ~0.6s pure-Python Ed25519
+        # verification on every hook invocation when the 'cryptography' package is absent)
+        now = time.time()
+        cache_key = f"{public_key or ''}|{license_key}"
+        with cls._VALIDATION_CACHE_LOCK:
+            cached = cls._VALIDATION_CACHE.get(cache_key)
+            if cached and now < cached[1]:
+                return True, dict(cached[0]), "License is active and valid (cached)"
+
         parts = license_key.split(".")
         if len(parts) != 3 or parts[0] not in ("TS1", "TS2"):
             return False, {}, "Invalid license key format (must start with TS2. or TS1.)"
@@ -260,6 +280,17 @@ class LicenseManager:
         if expires_at > 0 and now > expires_at:
             expired_days_ago = (now - expires_at) // 86400
             return False, payload, f"License expired {expired_days_ago} day(s) ago"
+
+        # Cache the successful verification, bounded by both the TTL and the
+        # license's own expiry so an expiring key is re-checked in time.
+        ttl = cls._VALIDATION_CACHE_TTL
+        if expires_at > 0:
+            ttl = min(ttl, max(1.0, float(expires_at - now)))
+        with cls._VALIDATION_CACHE_LOCK:
+            if len(cls._VALIDATION_CACHE) >= cls._VALIDATION_CACHE_MAX:
+                oldest = min(cls._VALIDATION_CACHE, key=lambda k: cls._VALIDATION_CACHE[k][1])
+                cls._VALIDATION_CACHE.pop(oldest, None)
+            cls._VALIDATION_CACHE[cache_key] = (payload, now + ttl)
 
         return True, payload, "License is active and valid"
 

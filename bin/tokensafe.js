@@ -22,7 +22,12 @@ function findPython() {
         stdio: 'pipe'
       });
       if (res.status === 0) return cmd;
-    } catch (_) {}
+      if (res.error && res.error.code !== 'ENOENT') {
+        console.error(`TokenSafe: python probe for '${cmd}' failed: ${res.error.message}`);
+      }
+    } catch (err) {
+      console.error(`TokenSafe: python probe for '${cmd}' threw: ${err.message}`);
+    }
   }
   return null;
 }
@@ -87,6 +92,11 @@ const child = spawn(python, [scriptPath, ...scriptArgs], {
     ...process.env,
     PYTHONPATH: ROOT_DIR + (process.env.PYTHONPATH ? path.delimiter + process.env.PYTHONPATH : '')
   }
+});
+
+child.on('error', (err) => {
+  console.error(`TokenSafe: failed to launch Python CLI: ${err.message}`);
+  process.exit(1);
 });
 
 child.on('exit', (code, signal) => {
