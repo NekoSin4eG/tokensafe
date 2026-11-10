@@ -38,7 +38,7 @@ from src.scoped_search import ScopedSearch
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
-    "version": "1.7.0"
+    "version": "1.8.0"
 }
 
 TOOLS = [
