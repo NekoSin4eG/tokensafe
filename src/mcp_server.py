@@ -6,6 +6,7 @@ Exposes tools for smart file reading, dependency prefetching, prompt compression
 
 import sys
 import os
+import time
 import json
 import traceback
 import fnmatch
@@ -32,7 +33,7 @@ from src.scoped_search import ScopedSearch
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
-    "version": "1.4.10"
+    "version": "1.4.11"
 }
 
 TOOLS = [
@@ -153,6 +154,10 @@ TOOLS = [
                     "enum": ["code", "config", "all"],
                     "description": "Scope of search: 'code' (source files only), 'config' (json, toml, yaml), or 'all' (default: 'all')"
                 },
+                "path": {
+                    "type": "string",
+                    "description": "Directory or project path to search (alias for project_path)"
+                },
                 "project_path": {
                     "type": "string",
                     "description": "Optional root directory path (defaults to current project)"
@@ -191,7 +196,8 @@ def build_dir_tree(dir_path: str, max_depth: int = 2, max_entries: int = 80) -> 
     IGNORE_DIRS = {
         'node_modules', '.git', 'dist', 'build', '.next', 'coverage',
         '__pycache__', '.turbo', '.vite', '.output', '.bunny', 'data',
-        '.venv', 'venv', '.cache', '.idea', '.vscode'
+        '.venv', 'venv', '.cache', '.idea', '.vscode',
+        'Library', 'Applications', 'Movies', 'Music', 'Pictures'
     }
     IGNORE_FILES = {
         '*.lock', '*.lockb', '*.map', '.DS_Store', 'Thumbs.db', 'package-lock.json',
@@ -209,10 +215,13 @@ def build_dir_tree(dir_path: str, max_depth: int = 2, max_entries: int = 80) -> 
     base_name = os.path.basename(os.path.abspath(dir_path)) or dir_path
     lines = [f"📁 **{base_name}/** (max depth: {max_depth})"]
     entries_count = 0
+    start_time = time.monotonic()
 
     def _traverse(curr_dir: str, prefix: str, current_depth: int):
         nonlocal entries_count
         if current_depth > max_depth or entries_count >= max_entries:
+            return
+        if time.monotonic() - start_time > 3.0:
             return
 
         try:
@@ -569,7 +578,11 @@ def handle_tool_call(name: str, args: dict) -> dict:
 
         # Resolve path relative to current working directory or absolute
         abs_path = os.path.abspath(path)
+        system_roots = {"/", "/Users", "/home", "/root", os.path.expanduser("~")}
         depth = min(4, max(1, int(args.get("depth", 2))))
+        if abs_path in system_roots:
+            # Do not walk entire home dir or filesystem root deeply
+            depth = 1
         max_entries = min(150, max(10, int(args.get("max_entries", 80))))
 
         tree_output = build_dir_tree(abs_path, max_depth=depth, max_entries=max_entries)
@@ -591,8 +604,20 @@ def handle_tool_call(name: str, args: dict) -> dict:
             return {"isError": True, "content": [{"type": "text", "text": "Error: 'query' argument is required for scoped_search."}]}
 
         scope = args.get("scope", "all")
-        p_path = args.get("project_path", "")
-        target_path = os.path.abspath(p_path) if p_path else os.getcwd()
+        raw_path = args.get("project_path") or args.get("path") or args.get("root_dir") or args.get("directory")
+        if raw_path:
+            target_path = os.path.abspath(raw_path)
+            if os.path.isfile(target_path):
+                target_path = os.path.dirname(target_path)
+        else:
+            resolved_path, err = _resolve_project_root(args)
+            if err or not resolved_path:
+                return {
+                    "isError": True,
+                    "content": [{"type": "text", "text": err or "Error: Invalid or unspecified project_path."}]
+                }
+            target_path = resolved_path
+
         max_res = args.get("max_results", 25)
         c_sens = bool(args.get("case_sensitive", False))
         u_regex = bool(args.get("use_regex", False))
@@ -606,6 +631,9 @@ def handle_tool_call(name: str, args: dict) -> dict:
             use_regex=u_regex
         )
         md_text = res["markdown"]
+        if not res.get("success", True):
+            return {"isError": True, "content": [{"type": "text", "text": md_text}]}
+
         res_tokens = count_tokens(md_text)
         est_orig = max(1500, res_tokens * 8)
         tracker.record_event(

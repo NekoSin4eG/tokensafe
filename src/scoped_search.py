@@ -6,12 +6,15 @@ Replaces uncontrolled grep/find commands with bounded, clean, token-efficient re
 import os
 import re
 import fnmatch
+import time
 from typing import Dict, List, Optional, Any, Tuple
 
 IGNORED_DIRS = {
-    ".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
+    ".git", ".hg", ".svn", "node_modules", ".venv", "venv", "__pycache__", "dist", "build",
     ".next", ".turbo", ".idea", ".vscode", "coverage", ".pytest_cache",
-    ".mypy_cache", ".gemini", ".system_generated", "data", "tokensafe.egg-info"
+    ".mypy_cache", ".gemini", ".system_generated", "data", "tokensafe.egg-info",
+    "Library", "Applications", "Pictures", "Movies", "Music", "Downloads",
+    ".cache", ".npm", ".bun", ".rustup", ".cargo", ".local", ".output", ".vite"
 }
 
 IGNORED_EXTENSIONS = {
@@ -90,6 +93,16 @@ class ScopedSearch:
             }
 
         root_dir = os.path.abspath(project_path or os.getcwd())
+        system_roots = {"/", "/Users", "/home", "/root", os.path.expanduser("~")}
+        if root_dir in system_roots:
+            return {
+                "success": False,
+                "error": f"Refusing to search system root or home directory ({root_dir}). Please provide an explicit project directory.",
+                "matches": [],
+                "total_matches": 0,
+                "markdown": f"Search aborted: '{root_dir}' is a system root. Please specify an explicit project directory path."
+            }
+
         if not os.path.isdir(root_dir):
             return {
                 "success": False,
@@ -122,8 +135,18 @@ class ScopedSearch:
         matches: List[Dict[str, Any]] = []
         total_scanned_files = 0
         hit_files = set()
+        start_time = time.monotonic()
+        timeout_seconds = 4.0
+        max_scanned_files = 2500
+        timed_out = False
 
         for dirpath, dirnames, filenames in os.walk(root_dir):
+            if time.monotonic() - start_time > timeout_seconds:
+                timed_out = True
+                break
+            if total_scanned_files >= max_scanned_files:
+                break
+
             # Prune ignored directories in-place
             dirnames[:] = [
                 d for d in dirnames
@@ -131,6 +154,11 @@ class ScopedSearch:
             ]
 
             for fname in filenames:
+                if time.monotonic() - start_time > timeout_seconds:
+                    timed_out = True
+                    break
+                if total_scanned_files >= max_scanned_files:
+                    break
                 full_path = os.path.join(dirpath, fname)
                 rel_path = os.path.relpath(full_path, root_dir).replace("\\", "/")
 
@@ -184,6 +212,10 @@ class ScopedSearch:
 
         if len(matches) >= max_results:
             lines.append(f"_Results capped at {max_results} matches._")
+        elif timed_out:
+            lines.append(f"_Search bounded at {timeout_seconds}s safety limit ({total_scanned_files} files scanned). Narrow 'project_path' for exhaustive scan._")
+        elif total_scanned_files >= max_scanned_files:
+            lines.append(f"_Scan bounded at {max_scanned_files} files limit. Narrow 'project_path' if needed._")
 
         return {
             "success": True,
@@ -192,6 +224,7 @@ class ScopedSearch:
             "total_matches": len(matches),
             "files_matched": len(hit_files),
             "scanned_files": total_scanned_files,
+            "timed_out": timed_out,
             "matches": matches,
             "markdown": "\n".join(lines)
         }

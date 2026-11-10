@@ -50,6 +50,20 @@ class TestScopedSearch(unittest.TestCase):
         self.assertIn("TokenSafe Scoped Search", text)
         self.assertIn("src/cloud_backend.py", text)
 
+    def test_scoped_search_path_alias(self):
+        src_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "src"))
+        res = handle_tool_call("scoped_search", {"query": "ScopedSearch", "path": src_dir, "scope": "code"})
+        self.assertNotIn("isError", res)
+        text = res["content"][0]["text"]
+        self.assertIn("scoped_search.py", text)
+
+    def test_scoped_search_rejects_system_root(self):
+        res = ScopedSearch.search("anything", project_path="/")
+        self.assertFalse(res["success"])
+        self.assertIn("system root", res["markdown"])
+        home_res = ScopedSearch.search("anything", project_path=os.path.expanduser("~"))
+        self.assertFalse(home_res["success"])
+
 
 if __name__ == "__main__":
     unittest.main()
