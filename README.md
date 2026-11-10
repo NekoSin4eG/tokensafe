@@ -316,7 +316,9 @@ tokensafe providers
 
 ## 📊 Zero-Loss SWE-bench Benchmark Results
 
-Verified across 8 real-world production software engineering scenarios (131,604 baseline tokens down to 7,251 tokens, **-94.5% net token reduction**, **+28.1% turn latency speedup** with **100% Zero-Loss accuracy retention**):
+Reference run across 8 real-world production software engineering scenarios (131,552 baseline tokens down to 7,263 tokens, **-94.5% net token reduction**, **+28.1% turn latency speedup** with **100% Zero-Loss accuracy retention**):
+
+> Token counts vary by ±1% between runs because prompt compaction is **measured live** on every execution; baseline sizes are modeled constants. The harness now ships a SIMULATION DISCLOSURE with a measured-vs-modeled evidence breakdown — see [METRICS.md](METRICS.md).
 
 | Benchmark Scenario | Task Complexity | Baseline Tokens | TokenSafe Tokens | Reduction | Turn Speedup | Accuracy |
 |---|---|---|---|---|---|---|
@@ -519,11 +521,8 @@ TokenSafe Cloud Backend enforces enterprise zero-trust security across all commu
 | `POST` | `/api/team/seat/revoke` | **Bearer Auth** | `Authorization: Bearer <jwt\|key>`, JSON `{ owner_email, license_key }` | Revokes an active team seat license key. |
 | `POST` | `/api/telemetry/sync` | **License Auth** | JSON `{ license_key, email, events: [...] }` | Syncs batch telemetry events (enforces max 50 events/batch). |
 | `POST` | `/webhook/stripe` | **HMAC Sig** | `Stripe-Signature: t=...,v1=...` | Verifies Stripe webhook payload against `STRIPE_WEBHOOK_SECRET`. |
-| `GET` | `/api/admin/overview` | **Admin Only** | `X-Admin-Secret` or Admin JWT | Global overview of MRR, seats, active licenses, and system health. |
-| `POST` | `/api/admin/digest/send` | **Admin Only** | `X-Admin-Secret` or Admin JWT | Dispatches scheduled Friday weekly ROI digest emails to team leads. |
-| `POST` | `/api/admin/license/issue`| **Admin Only** | `X-Admin-Secret` or Admin JWT | Manually issues or provisions a custom tier license. |
-| `POST` | `/api/admin/license/revoke`| **Admin Only**| `X-Admin-Secret` or Admin JWT | Immediately revokes a license. |
-| `POST` | `/api/admin/license/extend`| **Admin Only**| `X-Admin-Secret` or Admin JWT | Extends an active license duration. |
+
+> **Note:** administrative endpoints are intentionally **not documented in the public API surface** — not even their paths. They are restricted by a dedicated admin secret / admin JWT and live in the private operations manual only. Public clients never need them — seat and license management is available through the [dashboard](https://dashboard.tokensafe.dev).
 
 ### 3. Server Configuration & Environment Variables
 
@@ -531,7 +530,7 @@ TokenSafe Cloud Backend enforces enterprise zero-trust security across all commu
 |---|---|---|
 | `TOKENSAFE_PRIVATE_KEY` | Production | 64-character hex Ed25519 seed for issuing `TS2.` licenses. |
 | `ADMIN_SECRET_KEY` | Yes | High-entropy secret for administrative API access (`X-Admin-Secret`). |
-| `ADMIN_EMAILS` | Optional | Comma-separated admin emails (e.g. `nekosin4eg@gmail.com`). |
+| `ADMIN_EMAILS` | Optional | Comma-separated admin emails (e.g. `admin@yourcompany.com`). |
 | `STRIPE_WEBHOOK_SECRET` | Production | Webhook secret (`whsec_...`) used to verify Stripe webhooks. |
 | `SMTP_PASS` | Production | Password/token for transactional mail delivery via ImprovMX SMTP. |
 | `JWT_SECRET` | Optional | Shared HMAC secret for verifying custom JWT tokens. Set a persistent value in production — otherwise sessions invalidate on every restart. |

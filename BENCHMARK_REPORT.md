@@ -2,6 +2,12 @@
 
 > **Objective Proof of 80%+ Cost Reduction with 100% Accuracy Retention.**
 
+> **SIMULATION DISCLOSURE:** this is a simulated harness. All *baseline* sizes and turn
+> counts are **modeled** from typical production values. On the optimized side,
+> **138 tokens are measured live** by running the real tools during this run,
+> while **7,125 tokens are modeled constants**. Task success is self-verified.
+> Production savings are tracked separately with measured/estimated labels — see [METRICS.md](METRICS.md).
+
 | Metric | Baseline (Standard Agent) | Optimized (`agy-token-optimizer`) | Gain |
 | :--- | :--- | :--- | :--- |
 | **Context Tokens** | `131,552` | `7,263` | **-94.5%** |
