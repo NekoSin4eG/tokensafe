@@ -29,6 +29,7 @@ if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
 from src.license_manager import LicenseManager
+from src.metrics import resolve_measurement
 
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 METRICS_DB_PATH = os.path.join(DATA_DIR, "metrics.db")
@@ -178,16 +179,29 @@ class TelemetrySync:
                                 "saved_tokens": int(life_row["total_saved_tokens"]),
                                 "usd_saved": float(life_row["total_usd_saved"]),
                                 "model": "aggregate",
-                                "timestamp": int(time.time())
+                                "timestamp": int(time.time()),
+                                # Rolled-up historical mass of mixed provenance: conservatively estimated.
+                                "measurement": "estimated"
                             })
                     except Exception:
                         pass
 
-                rows = cur.execute(
-                    "SELECT id, timestamp, event_type, original_tokens, saved_tokens, est_usd_saved, details "
-                    "FROM events WHERE id > ? ORDER BY id ASC LIMIT 2000",
-                    (last_id,)
-                ).fetchall()
+                # The measurement column may be absent on legacy databases that have
+                # not yet been migrated by MetricsTracker._init_db; fall back to the
+                # event-type map so sync never blocks on schema drift.
+                try:
+                    rows = cur.execute(
+                        "SELECT id, timestamp, event_type, original_tokens, saved_tokens, est_usd_saved, details, measurement "
+                        "FROM events WHERE id > ? ORDER BY id ASC LIMIT 2000",
+                        (last_id,)
+                    ).fetchall()
+                except sqlite3.OperationalError:
+                    rows = cur.execute(
+                        "SELECT id, timestamp, event_type, original_tokens, saved_tokens, est_usd_saved, details, "
+                        "NULL as measurement "
+                        "FROM events WHERE id > ? ORDER BY id ASC LIMIT 2000",
+                        (last_id,)
+                    ).fetchall()
                 conn.close()
             except Exception as e:
                 return {
@@ -241,7 +255,8 @@ class TelemetrySync:
                     "saved_tokens": int(r["saved_tokens"] or 0),
                     "usd_saved": float(r["est_usd_saved"] or 0.0),
                     "model": model_name,
-                    "timestamp": ts_int
+                    "timestamp": ts_int,
+                    "measurement": resolve_measurement(str(r["event_type"] or "PROMPT"), r["measurement"])
                 }))
 
             total_sent = 0

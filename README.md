@@ -3,6 +3,7 @@
 </p>
 
 <h1 align="center">⚡ TokenSafe</h1>
+<!-- mcp-name: dev.tokensafe/tokensafe -->
 
 <p align="center">
   <b>Autonomous Zero-Loss Token Economy & Context Optimizer for AI Coding Agents</b><br>
@@ -327,6 +328,19 @@ Verified across 8 real-world production software engineering scenarios (131,604 
 | **Race Condition / Distributed Lock** | AST query & Redis redlock | 5,074 | **404** | **-92.0%** | **4 ➔ 3 turns (+25%)** | 100% Pass |
 | **OAuth JWT Expiration Triage** | Controller bug investigation | 3,757 | **401** | **-89.3%** | **3 ➔ 2 turns (+33%)** | 100% Pass |
 | **CI Test Failure Extraction** | Full test log & stack trace | 5,009 | **1,127** | **-77.5%** | 3 turns | 100% Pass |
+
+> **How to read these numbers:** the benchmark is a **simulated** harness — the compression ratios are real, deterministic tool-output deltas on real files, while the "turn speedup" column models agent behavior. We never present simulated numbers as metered ones. Every production event TokenSafe records is labeled `measured` (literally metered I/O reduction) or `estimated` (counterfactual baseline) — see **[METRICS.md](METRICS.md)** for the full methodology, and the dashboard exposes the `measured` / `estimated` split alongside every total.
+
+---
+
+## 📐 Metrics Honesty
+
+TokenSafe labels every savings event as one of:
+
+- **`measured`** — the model literally received fewer bytes than the tool produced (sliced file reads, filtered command output, skeletons). The delta is a fact.
+- **`estimated`** — the model received a compact artifact and "saved" is counted against a reasonable alternative (architecture graph vs. a full crawl; folded history digest, which is *injected* while the raw history remains in context).
+
+Sums on the dashboard and landing page always show the split (`X metered · Y est.`). When a live number is unavailable we render `—`, never a fabricated constant. USD figures are derived estimates (`tokens × $1.5 / 1M`), not invoices. Details: **[METRICS.md](METRICS.md)**.
 
 ---
 

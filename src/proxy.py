@@ -150,10 +150,28 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             return
 
         if self.path.startswith("/v1/chat/completions"):
+            self._touch_proxy_heartbeat()
             self.handle_chat_completions()
         else:
             self.send_response(404)
             self.end_headers()
+
+    @staticmethod
+    def _touch_proxy_heartbeat():
+        """Marks the proxy as actively serving agent traffic.
+
+        Lifecycle hooks read this marker to skip their own prompt compaction:
+        when the proxy is in the loop it REPLACES the last user message with the
+        TOCP form, so hook-side injection would double-count the same prompt."""
+        try:
+            marker = os.path.join(
+                os.environ.get("TOKENSAFE_DATA_DIR", os.path.join(BASE_DIR, "data")),
+                ".proxy_active",
+            )
+            with open(marker, "w", encoding="utf-8") as f:
+                f.write(str(int(__import__("time").time())))
+        except Exception:
+            pass
 
     def handle_chat_completions(self):
         try:
@@ -166,6 +184,8 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"error": f"Invalid JSON payload: {e}"}).encode("utf-8"))
             return
 
+        proxy_tracker = MetricsTracker()
+
         # 1. Local Secret Redaction: Scrub credentials across all messages before dispatch
         messages = payload.get("messages", [])
         if messages:
@@ -173,7 +193,9 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             if secrets_scrubbed > 0:
                 print(f"[TokenSafe] Scrubbed {secrets_scrubbed} sensitive secret(s) from payload before transmission.")
 
-        # 2. Ingress Optimization: Compact last user message
+        # 2. Ingress Optimization: REPLACE the last user message with its TOCP form.
+        #    This is the real replace-mode: the upstream model never sees the verbose
+        #    original, so the delta is literally measured (see METRICS.md).
         target_symbol = None
         if messages:
             for idx in reversed(range(len(messages))):
@@ -183,6 +205,22 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                     compaction = PromptCompactor.compact(raw_user, enable_deepseek=False)
                     if compaction["saved_tokens"] > 5:
                         msg["content"] = compaction["compact_text"]
+                        try:
+                            proxy_tracker.record_event(
+                                session_id="proxy_session",
+                                event_type="PROMPT",
+                                original_tokens=compaction["original_tokens"],
+                                optimized_tokens=compaction["compact_tokens"],
+                                details={
+                                    "mode": "proxy_replace",
+                                    "action": compaction.get("action"),
+                                    "symbol": compaction.get("symbol"),
+                                    "tier": compaction.get("tier", "REGEX"),
+                                },
+                                measurement="measured",  # bytes literally swapped
+                            )
+                        except Exception:
+                            pass
                     target_symbol = compaction.get("symbol")
                     break
 

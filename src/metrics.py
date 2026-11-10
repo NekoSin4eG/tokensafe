@@ -14,6 +14,30 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Generator
 
 USD_PER_TOKEN = 1.50 / 1_000_000.0
+
+# Event types whose `original_tokens` baseline is a counterfactual estimate rather
+# than literally metered I/O (see METRICS.md). Everything else counts as measured.
+#   GRAPH_TOPOLOGY: "original" is what a hypothetical full-file crawl would have cost.
+#   HISTORY_FOLD:   a folded digest is INJECTED as a system message; the full history
+#                   physically stays in the context window.
+#   PROMPT:         the TOCP form is injected alongside the original prompt until
+#                   replace-mode is verified end-to-end.
+#   ROLLUP_LIFETIME: pruned-and-rolled-up historical mass of mixed provenance;
+#                   conservatively labelled estimated.
+ESTIMATED_EVENT_TYPES = frozenset({
+    "GRAPH_TOPOLOGY",
+    "HISTORY_FOLD",
+    "PROMPT",
+    "ROLLUP_LIFETIME",
+})
+
+def resolve_measurement(event_type: str, explicit: Optional[str] = None) -> str:
+    """Resolves the measurement label for an event: explicit override wins,
+    then the estimated-type map, then 'measured'."""
+    if explicit in ("measured", "estimated"):
+        return explicit
+    return "estimated" if event_type in ESTIMATED_EVENT_TYPES else "measured"
+
 _METRICS_INIT_LOCK = threading.Lock()
 _INITIALIZED_METRICS_DBS: set = set()
 # Retention / telemetry cadence is wall-clock based (marker file) rather than
@@ -122,9 +146,25 @@ class MetricsTracker:
                         saved_tokens INTEGER NOT NULL,
                         reduction_pct REAL NOT NULL,
                         est_usd_saved REAL NOT NULL,
-                        details TEXT
+                        details TEXT,
+                        measurement TEXT NOT NULL DEFAULT 'measured'
                     )
                 """)
+                # Migration for databases created before the measurement column existed.
+                try:
+                    cursor.execute(
+                        "ALTER TABLE events ADD COLUMN measurement TEXT NOT NULL DEFAULT 'measured';"
+                    )
+                except sqlite3.OperationalError:
+                    pass  # column already present
+                # Retroactively label counterfactual event types recorded before the
+                # measured/estimated split was introduced (idempotent: new events of
+                # these types are already inserted with measurement='estimated').
+                cursor.execute(
+                    "UPDATE events SET measurement = 'estimated' "
+                    "WHERE measurement = 'measured' AND event_type IN "
+                    "('GRAPH_TOPOLOGY', 'HISTORY_FOLD', 'PROMPT', 'ROLLUP_LIFETIME');"
+                )
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS lifetime_aggregates (
                         id INTEGER PRIMARY KEY CHECK (id = 1),
@@ -152,9 +192,17 @@ class MetricsTracker:
         event_type: str,
         original_tokens: int,
         optimized_tokens: int,
-        details: Optional[Dict[str, Any]] = None
+        details: Optional[Dict[str, Any]] = None,
+        measurement: Optional[str] = None
     ) -> Dict[str, Any]:
-        """Records an optimization event and updates session totals."""
+        """Records an optimization event and updates session totals.
+
+        `measurement` labels the honesty of `saved_tokens`:
+          'measured'  - literally metered I/O reduction (tool output was smaller)
+          'estimated' - counterfactual baseline (see ESTIMATED_EVENT_TYPES / METRICS.md)
+        When omitted, the label is derived from the event type.
+        """
+        measurement_label = resolve_measurement(event_type, measurement)
         saved_tokens = max(0, original_tokens - optimized_tokens)
         reduction_pct = (saved_tokens / original_tokens * 100.0) if original_tokens > 0 else 0.0
         est_usd = round(saved_tokens * USD_PER_TOKEN, 6)
@@ -167,10 +215,12 @@ class MetricsTracker:
             cursor.execute("""
                 INSERT INTO events (
                     session_id, timestamp, event_type, original_tokens,
-                    optimized_tokens, saved_tokens, reduction_pct, est_usd_saved, details
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    optimized_tokens, saved_tokens, reduction_pct, est_usd_saved, details,
+                    measurement
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (session_id, now_iso, event_type, original_tokens,
-                  optimized_tokens, saved_tokens, round(reduction_pct, 2), est_usd, details_json))
+                  optimized_tokens, saved_tokens, round(reduction_pct, 2), est_usd, details_json,
+                  measurement_label))
 
             # 2. Upsert session
             cursor.execute("""
@@ -193,7 +243,8 @@ class MetricsTracker:
         return {
             "saved_tokens": saved_tokens,
             "reduction_pct": round(reduction_pct, 1),
-            "est_usd_saved": est_usd
+            "est_usd_saved": est_usd,
+            "measurement": measurement_label
         }
 
     def get_summary(self) -> Dict[str, Any]:
@@ -213,12 +264,14 @@ class MetricsTracker:
 
             # 2. Active events
             cursor.execute("""
-                SELECT 
+                SELECT
                     COUNT(*) as active_events,
                     COALESCE(SUM(original_tokens), 0) as active_orig,
                     COALESCE(SUM(optimized_tokens), 0) as active_opt,
                     COALESCE(SUM(saved_tokens), 0) as active_saved,
-                    COALESCE(SUM(est_usd_saved), 0.0) as active_usd
+                    COALESCE(SUM(est_usd_saved), 0.0) as active_usd,
+                    COALESCE(SUM(CASE WHEN measurement = 'measured' THEN saved_tokens ELSE 0 END), 0) as active_saved_measured,
+                    COALESCE(SUM(CASE WHEN measurement = 'estimated' THEN saved_tokens ELSE 0 END), 0) as active_saved_estimated
                 FROM events
             """)
             ev_row = cursor.fetchone()
@@ -229,7 +282,8 @@ class MetricsTracker:
 
             # 3. Breakdown of active events
             cursor.execute("""
-                SELECT event_type, COUNT(*) as count, COALESCE(SUM(saved_tokens), 0) as saved
+                SELECT event_type, COUNT(*) as count, COALESCE(SUM(saved_tokens), 0) as saved,
+                       COALESCE(SUM(CASE WHEN measurement = 'estimated' THEN saved_tokens ELSE 0 END), 0) as estimated_saved
                 FROM events
                 GROUP BY event_type
             """)
@@ -237,11 +291,13 @@ class MetricsTracker:
             for r in cursor.fetchall():
                 ev_type = r["event_type"]
                 if ev_type not in combined_breakdown:
-                    combined_breakdown[ev_type] = {"count": 0, "saved": 0}
+                    combined_breakdown[ev_type] = {"count": 0, "saved": 0, "estimated_saved": 0}
                 else:
                     combined_breakdown[ev_type] = dict(combined_breakdown[ev_type])
+                    combined_breakdown[ev_type].setdefault("estimated_saved", 0)
                 combined_breakdown[ev_type]["count"] += r["count"]
                 combined_breakdown[ev_type]["saved"] += r["saved"]
+                combined_breakdown[ev_type]["estimated_saved"] += r["estimated_saved"]
 
         total_events = life_events + (ev_row["active_events"] if ev_row else 0)
         total_orig = life_orig + (ev_row["active_orig"] if ev_row else 0)
@@ -250,12 +306,22 @@ class MetricsTracker:
         total_usd = life_usd + (ev_row["active_usd"] if ev_row else 0.0)
         overall_reduction = (total_saved / total_orig * 100.0) if total_orig > 0 else 0.0
 
+        # Honesty split: lifetime rollup breakdown carries per-type estimated mass
+        # (see prune); active events are split directly by the measurement column.
+        life_estimated = sum(int(v.get("estimated_saved", 0) or 0) for v in life_breakdown.values())
+        saved_measured = (ev_row["active_saved_measured"] if ev_row else 0) + (
+            life_saved - life_estimated
+        )
+        saved_estimated = (ev_row["active_saved_estimated"] if ev_row else 0) + life_estimated
+
         return {
             "session_count": max(session_count, 1 if total_events > 0 else 0),
             "total_events": total_events,
             "total_original_tokens": total_orig,
             "total_optimized_tokens": total_opt,
             "total_saved_tokens": total_saved,
+            "total_saved_tokens_measured": saved_measured,
+            "total_saved_tokens_estimated": saved_estimated,
             "overall_reduction_pct": round(overall_reduction, 1),
             "total_usd_saved": round(total_usd, 4),
             "breakdown": combined_breakdown
@@ -282,7 +348,8 @@ class MetricsTracker:
             cursor = conn.cursor()
             cursor.execute("""
                 SELECT id, session_id, timestamp, event_type, original_tokens,
-                       optimized_tokens, saved_tokens, reduction_pct, est_usd_saved, details
+                       optimized_tokens, saved_tokens, reduction_pct, est_usd_saved, details,
+                       measurement
                 FROM events
                 ORDER BY id DESC
                 LIMIT ?
@@ -391,7 +458,7 @@ class MetricsTracker:
 
             # 1. Calculate aggregates for events to be pruned
             cursor.execute(f"""
-                SELECT 
+                SELECT
                     COUNT(*) as cnt,
                     COALESCE(SUM(original_tokens), 0) as orig,
                     COALESCE(SUM(optimized_tokens), 0) as opt,
@@ -404,15 +471,16 @@ class MetricsTracker:
             prune_count = agg_row["cnt"] if agg_row else 0
 
             if prune_count > 0:
-                # 2. Breakdown of pruned events
+                # 2. Breakdown of pruned events (with estimated share for the honesty split)
                 cursor.execute(f"""
-                    SELECT event_type, COUNT(*) as cnt, COALESCE(SUM(saved_tokens), 0) as saved
+                    SELECT event_type, COUNT(*) as cnt, COALESCE(SUM(saved_tokens), 0) as saved,
+                           COALESCE(SUM(CASE WHEN measurement = 'estimated' THEN saved_tokens ELSE 0 END), 0) as est_saved
                     FROM events
                     WHERE {combined_where}
                     GROUP BY event_type
                 """, params)
                 pruned_breakdown = {
-                    r["event_type"]: {"count": r["cnt"], "saved": r["saved"]}
+                    r["event_type"]: {"count": r["cnt"], "saved": r["saved"], "estimated_saved": r["est_saved"]}
                     for r in cursor.fetchall()
                 }
 
@@ -423,11 +491,13 @@ class MetricsTracker:
 
                 for ev_type, vals in pruned_breakdown.items():
                     if ev_type not in current_breakdown:
-                        current_breakdown[ev_type] = {"count": 0, "saved": 0}
+                        current_breakdown[ev_type] = {"count": 0, "saved": 0, "estimated_saved": 0}
                     else:
                         current_breakdown[ev_type] = dict(current_breakdown[ev_type])
+                        current_breakdown[ev_type].setdefault("estimated_saved", 0)
                     current_breakdown[ev_type]["count"] += vals["count"]
                     current_breakdown[ev_type]["saved"] += vals["saved"]
+                    current_breakdown[ev_type]["estimated_saved"] += vals["estimated_saved"]
 
                 # 4. Update lifetime_aggregates
                 cursor.execute("""

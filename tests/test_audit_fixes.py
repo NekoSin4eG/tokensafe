@@ -507,5 +507,354 @@ class TestMacOsUpdaterDialog(unittest.TestCase):
         self.assertEqual(VersionChecker._posix_single_quote("it's"), "'it'\\''s'")
 
 
+class TestMetricsHonestySplit(unittest.TestCase):
+    """measured | estimated labelling end-to-end: local DB, summary split, cloud telemetry."""
+
+    def setUp(self):
+        from src import metrics as metrics_mod
+        self._tmp = tempfile.mkdtemp(prefix="tokensafe_honesty_")
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self.db_path = os.path.join(self._tmp, "metrics.db")
+        self._prev = os.environ.get("TOKENSAFE_DB_PATH")
+        self._prev_tel = os.environ.get("TOKENSAFE_TELEMETRY_DISABLED")
+        os.environ["TOKENSAFE_DB_PATH"] = self.db_path
+        os.environ["TOKENSAFE_TELEMETRY_DISABLED"] = "1"
+        metrics_mod._INITIALIZED_METRICS_DBS.clear()
+        from src.metrics import MetricsTracker
+        self.tracker = MetricsTracker()
+
+    def tearDown(self):
+        if self._prev is None:
+            os.environ.pop("TOKENSAFE_DB_PATH", None)
+        else:
+            os.environ["TOKENSAFE_DB_PATH"] = self._prev
+        if self._prev_tel is None:
+            os.environ.pop("TOKENSAFE_TELEMETRY_DISABLED", None)
+        else:
+            os.environ["TOKENSAFE_TELEMETRY_DISABLED"] = self._prev_tel
+
+    def test_labels_resolved_by_type_map_and_override(self):
+        r_tool = self.tracker.record_event("s", "TOOL_READ", 100, 30)
+        r_fold = self.tracker.record_event("s", "HISTORY_FOLD", 1000, 100)
+        r_graph = self.tracker.record_event("s", "GRAPH_TOPOLOGY", 5000, 500)
+        r_prompt = self.tracker.record_event("s", "PROMPT", 500, 400)
+        r_forced = self.tracker.record_event("s", "PROMPT", 200, 100, measurement="measured")
+        self.assertEqual(r_tool["measurement"], "measured")
+        self.assertEqual(r_fold["measurement"], "estimated")
+        self.assertEqual(r_graph["measurement"], "estimated")
+        self.assertEqual(r_prompt["measurement"], "estimated")
+        self.assertEqual(r_forced["measurement"], "measured")
+
+    def test_summary_split_sums(self):
+        self.tracker.record_event("s", "TOOL_READ", 100, 30)        # +70 measured
+        self.tracker.record_event("s", "COMMAND_FILTER", 400, 100)  # +300 measured
+        self.tracker.record_event("s", "HISTORY_FOLD", 1000, 100)   # +900 estimated
+        s = self.tracker.get_summary()
+        self.assertEqual(s["total_saved_tokens"], 1270)
+        self.assertEqual(s["total_saved_tokens_measured"], 370)
+        self.assertEqual(s["total_saved_tokens_estimated"], 900)
+
+    def test_prune_rollup_keeps_estimated_share(self):
+        self.tracker.record_event("s", "HISTORY_FOLD", 1000, 100)   # 900 estimated (older id)
+        self.tracker.record_event("s", "TOOL_READ", 100, 30)        # 70 measured  (kept)
+        res = self.tracker.prune(max_events=1)  # roll the oldest event into lifetime
+        self.assertEqual(res["pruned_events"], 1)
+        s = self.tracker.get_summary()
+        # totals preserved across the rollup: 900 estimated (lifetime) + 70 measured (active)
+        self.assertEqual(s["total_saved_tokens"], 970)
+        self.assertEqual(s["total_saved_tokens_measured"], 70)
+        self.assertEqual(s["total_saved_tokens_estimated"], 900)
+        self.assertEqual(s["breakdown"]["HISTORY_FOLD"]["estimated_saved"], 900)
+
+    def test_legacy_rows_relabelled_on_migration(self):
+        # Simulate a pre-split database row (labeled 'measured' by the old schema default).
+        import sqlite3
+        conn = sqlite3.connect(self.db_path)
+        conn.execute(
+            "INSERT INTO events (session_id, timestamp, event_type, original_tokens,"
+            " optimized_tokens, saved_tokens, reduction_pct, est_usd_saved, details, measurement)"
+            " VALUES ('s', '2026-01-01', 'GRAPH_TOPOLOGY', 100, 10, 90, 90, 0.0001, '{}', 'measured')"
+        )
+        conn.commit()
+        conn.close()
+        # Force the init path to run again so the retro-labelling UPDATE fires.
+        from src import metrics as metrics_mod
+        metrics_mod._INITIALIZED_METRICS_DBS.clear()
+        from src.metrics import MetricsTracker
+        MetricsTracker(self.db_path)
+        s = self.tracker.get_summary()
+        self.assertEqual(s["total_saved_tokens_estimated"], 90)
+        self.assertEqual(s["total_saved_tokens_measured"], 0)
+
+
+class TestCloudTelemetryMeasurementSplit(unittest.TestCase):
+    """Cloud record_telemetry labels + dashboard/admin split (shared local cloud.db pattern)."""
+
+    def setUp(self):
+        from src.cloud_backend import (
+            CloudBackendService, init_cloud_db, get_db_connection, create_jwt
+        )
+        self.svc = CloudBackendService
+        self.create_jwt = create_jwt
+        init_cloud_db()
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM telemetry WHERE customer_email LIKE '%@example.com'")
+            conn.commit()
+
+    def tearDown(self):
+        from src.cloud_backend import get_db_connection
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM telemetry WHERE customer_email LIKE '%@example.com'")
+            conn.commit()
+
+    def test_record_telemetry_labels_and_dashboard_split(self):
+        email = "split_test@example.com"
+        self.svc.handle_stripe_checkout(email=email, tier="solo")
+        events = [
+            {"event_type": "TOOL_READ", "original_tokens": 100, "saved_tokens": 70, "est_usd_saved": 0.0001},
+            {"event_type": "HISTORY_FOLD", "original_tokens": 1000, "saved_tokens": 900, "est_usd_saved": 0.0014},
+            {"event_type": "PROMPT", "original_tokens": 500, "saved_tokens": 100,
+             "est_usd_saved": 0.0001, "measurement": "measured"},  # explicit override honored
+        ]
+        cnt = self.svc.record_telemetry(email, "", events)
+        self.assertEqual(cnt, 3)
+        data = self.svc.get_dashboard_data(email)
+        m = data["metrics"]
+        self.assertEqual(m["total_saved_tokens"], 1070)
+        self.assertEqual(m["saved_tokens_measured"], 170)   # 70 + 100 (override)
+        self.assertEqual(m["saved_tokens_estimated"], 900)  # HISTORY_FOLD
+
+    def test_admin_overview_no_fabricated_fallbacks(self):
+        admin_email = "nekosin4eg@gmail.com"
+        token = self.create_jwt({"email": admin_email})
+        overview = self.svc.get_admin_overview(token=token)
+        self.assertTrue(overview.get("authorized"))
+        # The shared dev DB may hold real telemetry; the contract is the LABELS exist
+        # and the ratio is a computed number, never the old fabricated 74.x constant.
+        self.assertIsInstance(overview["overview"]["overall_reduction_pct"], float)
+        self.assertNotIn(str(overview["overview"]["overall_reduction_pct"]), ("74.2", "74.5"))
+        self.assertIn("saved_tokens_measured", overview["overview"])
+        self.assertIn("saved_tokens_estimated", overview["overview"])
+        for lic in overview["overview"].get("licenses", []):
+            self.assertNotEqual(lic["client_version"], "1.3.4")
+
+
+class TestPublicRateLimit(unittest.TestCase):
+    """Sliding-window limiter on public endpoints; /health must stay exempt."""
+
+    def test_limiter_blocks_after_budget_and_recovers(self):
+        from src.cloud_backend import _is_rate_limited, _RATE_LIMIT_BUCKETS
+        _RATE_LIMIT_BUCKETS.pop("t:limit", None)
+        # budget of 3: first 3 pass, 4th is blocked
+        results = [_is_rate_limited("t:limit", limit_per_minute=3) for _ in range(4)]
+        self.assertEqual(results, [False, False, False, True])
+        # window slides: backdate all hits so the bucket drains
+        import time as _time
+        _RATE_LIMIT_BUCKETS["t:limit"] = [_time.time() - 120] * 3
+        self.assertFalse(_is_rate_limited("t:limit", limit_per_minute=3))
+        _RATE_LIMIT_BUCKETS.pop("t:limit", None)
+
+    def test_limiter_disabled_via_env_zero(self):
+        from src.cloud_backend import _is_rate_limited, _RATE_LIMIT_BUCKETS
+        _RATE_LIMIT_BUCKETS.pop("t:off", None)
+        self.assertFalse(any(_is_rate_limited("t:off", limit_per_minute=0) for _ in range(50)))
+        _RATE_LIMIT_BUCKETS.pop("t:off", None)
+
+    def test_health_endpoint_not_rate_limited(self):
+        # /health must never be throttled (Bunny probes); assert the route block
+        # in the handler contains no limiter call.
+        import inspect
+        import re
+        from src.cloud_backend import CloudRequestHandler
+        src = inspect.getsource(CloudRequestHandler._handle_get)
+        m = re.search(
+            r'if path in \("/health", "/api/health"\):.*?(?=\n        elif |\Z)', src, re.S
+        )
+        self.assertIsNotNone(m, "health route block not found")
+        self.assertNotIn("_is_rate_limited", m.group(0))
+
+
+class TestTS1SunsetMigration(unittest.TestCase):
+    """check_version transparently reissues TS1 keys as TS2 and the client swaps them."""
+
+    def setUp(self):
+        from src.cloud_backend import CloudBackendService, init_cloud_db, get_db_connection
+        self.svc = CloudBackendService
+        init_cloud_db()
+        self._conn_ctx = get_db_connection
+        with get_db_connection() as conn:
+            conn.execute("DELETE FROM licenses WHERE customer_email LIKE '%@ts1-migrate.com'")
+            conn.execute("DELETE FROM customers WHERE email LIKE '%@ts1-migrate.com'")
+            conn.commit()
+
+    def tearDown(self):
+        with self._conn_ctx() as conn:
+            conn.execute("DELETE FROM licenses WHERE customer_email LIKE '%@ts1-migrate.com'")
+            conn.execute("DELETE FROM customers WHERE email LIKE '%@ts1-migrate.com'")
+            conn.commit()
+
+    def test_ts1_key_reissued_as_ts2(self):
+        from src.license_manager import LicenseManager
+        email = "legacy@ts1-migrate.com"
+        old_key = LicenseManager.generate_license(tier="solo", email=email, duration_days=45, version=1)
+        self.assertTrue(old_key.startswith("TS1."))
+        now = int(time.time())
+        with self._conn_ctx() as conn:
+            conn.execute(
+                "INSERT INTO licenses (license_key, customer_email, tier, is_trial, is_seat, parent_email, status, created_at, expires_at)"
+                " VALUES (?, ?, 'solo', 0, 0, NULL, 'active', ?, ?)",
+                (old_key, email, now, now + 45 * 86400)
+            )
+            conn.commit()
+
+        resp = self.svc.check_version(client_version="1.4.15", license_key=old_key)
+        self.assertTrue(resp.get("ts1_deprecated"))
+        new_key = resp.get("reissued_license_key", "")
+        self.assertTrue(new_key.startswith("TS2."))
+        self.assertIn("TS2 Ed25519", resp["message"])
+
+        # New key verifies and carries the same identity with preserved duration
+        valid, payload, _ = LicenseManager.validate_license(new_key)
+        self.assertTrue(valid)
+        self.assertEqual(payload["email"], email)
+        self.assertGreaterEqual(payload["expires_at"], now + 44 * 86400)
+
+        # The row now points at the TS2 key; the TS1 key is retired server-side
+        with self._conn_ctx() as conn:
+            row = conn.execute(
+                "SELECT license_key FROM licenses WHERE customer_email = ?", (email,)
+            ).fetchone()
+        self.assertEqual(row["license_key"], new_key)
+
+        # Second contact with the OLD key: no issued row anymore => no reissue loop
+        resp2 = self.svc.check_version(client_version="1.4.15", license_key=old_key)
+        self.assertNotIn("reissued_license_key", resp2)
+
+    def test_client_swaps_reissued_key_and_never_caches_it(self):
+        import importlib
+        from unittest.mock import patch, MagicMock
+        from src import version_checker as vc_mod
+        email = "swap@ts1-migrate.com"
+        new_key = LicenseManager_generate_ts2(email)
+
+        saved = {}
+        def fake_urlopen(req, timeout=1.5):
+            body = json.dumps({
+                "status": "up_to_date", "client_version": "1.4.15",
+                "latest_version": "1.4.15", "update_available": False,
+                "ts1_deprecated": True, "reissued_license_key": new_key,
+            }).encode("utf-8")
+            resp = MagicMock()
+            resp.status = 200
+            resp.read.return_value = body
+            ctx = MagicMock()
+            ctx.__enter__.return_value = resp
+            return ctx
+
+        with patch.object(vc_mod.VersionChecker, "save_cache", side_effect=lambda d: saved.update(d)), \
+             patch.object(vc_mod.VersionChecker, "load_cache", return_value=None), \
+             patch("urllib.request.urlopen", side_effect=fake_urlopen), \
+             patch("src.license_manager.LicenseManager.save_license") as fake_save:
+            data = vc_mod.VersionChecker.check_version(current_version="1.4.15", force_fetch=True)
+        fake_save.assert_called_once_with(new_key)
+        self.assertNotIn("reissued_license_key", data)
+        self.assertNotIn("reissued_license_key", saved)
+
+
+def LicenseManager_generate_ts2(email: str) -> str:
+    from src.license_manager import LicenseManager
+    return LicenseManager.generate_license(tier="solo", email=email, duration_days=45)
+
+
+class TestProxyReplaceModeDedup(unittest.TestCase):
+    """Proxy replace-mode heartbeat: hook skips prompt compaction while the proxy
+    is actively replacing prompts (no double-count, no double-injection)."""
+
+    def setUp(self):
+        self._tmp = tempfile.mkdtemp(prefix="tokensafe_proxy_hb_")
+        self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        self._prev = os.environ.get("TOKENSAFE_DATA_DIR")
+        os.environ["TOKENSAFE_DATA_DIR"] = self._tmp
+
+    def tearDown(self):
+        if self._prev is None:
+            os.environ.pop("TOKENSAFE_DATA_DIR", None)
+        else:
+            os.environ["TOKENSAFE_DATA_DIR"] = self._prev
+
+    def test_heartbeat_marker_roundtrip(self):
+        from src.proxy import TokenSafeProxyHandler
+        import time as _time
+        marker = os.path.join(self._tmp, ".proxy_active")
+        self.assertFalse(os.path.exists(marker))
+        TokenSafeProxyHandler._touch_proxy_heartbeat()
+        self.assertTrue(os.path.exists(marker))
+        self.assertLessEqual(_time.time() - os.path.getmtime(marker), 5)
+
+    def test_hook_skips_compaction_while_proxy_active(self):
+        # Fresh heartbeat => hook must not inject a TOCP copy nor record PROMPT
+        from src.proxy import TokenSafeProxyHandler
+        from src import metrics as metrics_mod
+        TokenSafeProxyHandler._touch_proxy_heartbeat()
+        os.environ["TOKENSAFE_DB_PATH"] = os.path.join(self._tmp, "metrics.db")
+        os.environ["TOKENSAFE_TELEMETRY_DISABLED"] = "1"
+        metrics_mod._INITIALIZED_METRICS_DBS.clear()
+        self.addCleanup(os.environ.pop, "TOKENSAFE_DB_PATH", None)
+        self.addCleanup(os.environ.pop, "TOKENSAFE_TELEMETRY_DISABLED", None)
+
+        payload = json.dumps({
+            "lastUserInput": "please refactor the auth module to use async handlers",
+            "conversationId": "proxy_dedup_test",
+            "invocationNum": 1,
+            "transcriptPath": ""
+        })
+        res = subprocess.run(
+            [sys.executable, os.path.join(PROJECT_ROOT, "hooks", "pre_invocation.py")],
+            input=payload, capture_output=True, text=True, timeout=60,
+            env={**os.environ}
+        )
+        self.assertEqual(res.returncode, 0, res.stderr)
+        out = json.loads(res.stdout or "{}")
+        serialized = json.dumps(out)
+        self.assertNotIn("[TOCP Compressed Intent]", serialized)
+        from src.metrics import MetricsTracker
+        t = MetricsTracker()
+        s = t.get_summary()
+        self.assertEqual(s["total_events"], 0)
+
+    def test_hook_compacts_again_when_heartbeat_stale(self):
+        # Stale heartbeat (>120s) => hook resumes its own compaction
+        import time as _time
+        marker = os.path.join(self._tmp, ".proxy_active")
+        with open(marker, "w") as f:
+            f.write(str(int(_time.time())))
+        os.utime(marker, (_time.time() - 300, _time.time() - 300))
+        from src import metrics as metrics_mod
+        os.environ["TOKENSAFE_DB_PATH"] = os.path.join(self._tmp, "metrics.db")
+        os.environ["TOKENSAFE_TELEMETRY_DISABLED"] = "1"
+        metrics_mod._INITIALIZED_METRICS_DBS.clear()
+        self.addCleanup(os.environ.pop, "TOKENSAFE_DB_PATH", None)
+        self.addCleanup(os.environ.pop, "TOKENSAFE_TELEMETRY_DISABLED", None)
+
+        payload = json.dumps({
+            "lastUserInput": (
+                "Now I want you to carefully review and refactor the entire authentication module "
+                "in the src/auth directory to use async handlers instead of blocking calls because "
+                "the current implementation blocks the event loop"
+            ),
+            "conversationId": "proxy_dedup_stale_test",
+            "invocationNum": 1,
+            "transcriptPath": ""
+        })
+        res = subprocess.run(
+            [sys.executable, os.path.join(PROJECT_ROOT, "hooks", "pre_invocation.py")],
+            input=payload, capture_output=True, text=True, timeout=60,
+            env={**os.environ}
+        )
+        self.assertEqual(res.returncode, 0, res.stderr)
+        out = json.loads(res.stdout or "{}")
+        self.assertIn("[TOCP Compressed Intent]", json.dumps(out))
+
+
 if __name__ == "__main__":
     unittest.main()

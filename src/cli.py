@@ -22,11 +22,27 @@ from src.compactor import PromptCompactor
 from src.tokenizer import count_tokens
 
 def main():
-    tracker = MetricsTracker()
-    dashboard = Dashboard(tracker)
-
     args = sys.argv[1:]
     command = args[0] if args else "stats"
+
+    # Fast path: version queries must not construct MetricsTracker (which creates
+    # the data dir and SQLite database). `tokensafe --version` may run in read-only
+    # or foreign directories and must stay side-effect free.
+    if command in ("version", "--version", "-v"):
+        from src.version_checker import CURRENT_VERSION, VersionChecker
+        print(f"TokenSafe v{CURRENT_VERSION}")
+        if "--check" in args or "-c" in args:
+            banner = VersionChecker.get_banner()
+            if banner:
+                print(banner)
+            else:
+                print("\033[32m✔ TokenSafe is up to date.\033[0m")
+            if "--notify" in args or "--prompt" in args:
+                VersionChecker.notify_os_update(force=True)
+        return
+
+    tracker = MetricsTracker()
+    dashboard = Dashboard(tracker)
 
     if command in ("stats", "dashboard"):
         try:
@@ -77,18 +93,6 @@ def main():
     elif command in ("update", "upgrade"):
         from src.installer import AgentInstaller
         AgentInstaller.self_update()
-
-    elif command in ("version", "--version", "-v"):
-        from src.version_checker import CURRENT_VERSION, VersionChecker
-        print(f"TokenSafe v{CURRENT_VERSION}")
-        if "--check" in args or "-c" in args:
-            banner = VersionChecker.get_banner()
-            if banner:
-                print(banner)
-            else:
-                print("\033[32m✔ TokenSafe is up to date.\033[0m")
-            if "--notify" in args or "--prompt" in args:
-                VersionChecker.notify_os_update(force=True)
 
     elif command in ("check-update", "check_update"):
         from src.version_checker import CURRENT_VERSION, VersionChecker

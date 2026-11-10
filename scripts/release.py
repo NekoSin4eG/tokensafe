@@ -192,6 +192,20 @@ def bump_version(target: str) -> str:
         f'seats_after[0]["client_version"], "{new_version}"'
     )
 
+    # 9. server.json (Official MCP Registry manifest)
+    server_json_path = os.path.join(PROJECT_ROOT, "server.json")
+    if os.path.exists(server_json_path):
+        with open(server_json_path, "r", encoding="utf-8") as f:
+            server_data = json.load(f)
+        server_data["version"] = new_version
+        for pkg in server_data.get("packages", []):
+            if isinstance(pkg, dict) and "version" in pkg:
+                pkg["version"] = new_version
+        with open(server_json_path, "w", encoding="utf-8") as f:
+            json.dump(server_data, f, indent=2)
+            f.write("\n")
+        print("  ✓ Updated server.json (root & package versions)")
+
     print(f"\n✅ All files successfully bumped to {new_version}!")
     return new_version
 

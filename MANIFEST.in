@@ -3,5 +3,6 @@ include LICENSE
 exclude src/cloud_backend.py
 exclude src/mailer.py
 exclude tests/test_cloud_backend.py
+recursive-exclude src/cloud *
 recursive-exclude data *
 recursive-exclude frontend *

@@ -135,6 +135,15 @@ class VersionChecker:
                 if resp.status == 200:
                     data = json.loads(resp.read().decode("utf-8"))
                     data["checked_at"] = now
+                    # TS1 sunset: transparently swap in the reissued TS2 key.
+                    # Never persist the key inside version_cache.json — it is a secret.
+                    reissued = data.pop("reissued_license_key", "")
+                    if reissued and reissued.startswith("TS2."):
+                        try:
+                            from src.license_manager import LicenseManager
+                            LicenseManager.save_license(reissued)
+                        except Exception:
+                            pass
                     data.pop("ttl", None)  # authoritative server answer: full 24h cache
                     cls.save_cache(data)
                     return data

@@ -56,4 +56,4 @@ tokensafe-stats = "src.dashboard:main"
 
 [tool.setuptools.packages.find]
 include = ["src*"]
-exclude = ["src.cloud_backend*", "src.mailer*"]
+exclude = ["src.cloud_backend*", "src.cloud*", "src.mailer*"]

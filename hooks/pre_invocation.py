@@ -22,6 +22,24 @@ from src.metrics import MetricsTracker
 from src.environment_auditor import EnvironmentAuditor
 from src.license_manager import LicenseManager
 
+def _proxy_is_active() -> bool:
+    """True when the local tokensafe-proxy recently served agent traffic.
+
+    The proxy REPLACES the last user message with its TOCP form (real
+    replace-mode); injecting a second compressed copy from the hook would
+    duplicate the optimization and double-count it in metrics."""
+    try:
+        import time as _time
+        marker = os.path.join(
+            os.environ.get("TOKENSAFE_DATA_DIR", os.path.join(PROJECT_ROOT, "data")),
+            ".proxy_active",
+        )
+        if os.path.exists(marker):
+            return _time.time() - os.path.getmtime(marker) < 120.0
+    except Exception:
+        pass
+    return False
+
 def main():
     try:
         raw_input = sys.stdin.read()
@@ -80,8 +98,9 @@ def main():
         except Exception:
             pass
 
-    # 1. Prompt Compaction (Tier 2 LLM Distillation paused if community quota exceeded)
-    if last_user_input and len(last_user_input.strip()) >= 5:
+    # 1. Prompt Compaction (Tier 2 LLM Distillation paused if community quota exceeded).
+    #    Skipped while the proxy is in the loop: it already replaced the prompt.
+    if last_user_input and len(last_user_input.strip()) >= 5 and not _proxy_is_active():
         enable_distill = not quota.get("is_quota_exceeded", False)
         compaction = PromptCompactor.compact(last_user_input, enable_deepseek=enable_distill)
         saved_tokens = compaction["saved_tokens"]
