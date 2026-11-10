@@ -147,7 +147,9 @@ class LicenseManager:
         duration_days: int = 30,
         signing_key: Optional[str] = None,
         is_trial: bool = False,
-        version: int = 2
+        version: int = 2,
+        org_id: Optional[str] = None,
+        jti: Optional[str] = None
     ) -> str:
         """
         Generates a tamper-proof cryptographically signed license key.
@@ -157,7 +159,7 @@ class LicenseManager:
         now = int(time.time())
         expires_at = 0 if duration_days == 0 else now + (duration_days * 86400)
 
-        payload = {
+        payload: Dict[str, Any] = {
             "tier": tier.lower(),
             "email": email.strip().lower(),
             "issued_at": now,
@@ -165,6 +167,10 @@ class LicenseManager:
             "trial": is_trial,
             "v": version
         }
+        if org_id:
+            payload["org"] = org_id.strip()
+        if jti:
+            payload["jti"] = jti.strip()
 
         payload_bytes = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode("utf-8")
         payload_b64 = base64.urlsafe_b64encode(payload_bytes).decode("ascii").rstrip("=")
