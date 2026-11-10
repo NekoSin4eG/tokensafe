@@ -46,6 +46,26 @@ pip install tokensafe && tokensafe
 curl -fsSL https://tokensafe.dev/install.sh | bash
 ```
 
+### Optional dependency: `cryptography` (recommended)
+
+The TokenSafe engine itself is **standard-library only** and works out of the box.
+A single optional dependency — [`cryptography`](https://pypi.org/project/cryptography/) —
+is installed automatically by `install.sh` / `requirements.txt` when available:
+
+```bash
+pip install cryptography   # or: brew install cryptography
+```
+
+| Component | With `cryptography` | Without (pure-stdlib fallback) |
+|---|---|---|
+| Client: license verification | Instant Ed25519 fast-path | Pure-Python Ed25519 (~0.3s once, then cached — see below) |
+| Client: everything else | Identical | Identical |
+| Cloud backend: Clerk session tokens | RS256 signature verified | **Rejected** (fail-closed — unsigned tokens are never accepted) |
+| Cloud backend: everything else | Identical | Identical |
+
+The client caches a successful license verification for up to 1 hour, so even the
+pure-Python path adds no measurable latency after the first hook invocation.
+
 ---
 
 ## 🔌 Universal MCP Server Configuration

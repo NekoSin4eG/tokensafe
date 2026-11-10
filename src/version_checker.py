@@ -18,6 +18,11 @@ from typing import Dict, Any, Optional, Tuple
 
 CURRENT_VERSION = "1.4.13"
 CACHE_TTL = 86400  # 24 hours
+# When the cloud is unreachable we must NOT cache the synthesized "up to date"
+# answer for a full day — otherwise an update released right after an outage
+# stays invisible for up to 24h (this is exactly why the macOS dialog appeared
+# "broken" while the backend was redeploying).
+FALLBACK_CACHE_TTL = 900  # 15 minutes
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
@@ -100,12 +105,14 @@ class VersionChecker:
 
         if not force_fetch and cached:
             checked_at = cached.get("checked_at", 0)
-            if now - checked_at < CACHE_TTL:
+            ttl = int(cached.get("ttl", CACHE_TTL))
+            if now - checked_at < ttl:
                 return cached
 
-        # Default payload
+        # Default payload (offline fallback — cached only briefly, see FALLBACK_CACHE_TTL)
         payload = {
             "checked_at": now,
+            "ttl": FALLBACK_CACHE_TTL,
             "client_version": current_version,
             "latest_version": current_version,
             "min_supported_version": "1.1.0",
@@ -128,6 +135,7 @@ class VersionChecker:
                 if resp.status == 200:
                     data = json.loads(resp.read().decode("utf-8"))
                     data["checked_at"] = now
+                    data.pop("ttl", None)  # authoritative server answer: full 24h cache
                     cls.save_cache(data)
                     return data
         except Exception:
@@ -181,14 +189,16 @@ class VersionChecker:
 
         if plat == "darwin":
             try:
+                # TCC-safe: driving Terminal.app via AppleScript requires an
+                # Automation permission prompt that background (hook-spawned)
+                # processes can never satisfy, which made "Update Now" silently fail.
+                # `do shell script` needs no such permission; prefer the explicit
+                # ~/.local/bin path because non-interactive shells lack the user PATH.
                 escaped_cmd = update_command.replace('"', '\\"')
                 apple_script = f'''
                 set dialogResult to display dialog "A new version of TokenSafe (v{latest_version}) is available.\\n\\nCurrent version: v{current_version}\\nLatest version: v{latest_version}\\n\\nWould you like to update now?" with title "TokenSafe Update Available" buttons {{"Later", "Update Now"}} default button "Update Now" with icon note
                 if button returned of dialogResult is "Update Now" then
-                    tell application "Terminal"
-                        activate
-                        do script "{escaped_cmd}"
-                    end tell
+                    do shell script "if [ -x \\"$HOME/.local/bin/tokensafe\\" ]; then CMD=\\"$HOME/.local/bin/tokensafe\\"; else CMD=\\"{escaped_cmd}\\"; fi; nohup \\"$CMD\\" update > /tmp/tokensafe-update.log 2>&1 &"
                 end if
                 '''
                 subprocess.Popen(
@@ -330,7 +340,9 @@ class VersionChecker:
             last_notified_at = cached.get("last_os_notify_at", 0)
 
             # If cache is valid and no update is available, skip completely
-            if now - checked_at < CACHE_TTL and not update_available:
+            # (ttl-aware: offline fallback entries expire after FALLBACK_CACHE_TTL)
+            ttl = int(cached.get("ttl", CACHE_TTL))
+            if now - checked_at < ttl and not update_available:
                 return
 
             # If update is available but user was already notified within 24h, skip
