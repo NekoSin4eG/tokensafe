@@ -409,6 +409,35 @@ class TestCloudAuthRegressions(unittest.TestCase):
         self.assertFalse(cb.CloudBackendService.is_issued_license(forged))
         self.assertTrue(cb.CloudBackendService.is_issued_license("TS2." + "a" * 40))
 
+    def test_team_cache_ttl_purges_stale_entries(self):
+        """Team cache retention: entries idle beyond the TTL are pruned on writes."""
+        cb = self._import_cb()
+        cb.init_cloud_db()
+        svc = cb.CloudBackendService
+        stale_cutoff = int(__import__("time").time()) - (svc.TEAM_CACHE_TTL_DAYS + 1) * 86400
+        with cb.get_db_connection() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO team_cache (team_id, cache_type, key_hash, cached_value, tokens_saved_estimate, created_at, last_accessed_at, hit_count) VALUES (?,?,?,?,?,?,?,0)",
+                ("ttltest@team.io", "PROMPT", "deadbeef", "(DEBUG x)", 0, stale_cutoff, stale_cutoff)
+            )
+            conn.commit()
+        # Force the amortized purge window and trigger it via a fresh put
+        svc._TEAM_CACHE_LAST_PURGE = 0.0
+        self.assertTrue(svc.team_cache_put("ttltest@team.io", "PROMPT", "cafebabe", "(DEBUG y)"))
+        with cb.get_db_connection() as conn:
+            stale = conn.execute(
+                "SELECT COUNT(*) FROM team_cache WHERE team_id = ? AND key_hash = 'deadbeef'",
+                ("ttltest@team.io",)
+            ).fetchone()[0]
+            fresh = conn.execute(
+                "SELECT COUNT(*) FROM team_cache WHERE team_id = ? AND key_hash = 'cafebabe'",
+                ("ttltest@team.io",)
+            ).fetchone()[0]
+            conn.execute("DELETE FROM team_cache WHERE team_id = ?", ("ttltest@team.io",))
+            conn.commit()
+        self.assertEqual(stale, 0, "stale entry beyond TTL must be purged")
+        self.assertEqual(fresh, 1, "fresh entry must survive")
+
 
 class TestMcpFirewallWiring(unittest.TestCase):
     """H2: smart_read_file results populate the dedup cache; second read is a cache hit."""
