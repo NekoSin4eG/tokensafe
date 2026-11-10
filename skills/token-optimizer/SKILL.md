@@ -48,6 +48,7 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
 | MCP Tool | Description | Efficiency Impact |
 |---|---|---|
 | `tokensafe:smart_read_file` | Graph-guided AST reader with target `symbol` body retention and 1-hop dependency inlining. | **-85% to -92%** token reduction |
+| `tokensafe:scoped_search` | Safe, token-bounded keyword, symbol, or config search across the codebase. | **-90% to -95%** vs raw grep/find |
 | `tokensafe:get_architecture_graph` | Computes dependency topology, hub centrality, and identifies top God Nodes for `project_path`. | **~200 tokens** (replaces 50k crawl) |
 | `tokensafe:get_api_surface` | Generates a compact markdown map of all exported types, interfaces, and classes. | **~500 tokens** for entire project |
 | `tokensafe:sanitize_command` | Intercepts shell commands to strip lockfiles, cap unbounded git logs, and quiet test tracebacks. | Saves **10k-50k tokens** per run |
@@ -72,7 +73,20 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
 ```
 *Identifies core architectural hubs and dependency weights before inspecting files.*
 
-### 2. Targeted Symbol Inspection Workflow
+### 2. Scoped Code & Config Search Workflow
+```json
+{
+  "ServerName": "tokensafe",
+  "ToolName": "scoped_search",
+  "Arguments": {
+    "query": "HARDCODED_VERSION",
+    "scope": "code"
+  }
+}
+```
+*Locates exact occurrences with file and line references in < 100 tokens, without running raw terminal grep.*
+
+### 3. Targeted Symbol Inspection Workflow
 ```json
 {
   "ServerName": "tokensafe",

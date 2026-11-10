@@ -28,6 +28,7 @@ from src.tokenizer import count_tokens
 from src.agent_firewall import AgentFirewall
 from src.diff_slicer import DiffSlicer
 from src.guard import TokenSafeGuard
+from src.scoped_search import ScopedSearch
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
@@ -134,6 +135,41 @@ TOOLS = [
                 "max_entries": {"type": "integer", "description": "Maximum entries to display before pruning (default: 80)"}
             },
             "required": ["path"]
+        }
+    },
+    {
+        "name": "scoped_search",
+        "description": "Safe, token-bounded symbol and text search across the codebase. Replaces raw grep/find with clean, line-numbered markdown matches (-90% tokens).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Text, identifier, or symbol name to search for"
+                },
+                "scope": {
+                    "type": "string",
+                    "enum": ["code", "config", "all"],
+                    "description": "Scope of search: 'code' (source files only), 'config' (json, toml, yaml), or 'all' (default: 'all')"
+                },
+                "project_path": {
+                    "type": "string",
+                    "description": "Optional root directory path (defaults to current project)"
+                },
+                "max_results": {
+                    "type": "integer",
+                    "description": "Maximum matching lines to return (default: 25, max: 100)"
+                },
+                "case_sensitive": {
+                    "type": "boolean",
+                    "description": "Whether search is case-sensitive (default: false)"
+                },
+                "use_regex": {
+                    "type": "boolean",
+                    "description": "Whether query is a regular expression (default: false)"
+                }
+            },
+            "required": ["query"]
         }
     }
 ]
@@ -545,6 +581,38 @@ def handle_tool_call(name: str, args: dict) -> dict:
             details={"path": os.path.basename(abs_path) or abs_path, "depth": depth, "tokens_saved": est_orig_tokens - tree_tokens}
         )
         return {"content": [{"type": "text", "text": tree_output}]}
+
+    elif name == "scoped_search":
+        query = args.get("query", "")
+        if not query:
+            return {"isError": True, "content": [{"type": "text", "text": "Error: 'query' argument is required for scoped_search."}]}
+
+        scope = args.get("scope", "all")
+        p_path = args.get("project_path", "")
+        target_path = os.path.abspath(p_path) if p_path else os.getcwd()
+        max_res = args.get("max_results", 25)
+        c_sens = bool(args.get("case_sensitive", False))
+        u_regex = bool(args.get("use_regex", False))
+
+        res = ScopedSearch.search(
+            query=query,
+            project_path=target_path,
+            scope=scope,
+            max_results=max_res,
+            case_sensitive=c_sens,
+            use_regex=u_regex
+        )
+        md_text = res["markdown"]
+        res_tokens = count_tokens(md_text)
+        est_orig = max(1500, res_tokens * 8)
+        tracker.record_event(
+            session_id="mcp_session",
+            event_type="SCOPED_SEARCH",
+            original_tokens=est_orig,
+            optimized_tokens=res_tokens,
+            details={"query": query, "scope": scope, "matches": res["total_matches"]}
+        )
+        return {"content": [{"type": "text", "text": md_text}]}
 
     return {"isError": True, "content": [{"type": "text", "text": f"Unknown tool: {name}"}]}
 

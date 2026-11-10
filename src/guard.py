@@ -343,6 +343,7 @@ class TokenSafeGuard:
                     return (
                         f"Raw terminal code search blocked: '{sub_cmd}'. "
                         f"TokenSafe Protocol mandates using MCP tools to prevent context window bloat:\n"
+                        f"• To search keywords, symbols, or configs: call 'tokensafe:scoped_search(query, scope)'\n"
                         f"• To inspect definitions/symbols in a file: call 'tokensafe:smart_read_file(path, symbol)'\n"
                         f"• To locate God Nodes & architecture: call 'tokensafe:get_architecture_graph(project_path)'\n"
                         f"• To inspect project exports & types: call 'tokensafe:get_api_surface(project_path)'"
@@ -356,8 +357,8 @@ class TokenSafeGuard:
                 if has_code_ext or has_code_dir:
                     return (
                         f"Raw file crawl via 'find' blocked: '{sub_cmd}'. "
-                        f"Use 'tokensafe:get_architecture_graph(project_path)' or "
-                        f"'tokensafe:get_api_surface(project_path)' instead of scanning directory trees."
+                        f"Use 'tokensafe:scoped_search(query)' or 'tokensafe:get_architecture_graph(project_path)' "
+                        f"instead of scanning directory trees."
                     )
 
         return None

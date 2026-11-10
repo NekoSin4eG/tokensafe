@@ -169,18 +169,33 @@ def main():
                 }
             })
 
-    # 3. Protocol Enforcement Reminder (Injected ephemerally for the model on every invocation)
-    protocol_reminder = (
-        "[TokenSafe Mandatory Directives]:\n"
-        "• Terminal code searches (grep/rg/find on source files) are BLOCKED by TokenSafe Guard.\n"
-        "• To inspect component or function definitions: call 'tokensafe:smart_read_file(path, symbol)'.\n"
-        "• To locate dependencies & God Nodes: call 'tokensafe:get_architecture_graph(project_path)'.\n"
-        "• To inspect all exported types/interfaces: call 'tokensafe:get_api_surface(project_path)'.\n"
-        "• Prefer 'edit_file' over 'write_file' for existing files."
+    # 3. Adaptive Protocol Enforcement Reminder (Dynamic Deduplication)
+    # Injects full directives on initial turns, after history folding, or upon guard violations.
+    # Otherwise suppresses repetitive blocks, saving ~60 tokens per invocation.
+    recent_guard = tracker.get_last_event(conversation_id, "GUARD_RAW_CODE_SEARCH")
+    should_inject_full = (
+        invocation_num <= 2 or
+        folded_text is not None or
+        recent_guard is not None
     )
-    inject_steps.append({
-        "ephemeralMessage": protocol_reminder
-    })
+
+    if should_inject_full:
+        protocol_reminder = (
+            "[TokenSafe Mandatory Directives]:\n"
+            "• Terminal code searches (grep/rg/find on source files) are BLOCKED by TokenSafe Guard.\n"
+            "• To search keywords, symbols, or configs: call 'tokensafe:scoped_search(query, scope)'.\n"
+            "• To inspect component or function definitions: call 'tokensafe:smart_read_file(path, symbol)'.\n"
+            "• To locate dependencies & God Nodes: call 'tokensafe:get_architecture_graph(project_path)'.\n"
+            "• To inspect all exported types/interfaces: call 'tokensafe:get_api_surface(project_path)'.\n"
+            "• Prefer 'edit_file' over 'write_file' for existing files."
+        )
+        inject_steps.append({
+            "ephemeralMessage": protocol_reminder
+        })
+    elif invocation_num % 5 == 0:
+        inject_steps.append({
+            "ephemeralMessage": "[Protocol: TokenSafe Active | Use 'tokensafe:scoped_search' & 'smart_read_file']"
+        })
 
     response = {}
     if inject_steps:
