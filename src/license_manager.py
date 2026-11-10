@@ -16,6 +16,8 @@ from typing import Dict, Any, Tuple, Optional
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.path.join(PROJECT_ROOT, "data")
 LICENSE_FILE = os.path.join(DATA_DIR, "license.json")
+GLOBAL_DATA_DIR = os.path.expanduser("~/.tokensafe")
+GLOBAL_LICENSE_FILE = os.path.join(GLOBAL_DATA_DIR, "license.json")
 
 # Master Public Key for client-side offline verification (RFC 8032 Ed25519)
 DEFAULT_ED25519_PUBLIC_KEY = os.environ.get("TOKENSAFE_PUBLIC_KEY", "3911e2ffe5ad07ee23be392b88f238af302f9d3a0bf51881de8b5e0e6af71430")
@@ -276,34 +278,45 @@ class LicenseManager:
 
     @classmethod
     def get_active_license_key(cls) -> str:
-        """Retrieves active raw license key string from env or data/license.json, or empty string."""
+        """Retrieves active raw license key string from env or persistent license.json files."""
         key = os.environ.get("TOKENSAFE_LICENSE_KEY", "").strip()
-        if not key and os.path.exists(LICENSE_FILE):
-            try:
-                with open(LICENSE_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    key = data.get("license_key", "").strip()
-            except Exception:
-                pass
+        if not key:
+            for p in (LICENSE_FILE, GLOBAL_LICENSE_FILE):
+                if os.path.exists(p):
+                    try:
+                        with open(p, "r", encoding="utf-8") as f:
+                            data = json.load(f)
+                            candidate = data.get("license_key", "").strip()
+                            if candidate:
+                                key = candidate
+                                break
+                    except Exception:
+                        pass
         return key
 
     @classmethod
     def save_license(cls, license_key: str) -> Tuple[bool, str]:
-        """Saves a verified license key to local persistent storage."""
+        """Saves a verified license key to local and user global persistent storage."""
         valid, payload, msg = cls.validate_license(license_key)
         if not valid:
             return False, f"Cannot save invalid license: {msg}"
 
-        os.makedirs(DATA_DIR, exist_ok=True)
-        with open(LICENSE_FILE, "w", encoding="utf-8") as f:
-            json.dump({
-                "license_key": license_key,
-                "tier": payload.get("tier"),
-                "email": payload.get("email"),
-                "expires_at": payload.get("expires_at"),
-                "trial": payload.get("trial", False),
-                "saved_at": int(time.time())
-            }, f, indent=2)
+        record = {
+            "license_key": license_key,
+            "tier": payload.get("tier"),
+            "email": payload.get("email"),
+            "expires_at": payload.get("expires_at"),
+            "trial": payload.get("trial", False),
+            "saved_at": int(time.time())
+        }
+
+        for target_dir, target_file in ((DATA_DIR, LICENSE_FILE), (GLOBAL_DATA_DIR, GLOBAL_LICENSE_FILE)):
+            try:
+                os.makedirs(target_dir, exist_ok=True)
+                with open(target_file, "w", encoding="utf-8") as f:
+                    json.dump(record, f, indent=2)
+            except Exception:
+                pass
 
         tier_name = payload.get("tier", "").upper()
         trial_note = " (7-Day Trial)" if payload.get("trial") else ""

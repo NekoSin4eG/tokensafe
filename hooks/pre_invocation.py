@@ -99,7 +99,8 @@ def main():
                     "target_file": compaction["target_file"],
                     "symbol": compaction["symbol"],
                     "traits": compaction["traits"],
-                    "tier": tier
+                    "tier": tier,
+                    "model": payload.get("model") or os.environ.get("AGY_MODEL") or os.environ.get("MODEL") or "gemini-3.8-flash"
                 }
             )
 
@@ -149,7 +150,8 @@ def main():
                         "turns": invocation_num,
                         "total_accum_orig": orig_hist_tokens,
                         "read_files": stats.get("read_files_count", 0),
-                        "edited_files": stats.get("edited_files_count", 0)
+                        "edited_files": stats.get("edited_files_count", 0),
+                        "model": payload.get("model") or os.environ.get("AGY_MODEL") or os.environ.get("MODEL") or "gemini-3.8-flash"
                     }
                 )
 

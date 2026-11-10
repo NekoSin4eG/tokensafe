@@ -215,7 +215,7 @@ class TelemetrySync:
                         except Exception:
                             ts_int = int(time.time())
 
-                model_name = "default"
+                model_name = os.environ.get("AGY_MODEL") or os.environ.get("MODEL") or "gemini-3.8-flash"
                 if r["details"]:
                     try:
                         det = json.loads(r["details"]) if isinstance(r["details"], str) else r["details"]
