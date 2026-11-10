@@ -1082,6 +1082,80 @@ class TestContextBudgetHUD(unittest.TestCase):
         self.assertNotIn("Context Budget", res2.stdout, "warning must fire only once per session")
 
 
+class TestUpdaterHonestAdvertisement(unittest.TestCase):
+    """The updater never offers a version npm cannot deliver (npm-OTP lag)."""
+
+    def setUp(self):
+        from src.cloud_backend import CloudBackendService
+        self.svc = CloudBackendService
+        from src.cloud_backend import init_cloud_db
+        init_cloud_db()
+
+    def test_advertises_npm_latest_when_server_baked_version_is_ahead(self):
+        from unittest.mock import patch
+        from src.cloud import services as cloud_services
+        # Server baked 2.0.0, npm only has 1.8.0 (OTP not entered yet):
+        # a 1.8.0 client must be told 'up to date', not offered a phantom 2.0.0.
+        with patch.object(cloud_services, "fetch_npm_latest_version", return_value="1.8.0"):
+            resp = self.svc.check_version(client_version="1.8.0")
+        self.assertEqual(resp["status"], "up_to_date")
+        self.assertEqual(resp["latest_version"], "1.8.0")
+        self.assertFalse(resp["update_available"])
+
+        # And a 1.7.0 client is offered 1.8.0, not 2.0.0
+        with patch.object(cloud_services, "fetch_npm_latest_version", return_value="1.8.0"):
+            resp2 = self.svc.check_version(client_version="1.7.0")
+        self.assertEqual(resp2["latest_version"], "1.8.0")
+        self.assertTrue(resp2["update_available"])
+
+    def test_falls_back_to_baked_version_when_registry_silent(self):
+        from unittest.mock import patch
+        from src.cloud import services as cloud_services
+        with patch.object(cloud_services, "fetch_npm_latest_version", return_value=None):
+            resp = self.svc.check_version(client_version="1.0.0")
+        self.assertEqual(resp["latest_version"], resp["min_supported_version"] and resp["latest_version"])
+        self.assertIn(resp["latest_version"], ("2.0.0", cloud_services.LATEST_VERSION))
+
+
+class TestDialogClaim(unittest.TestCase):
+    """Only ONE update dialog per machine even with concurrent hook processes."""
+
+    def test_fresh_claim_blocks_second_dialog(self):
+        import time as _time
+        from unittest.mock import patch
+        from src.version_checker import VersionChecker, DATA_DIR
+        claim = os.path.join(DATA_DIR, ".update_dialog.claim")
+        with open(claim, "w") as f:
+            f.write("999999")
+        os.utime(claim, (_time.time(), _time.time()))
+        self.addCleanup(lambda: os.path.exists(claim) and os.remove(claim))
+        with patch.object(VersionChecker, "check_version",
+                          return_value={"update_available": True, "latest_version": "9.9.9",
+                                        "update_command": "tokensafe update"}), \
+             patch.object(VersionChecker, "show_os_dialog") as fake_dialog:
+            shown = VersionChecker.notify_os_update(force=True)
+        self.assertFalse(shown)
+        fake_dialog.assert_not_called()
+
+    def test_stale_claim_does_not_block(self):
+        import time as _time
+        from unittest.mock import patch
+        from src.version_checker import VersionChecker, DATA_DIR
+        claim = os.path.join(DATA_DIR, ".update_dialog.claim")
+        with open(claim, "w") as f:
+            f.write("999999")
+        stale = _time.time() - 120
+        os.utime(claim, (stale, stale))
+        self.addCleanup(lambda: os.path.exists(claim) and os.remove(claim))
+        with patch.object(VersionChecker, "check_version",
+                          return_value={"update_available": True, "latest_version": "9.9.9",
+                                        "update_command": "tokensafe update"}), \
+             patch.object(VersionChecker, "show_os_dialog", return_value=True) as fake_dialog:
+            shown = VersionChecker.notify_os_update(force=True)
+        self.assertTrue(shown)
+        fake_dialog.assert_called_once()
+
+
 class TestByAgentBreakdown(unittest.TestCase):
     """Honest Cumulative Total: per-agent aggregation with measured/estimated split."""
 

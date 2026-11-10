@@ -331,15 +331,44 @@ class VersionChecker:
         if not force and last_notified_ver == latest and (now - last_notified_at) < CACHE_TTL:
             return False
 
-        cached["last_os_notify_version"] = latest
-        cached["last_os_notify_at"] = now
-        cls.save_cache(cached)
+        # Cross-process claim: several agent hook processes can pass the 24h
+        # cache check simultaneously (Antigravity + ZCode + adapters), which
+        # rendered the update dialog TWICE. Only the process that wins the
+        # O_EXCL claim shows the dialog; the claim self-expires.
+        claim_path = os.path.join(DATA_DIR, ".update_dialog.claim")
+        try:
+            if os.path.exists(claim_path):
+                if (now - os.path.getmtime(claim_path)) < 60:
+                    return False
+                os.remove(claim_path)  # stale claim: safe to reclaim (O_EXCL guards the race)
+            fd = os.open(claim_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            os.write(fd, str(os.getpid()).encode("utf-8"))
+            os.close(fd)
+        except FileExistsError:
+            return False
+        except OSError:
+            pass  # claim is best-effort; never block the dialog entirely on fs errors
 
-        return cls.show_os_dialog(
-            current_version=current_version,
-            latest_version=latest,
-            update_command=cmd
-        )
+        try:
+            cached["last_os_notify_version"] = latest
+            cached["last_os_notify_at"] = now
+            cls.save_cache(cached)
+        except Exception:
+            pass
+
+        try:
+            dispatched = cls.show_os_dialog(
+                current_version=current_version,
+                latest_version=latest,
+                update_command=cmd
+            )
+            return dispatched
+        finally:
+            # Release the dialog claim so a future version can notify again.
+            try:
+                os.remove(claim_path)
+            except OSError:
+                pass
 
     @classmethod
     def notify_os_update_background(
