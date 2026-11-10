@@ -154,14 +154,19 @@ def bump_version(target: str) -> str:
         rf'\g<1>"{new_version}"'
     )
 
-    # 5. src/cloud_backend.py
+    # 5. src/cloud/ package (post-split home of the backend version constants)
     replace_in_file(
-        "src/cloud_backend.py",
+        "src/cloud/config.py",
         r'(HARDCODED_VERSION\s*=\s*)"[^"]+"',
         rf'\g<1>"{new_version}"'
     )
     replace_in_file(
-        "src/cloud_backend.py",
+        "src/cloud/services.py",
+        r'TokenSafe-Backend/[0-9]+\.[0-9]+\.[0-9]+',
+        f'TokenSafe-Backend/{new_version}'
+    )
+    replace_in_file(
+        "src/cloud/stripe.py",
         r'TokenSafe-Backend/[0-9]+\.[0-9]+\.[0-9]+',
         f'TokenSafe-Backend/{new_version}'
     )
