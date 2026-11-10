@@ -1082,10 +1082,6 @@ class TestContextBudgetHUD(unittest.TestCase):
         self.assertNotIn("Context Budget", res2.stdout, "warning must fire only once per session")
 
 
-@unittest.skipIf(
-    not os.path.exists(os.path.join(PROJECT_ROOT, 'src', 'cloud_backend.py')),
-    'cloud backend stripped from public export'
-)
 class TestByAgentBreakdown(unittest.TestCase):
     """Honest Cumulative Total: per-agent aggregation with measured/estimated split."""
 
@@ -1121,6 +1117,10 @@ class TestByAgentBreakdown(unittest.TestCase):
                          t.get_summary()["total_saved_tokens"])
 
 
+@unittest.skipIf(
+    not os.path.exists(os.path.join(PROJECT_ROOT, 'src', 'cloud_backend.py')),
+    'cloud backend stripped from public export'
+)
 class TestPerSeatRoi(unittest.TestCase):
     """Owner dashboard seats carry per-member ROI with measured/estimated split."""
 
