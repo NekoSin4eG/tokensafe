@@ -16,7 +16,7 @@ import urllib.request
 import urllib.error
 from typing import Dict, Any, Optional, Tuple
 
-CURRENT_VERSION = "1.4.9"
+CURRENT_VERSION = "1.4.10"
 CACHE_TTL = 86400  # 24 hours
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
