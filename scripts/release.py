@@ -415,7 +415,7 @@ def wait_for_prod_version(version: str, attempts: int = 12, delay: int = 15) -> 
     return False
 
 
-def run_release(target: str, otp: Optional[str] = None):
+def run_release(target: str, otp: Optional[str] = None, no_bump: bool = False):
     """Full release pipeline. Every phase is idempotent: re-running after a
     failure or an interactive gate (npm OTP) resumes where it stopped."""
     import glob as _glob
@@ -431,10 +431,19 @@ def run_release(target: str, otp: Optional[str] = None):
         and pypi_version_published(v) and npm_version_published(v)
         and registry_version_published(v)
     )
-    if tag_exists and not fully_shipped:
+    if no_bump:
+        next_v = v
+        print(f"🚀 Release pipeline: FINISH-ONLY v{next_v} (--no-bump: complete pending channels, no version bump)\n")
+    elif tag_exists and not fully_shipped:
         # In-flight release (e.g. paused on npm 2FA): finish THIS version.
         next_v = v
         print(f"🚀 Release pipeline: RESUME v{next_v} (tagged, channels incomplete — completing)\n")
+    elif fully_shipped:
+        next_v = calculate_next_version(v, target)
+        print(f"⚠  v{v} is already fully shipped everywhere — a NEW release v{next_v} will be created.")
+        print(f"   If you only wanted to finish pending channels, abort NOW and use --no-bump. Continuing in 5s...")
+        time.sleep(5)
+        print(f"🚀 Release pipeline: {v} ➜ {next_v}\n")
     else:
         next_v = calculate_next_version(v, target)
         print(f"🚀 Release pipeline: {v} ➜ {next_v}\n")
@@ -696,7 +705,8 @@ def main():
             otp = args[-1].split("=", 1)[1]
             args = args[:-1]
         target = args[0] if args else "patch"
-        run_release(target, otp=otp)
+        no_bump = "--no-bump" in args
+        run_release(target, otp=otp, no_bump=no_bump)
     else:
         print(f"Unknown command: {cmd}")
         sys.exit(1)
