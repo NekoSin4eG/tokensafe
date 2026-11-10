@@ -425,10 +425,16 @@ def run_release(target: str, otp: Optional[str] = None):
     # somewhere, this run finishes THAT version instead of bumping again —
     # 'release minor' after an npm-OTP pause must not silently create 1.(n+1).0.
     tag_exists = _sh(["git", "rev-parse", f"v{v}"])[0] == 0
-    already_published = pypi_version_published(v) or npm_version_published(v)
-    if tag_exists and already_published:
+    gh_release_exists = _sh(["gh", "release", "view", f"v{v}"])[0] == 0
+    fully_shipped = (
+        tag_exists and gh_release_exists
+        and pypi_version_published(v) and npm_version_published(v)
+        and registry_version_published(v)
+    )
+    if tag_exists and not fully_shipped:
+        # In-flight release (e.g. paused on npm 2FA): finish THIS version.
         next_v = v
-        print(f"🚀 Release pipeline: RESUME v{next_v} (tagged + published — completing remaining channels)\n")
+        print(f"🚀 Release pipeline: RESUME v{next_v} (tagged, channels incomplete — completing)\n")
     else:
         next_v = calculate_next_version(v, target)
         print(f"🚀 Release pipeline: {v} ➜ {next_v}\n")
