@@ -363,6 +363,36 @@ class TestCloudAuthRegressions(unittest.TestCase):
         self.assertEqual(email, "alice@test.com")
         self.assertEqual(claims.get("type"), "jwt")
 
+    def test_clerk_resolution_failure_is_negatively_cached(self):
+        """Resilience: while Clerk Backend API is down, lookups fail fast (one attempt per 30s)."""
+        cb = self._import_cb()
+        from unittest.mock import patch
+
+        cb._CLERK_USER_CACHE.pop("user_outage_1", None)
+        cb._CLERK_RESOLVE_FAILURES.pop("user_outage_1", None)
+        old_secret = os.environ.get("CLERK_SECRET_KEY")
+        os.environ["CLERK_SECRET_KEY"] = "sk_test_clerk_secret"
+        try:
+            calls = {"n": 0}
+
+            def flaky_urlopen(req, timeout=None):
+                calls["n"] += 1
+                raise IOError("clerk api unreachable")
+
+            with patch.object(cb.urllib.request, "urlopen", side_effect=flaky_urlopen):
+                r1 = cb._resolve_clerk_user("user_outage_1")
+                r2 = cb._resolve_clerk_user("user_outage_1")
+            self.assertIsNone(r1)
+            self.assertIsNone(r2)
+            self.assertEqual(calls["n"], 1, "second lookup must be served by the negative cache")
+            self.assertIn("user_outage_1", cb._CLERK_RESOLVE_FAILURES)
+        finally:
+            if old_secret is None:
+                os.environ.pop("CLERK_SECRET_KEY", None)
+            else:
+                os.environ["CLERK_SECRET_KEY"] = old_secret
+            cb._CLERK_RESOLVE_FAILURES.pop("user_outage_1", None)
+
     def test_forged_ts1_license_rejected_server_side(self):
         """H1: locally-forged TS1 keys (valid HMAC, public salt) fail the issuance check."""
         cb = self._import_cb()
