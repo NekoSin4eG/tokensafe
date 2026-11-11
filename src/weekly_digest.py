@@ -10,14 +10,45 @@ Aggregates:
 
 import os
 import sys
+import html as _html
 import time
 import json
 import sqlite3
+from contextlib import contextmanager
 from typing import Dict, List, Any, Optional, Tuple
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = os.environ.get("TOKENSAFE_DATA_DIR", os.path.join(PROJECT_ROOT, "data"))
 CLOUD_DB_PATH = os.environ.get("TOKENSAFE_CLOUD_DB_PATH", os.path.join(DATA_DIR, "cloud.db"))
+
+
+@contextmanager
+def _open_digest_db(db_path: str):
+    """Yields BunnyDB/cloud connection for default DB path, or local sqlite3 for custom paths."""
+    if db_path == CLOUD_DB_PATH:
+        try:
+            from src.cloud.db import get_db_connection
+            from src.cloud.config import BUNNY_DB_URL, BUNNY_DB_TOKEN, CLOUD_DB_PATH as CLOUD_CFG_DB_PATH
+
+            if (BUNNY_DB_URL and BUNNY_DB_TOKEN) or os.path.exists(CLOUD_CFG_DB_PATH):
+                with get_db_connection() as conn:
+                    yield conn
+                return
+            yield None
+            return
+        except ImportError:
+            pass
+
+    if not os.path.exists(db_path):
+        yield None
+        return
+
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 def format_token_number(n: int) -> str:
     """Formats large token count into human-readable 1.2M, 450K, etc."""
@@ -35,56 +66,100 @@ class WeeklyDigestGenerator:
         cls,
         owner_email: str,
         now: Optional[int] = None,
-        db_path: str = CLOUD_DB_PATH
+        db_path: str = CLOUD_DB_PATH,
+        allow_any_tier: bool = False
     ) -> Optional[Dict[str, Any]]:
         """
         Retrieves 7-day telemetry for team owned by owner_email.
-        Returns aggregated digest data or None if no team records found.
+        Supports both BunnyDB (cloud) and local SQLite databases.
+        Returns aggregated digest data or None if no eligible records found.
         """
+        clean_email = (owner_email or "").strip().lower()
+        if not clean_email or "@" not in clean_email:
+            return None
+
         now = now or int(time.time())
         seven_days_ago = now - (7 * 86400)
 
-        if not os.path.exists(db_path):
-            return None
-
-        conn = sqlite3.connect(db_path)
-        conn.row_factory = sqlite3.Row
-        try:
-            # 1. Verify owner and tier
-            owner = conn.execute("""
-                SELECT * FROM customers 
-                WHERE email = ? AND status = 'active';
-            """, (owner_email.lower(),)).fetchone()
-
-            if not owner or owner["tier"] not in ("team", "enterprise"):
+        with _open_digest_db(db_path) as conn:
+            if conn is None:
                 return None
 
-            # 2. Find all member emails and license keys in this team
-            licenses = conn.execute("""
-                SELECT * FROM licenses 
-                WHERE parent_email = ? OR customer_email = ?;
-            """, (owner_email.lower(), owner_email.lower())).fetchall()
+            # 1. Verify owner and active team/enterprise entitlement across customers & organizations
+            owner = conn.execute(
+                "SELECT * FROM customers WHERE email = ?;",
+                (clean_email,),
+            ).fetchone()
 
-            team_emails = {owner_email.lower()}
+            orgs = []
+            try:
+                orgs = conn.execute(
+                    "SELECT * FROM organizations WHERE owner_email = ? AND status = 'active' ORDER BY is_primary DESC, created_at ASC;",
+                    (clean_email,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                orgs = []
+
+            cust_active = bool(owner and str(owner["status"] or "").lower() == "active")
+            cust_tier = str(owner["tier"] or "").lower() if owner else ""
+            team_orgs = [o for o in orgs if str(o["tier"] or "").lower() in ("team", "enterprise")]
+
+            if team_orgs:
+                effective_tier = str(team_orgs[0]["tier"] or "team").lower()
+                effective_seats = sum(int(o["seats_total"] or 1) for o in team_orgs)
+            elif cust_active and cust_tier in ("team", "enterprise"):
+                effective_tier = cust_tier
+                effective_seats = int(owner["seats_total"] or 1)
+            elif allow_any_tier and (cust_active or orgs):
+                if orgs:
+                    effective_tier = str(orgs[0]["tier"] or cust_tier or "solo").lower()
+                    effective_seats = int(orgs[0]["seats_total"] or 1)
+                else:
+                    effective_tier = cust_tier or "solo"
+                    effective_seats = int(owner["seats_total"] or 1)
+            else:
+                return None
+
+            # 2. Find all member emails and license keys in this team / owned organizations
+            licenses = conn.execute(
+                "SELECT * FROM licenses WHERE parent_email = ? OR customer_email = ?;",
+                (clean_email, clean_email),
+            ).fetchall()
+
+            team_emails = {clean_email}
             for lic in licenses:
                 if lic["customer_email"]:
-                    team_emails.add(lic["customer_email"].lower())
+                    team_emails.add(str(lic["customer_email"]).strip().lower())
+
+            org_ids = [o["id"] for o in (team_orgs if team_orgs else orgs) if o["id"]]
+            if org_ids:
+                org_placeholders = ",".join(["?"] * len(org_ids))
+                org_lics = conn.execute(
+                    f"SELECT customer_email FROM licenses WHERE org_id IN ({org_placeholders});",
+                    org_ids,
+                ).fetchall()
+                for lic in org_lics:
+                    if lic["customer_email"]:
+                        team_emails.add(str(lic["customer_email"]).strip().lower())
 
             placeholders = ",".join(["?"] * len(team_emails))
             params = list(team_emails) + [seven_days_ago]
 
             # 3. Aggregate 7-day telemetry
-            events = conn.execute(f"""
-                SELECT * FROM telemetry 
+            events = conn.execute(
+                f"""
+                SELECT * FROM telemetry
                 WHERE customer_email IN ({placeholders}) AND timestamp >= ?
                 ORDER BY timestamp DESC;
-            """, params).fetchall()
+                """,
+                params,
+            ).fetchall()
 
-            total_orig = sum(e["original_tokens"] for e in events)
-            total_saved = sum(e["saved_tokens"] for e in events)
-            total_usd = sum(e["usd_saved"] for e in events)
+            total_orig = sum(int(e["original_tokens"] or 0) for e in events)
+            total_saved = sum(int(e["saved_tokens"] or 0) for e in events)
+            total_usd = sum(float(e["usd_saved"] or 0.0) for e in events)
             event_count = len(events)
-            reduction_pct = round((total_saved / total_orig * 100), 1) if total_orig > 0 else 76.5
+            reduction_pct = round((total_saved / total_orig * 100), 1) if total_orig > 0 else 0.0
 
             # 4. Engineer leaderboard
             engineer_stats: Dict[str, Dict[str, Any]] = {}
@@ -100,7 +175,7 @@ class WeeklyDigestGenerator:
             category_breakdown: Dict[str, int] = {}
 
             for e in events:
-                em = e["customer_email"].lower()
+                em = str(e["customer_email"] or clean_email).strip().lower()
                 if em not in engineer_stats:
                     engineer_stats[em] = {
                         "email": em,
@@ -109,13 +184,16 @@ class WeeklyDigestGenerator:
                         "usd_saved": 0.0,
                         "event_count": 0
                     }
-                engineer_stats[em]["saved_tokens"] += e["saved_tokens"]
-                engineer_stats[em]["original_tokens"] += e["original_tokens"]
-                engineer_stats[em]["usd_saved"] += e["usd_saved"]
+                saved_toks = int(e["saved_tokens"] or 0)
+                orig_toks = int(e["original_tokens"] or 0)
+                usd_val = float(e["usd_saved"] or 0.0)
+                engineer_stats[em]["saved_tokens"] += saved_toks
+                engineer_stats[em]["original_tokens"] += orig_toks
+                engineer_stats[em]["usd_saved"] += usd_val
                 engineer_stats[em]["event_count"] += 1
 
-                ev_type = e["event_type"]
-                category_breakdown[ev_type] = category_breakdown.get(ev_type, 0) + e["saved_tokens"]
+                ev_type = str(e["event_type"] or "PROMPT")
+                category_breakdown[ev_type] = category_breakdown.get(ev_type, 0) + saved_toks
 
             leaderboard = sorted(
                 engineer_stats.values(),
@@ -130,9 +208,9 @@ class WeeklyDigestGenerator:
                 eng["usd_saved_formatted"] = f"${eng['usd_saved']:.2f}"
 
             return {
-                "owner_email": owner_email,
-                "tier": owner["tier"],
-                "seats_total": owner["seats_total"],
+                "owner_email": clean_email,
+                "tier": effective_tier,
+                "seats_total": effective_seats,
                 "active_members_count": len([e for e in leaderboard if e["event_count"] > 0]),
                 "total_members_count": len(team_emails),
                 "total_original_tokens": total_orig,
@@ -146,14 +224,12 @@ class WeeklyDigestGenerator:
                 "start_time": seven_days_ago,
                 "end_time": now
             }
-        finally:
-            conn.close()
 
     @classmethod
     def render_email_html(cls, digest: Dict[str, Any]) -> str:
         """Generates Apple-style responsive dark-mode HTML email."""
-        owner_email = digest["owner_email"]
-        total_saved_human = digest["total_saved_human"]
+        owner_email = _html.escape(str(digest["owner_email"]))
+        total_saved_human = _html.escape(str(digest["total_saved_human"]))
         usd_saved = f"${digest['total_usd_saved']:.2f}"
         reduction_pct = digest["reduction_pct"]
         leaderboard = digest["leaderboard"]
@@ -165,7 +241,7 @@ class WeeklyDigestGenerator:
         for eng in leaderboard[:10]:
             rank = eng["rank"]
             medal = "🥇 " if rank == 1 else "🥈 " if rank == 2 else "🥉 " if rank == 3 else f"#{rank} "
-            email_mask = eng["email"].split("@")[0] + "@..."
+            email_mask = _html.escape(eng["email"].split("@")[0] + "@...")
             rows_html += f"""
             <tr style="border-bottom: 1px solid rgba(255, 255, 255, 0.05);">
               <td style="padding: 12px 8px; font-weight: 700; color: #10b981;">{medal}</td>

@@ -86,5 +86,13 @@ class TestTokenSafeMailer(unittest.TestCase):
             self.assertTrue(result)
             mock_send_smtp.assert_called_once()
 
+    def test_send_raw_records_last_error_when_unconfigured(self):
+        with patch.dict(os.environ, {"IMPROVMX_API_KEY": "", "SMTP_PASS": "", "IMPROVMX_SMTP_PASS": ""}, clear=False), \
+             patch.object(TokenSafeMailer, "IMPROVMX_API_KEY", ""), \
+             patch.object(TokenSafeMailer, "SMTP_PASS", ""):
+            result = TokenSafeMailer._send_raw("bob@customer.com", "Subject", "Text", "<p>HTML</p>")
+            self.assertFalse(result)
+            self.assertIn("not configured", TokenSafeMailer.get_last_error().lower())
+
 if __name__ == "__main__":
     unittest.main()
