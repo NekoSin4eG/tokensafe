@@ -1,7 +1,7 @@
 {
   "name": "tokensafe",
   "displayName": "TokenSafe",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "description": "Local-first guardrails, focused context & auditable team ROI for AI coding agents. Agents read only the code they need, secrets get blocked before commit.",
   "logo": "assets/logo.svg",
   "author": {
