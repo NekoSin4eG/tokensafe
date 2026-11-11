@@ -39,6 +39,7 @@ ESTIMATED_EVENT_TYPES = frozenset({
     "GUARD_TLS_VERIFY_BYPASS",
     "GUARD_JUNK_READ",
     "GUARD_INFINITE",
+    "GUARD_RAW_CODE_SEARCH",
 })
 
 def resolve_measurement(event_type: str, explicit: Optional[str] = None) -> str:
@@ -176,7 +177,8 @@ class MetricsTracker:
                     "('GRAPH_TOPOLOGY', 'HISTORY_FOLD', 'PROMPT', 'ROLLUP_LIFETIME', "
                     "'COMMAND_FILTER', 'LOOP_GUARD', 'GUARD_SECRET', "
                     "'GUARD_DESTRUCTIVE', 'GUARD_TLS_VERIFY_BYPASS', "
-                    "'GUARD_JUNK_READ', 'GUARD_INFINITE');"
+                    "'GUARD_JUNK_READ', 'GUARD_INFINITE', "
+                    "'GUARD_RAW_CODE_SEARCH');"
                 )
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS lifetime_aggregates (

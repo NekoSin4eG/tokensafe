@@ -331,7 +331,9 @@ class TokenSafeGuard:
             if grep_match:
                 has_code_ext = any(ext in sub_cmd for ext in cls.CODE_EXTENSIONS)
                 has_code_dir = any(re.search(rf'\b{re.escape(d)}(?:/|\b)', sub_cmd) for d in cls.CODE_DIRS)
-                is_recursive_all = bool(re.search(r'\b(grep|egrep)\b.*?\s-[a-zA-Z]*[rR]\b', sub_cmd)) or \
+                # '-rn' / '-Rn' are the canonical recursive forms — the flag
+                # regex must accept letters after r/R, plus the long --recursive.
+                is_recursive_all = bool(re.search(r'\b(grep|egrep)\b.*?\s(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b', sub_cmd)) or \
                                    bool(re.search(r'\brg\b', sub_cmd))
 
                 if has_code_ext or has_code_dir or is_recursive_all:

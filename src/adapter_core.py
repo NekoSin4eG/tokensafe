@@ -54,6 +54,9 @@ _INFINITE_PATTERNS = [
     r"\bdocker\s+logs\b[^|;&]*\s(?:-f\b|--follow)",
     r"\bkubectl\s+logs\b[^|;&]*\s-f\b",
     r"\bdocker\s+attach\b",
+    # vitest runs an interactive watcher unless the `run` subcommand is given
+    r"\bvitest\b(?![^|;&]*\brun\b)",
+    r"\b(?:jest|vitest)\b[^|;&]*--watch\b",
 ]
 
 # Lockfiles/junk that must never be dumped into an agent context.
@@ -141,6 +144,20 @@ def guard_command(command: str, agent: str, session_id: str = "") -> Dict[str, A
         if re.search(pat, text):
             blocked("DESTRUCTIVE", "Blocked: irreversible/destructive operation")
             return result
+    # RAW_CODE_SEARCH (deny): recursive grep/rg/find crawls over source trees
+    # are the exact workflow the tokensafe MCP tools replace. TokenSafeGuard
+    # already enforces this on the Antigravity path (inspect_command) — share
+    # its check here so Claude Code / Cursor adapters honor the same policy
+    # with the same "use tokensafe:scoped_search" guidance. Fail-open on
+    # import problems, like every adapter guard path.
+    try:
+        from src.guard import TokenSafeGuard
+        search_err = TokenSafeGuard._check_raw_code_search(cmd)
+    except Exception:
+        search_err = None
+    if search_err:
+        blocked("RAW_CODE_SEARCH", search_err)
+        return result
     for pat in _TLS_BYPASS_PATTERNS:
         if re.search(pat, text):
             blocked("TLS_VERIFY_BYPASS", "Certificate verification disabled — confirm this is intentional", decision="ask")

@@ -245,7 +245,8 @@ class TestHonestyFlipForGuessedOriginals(unittest.TestCase):
     def test_resolve_measurement_type_map(self):
         from src.metrics import resolve_measurement
         for t in ("COMMAND_FILTER", "LOOP_GUARD", "GUARD_SECRET", "GUARD_DESTRUCTIVE",
-                  "GUARD_TLS_VERIFY_BYPASS", "GUARD_JUNK_READ", "GUARD_INFINITE"):
+                  "GUARD_TLS_VERIFY_BYPASS", "GUARD_JUNK_READ", "GUARD_INFINITE",
+                  "GUARD_RAW_CODE_SEARCH"):
             self.assertEqual(resolve_measurement(t), "estimated", t)
         # Real-byte events stay measured
         for t in ("TOOL_READ", "AST_SKELETON", "GRAPH_SKELETON", "SUBAGENT_DEDUP", "OUTPUT_GUARD"):
@@ -289,14 +290,18 @@ class TestGuardInfiniteAndGitTls(unittest.TestCase):
         for cmd in ("tail -f app.log", "tail -n 5 -f app.log",
                     "watch -n1 kubectl get pods",
                     "docker logs -f c1", "docker logs --follow c1",
-                    "kubectl logs -f pod", "docker attach c1"):
+                    "kubectl logs -f pod", "docker attach c1",
+                    # vitest defaults to an interactive watcher; only `run` is finite
+                    "vitest", "npx vitest", "vitest src/a.test.ts",
+                    "jest --watch", "vitest --watch"):
             res = guard_command(cmd, "claude_code", "s")
             self.assertEqual(res["decision"], "ask", cmd)
 
     def test_terminating_lookalikes_pass(self):
         from src.adapter_core import guard_command
         for cmd in ("tail -n 100 app.log", "docker logs --tail 50 c1",
-                    "kubectl logs pod | grep error", "git attach --dry-run x"):
+                    "kubectl logs pod | grep error", "git attach --dry-run x",
+                    "vitest run", "npx vitest run", "jest"):
             self.assertEqual(guard_command(cmd, "claude_code", "s")["decision"], "allow", cmd)
 
     def test_git_level_tls_bypass_ask(self):
@@ -311,6 +316,209 @@ class TestGuardInfiniteAndGitTls(unittest.TestCase):
         from src.adapter_core import guard_command
         for cmd in ("git clone https://x", "git pull", "git -c color.ui=always log"):
             self.assertEqual(guard_command(cmd, "claude_code", "s")["decision"], "allow", cmd)
+
+
+class TestGuardRawSourceSearch(unittest.TestCase):
+    """RAW_CODE_SEARCH deny in adapter_core: recursive grep/rg/find crawls
+    over source trees are hard-blocked on EVERY adapter (Claude Code, Cursor,
+    Antigravity/ZCode) with a redirect to the tokensafe MCP tools — the
+    AGENTS.md 'hard-blocked' promise made literal."""
+
+    def test_recursive_source_search_denied(self):
+        from src.adapter_core import guard_command
+        for cmd in ("grep -rn 'getUser' src/",
+                    "grep -R --include='*.ts' foo frontend/src",
+                    "egrep -r 'TODO' lib/",
+                    "rg pattern src/hooks",
+                    # guard.py policy: rg/find are recursive by construction,
+                    # so any invocation over a repo crawl is denied
+                    "rg --files .",
+                    "find . -name '*.py'",
+                    "find src -iname '*.tsx'",
+                    "cd app && grep -rn 'x' tests/",
+                    "git grep -rn '5+' frontend/ || true"):
+            res = guard_command(cmd, "claude_code", "s")
+            self.assertEqual(res["decision"], "deny", cmd)
+            self.assertIn("scoped_search", res["reason"], cmd)
+            self.assertGreater(res["saved_tokens"], 0, cmd)
+
+    def test_safe_searches_still_allowed(self):
+        from src.adapter_core import guard_command
+        for cmd in ("grep -n 'def x' README.md",
+                    "grep -c 'error' notes.txt",
+                    "cat server.log | grep error",
+                    "kubectl logs pod | grep err",
+                    "find . -name '*.png'",
+                    "git log --oneline -n 5"):
+            self.assertEqual(guard_command(cmd, "claude_code", "s")["decision"], "allow", cmd)
+
+    def test_raw_code_search_event_is_estimated(self):
+        tmp = tempfile.mkdtemp(prefix="tokensafe_rawgrep_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        db_path = os.path.join(tmp, "metrics.db")
+        os.environ["TOKENSAFE_DB_PATH"] = db_path
+        os.environ["TOKENSAFE_TELEMETRY_DISABLED"] = "1"
+        self.addCleanup(os.environ.pop, "TOKENSAFE_DB_PATH", None)
+        self.addCleanup(os.environ.pop, "TOKENSAFE_TELEMETRY_DISABLED", None)
+        from src import metrics as metrics_mod
+        from src.metrics import MetricsTracker, resolve_measurement
+        from src.adapter_core import guard_command
+        metrics_mod._INITIALIZED_METRICS_DBS.clear()
+        self.addCleanup(metrics_mod._INITIALIZED_METRICS_DBS.clear)
+        self.assertEqual(resolve_measurement("GUARD_RAW_CODE_SEARCH"), "estimated")
+        res = guard_command("grep -rn 'x' src/", "cursor", "rawgrep_sess")
+        self.assertEqual(res["decision"], "deny")
+        s = MetricsTracker(db_path).get_summary()
+        self.assertEqual(s["total_saved_tokens_measured"], 0)
+        self.assertGreaterEqual(s["total_saved_tokens_estimated"], res["saved_tokens"])
+
+
+class TestCliTestsWrapper(unittest.TestCase):
+    """`tokensafe tests`: unittest output compacted to names + root causes
+    so a full-suite run never floods the context window."""
+
+    GREEN = ("....................\n"
+             "----------------------------------------------------------------------\n"
+             "Ran 20 tests in 0.421s\n\nOK\n")
+
+    RED = (
+        "x.....F..E.......\n"
+        "======================================================================\n"
+        "FAIL: test_bad_math (test_sample.Case.test_bad_math)\n"
+        "----------------------------------------------------------------------\n"
+        "Traceback (most recent call last):\n"
+        '  File "tests/test_sample.py", line 12, in test_bad_math\n'
+        "    self.assertEqual(1 + 1, 3)\n"
+        "AssertionError: 2 != 3\n"
+        "\n"
+        "======================================================================\n"
+        "ERROR: test_boom (test_sample.Case.test_boom)\n"
+        "----------------------------------------------------------------------\n"
+        "Traceback (most recent call last):\n"
+        '  File "tests/test_sample.py", line 18, in test_boom\n'
+        "    raise ValueError('exploded with a very long ' * 20 + 'tail')\n"
+        "ValueError: exploded with a very long exploded with a very long exploded with a very long "
+        "exploded with a very long exploded with a very long exploded with a very long exploded with "
+        "a very long exploded with a very long exploded with a very long exploded with a very long "
+        "exploded with a very long exploded with a very long exploded with a very long exploded with "
+        "a very long exploded with a very long exploded with a very long exploded with a very long "
+        "exploded with a very long exploded with a very long tail\n"
+        "\n"
+        "----------------------------------------------------------------------\n"
+        "Ran 15 tests in 0.102s\n\n"
+        "FAILED (failures=1, errors=1)\n")
+
+    def test_green_summary_is_one_line(self):
+        from src.cli import summarize_unittest_output
+        out = summarize_unittest_output(self.GREEN)
+        self.assertIn("Ran 20 tests", out)
+        self.assertIn("all tests passed", out)
+        self.assertNotIn("✗", out)
+
+    def test_failure_summary_names_and_causes(self):
+        import re
+        from src.cli import summarize_unittest_output
+        out = summarize_unittest_output(self.RED)
+        plain = re.sub(r"\x1b\[[0-9;]*m", "", out)
+        self.assertIn("Ran 15 tests", plain)
+        self.assertIn("FAILED (failures=1, errors=1)", plain)
+        self.assertIn("FAIL test_bad_math", plain)
+        self.assertIn('File "tests/test_sample.py", line 12', plain)
+        self.assertIn("AssertionError: 2 != 3", plain)
+        self.assertIn("ERROR test_boom", plain)
+        # The Ran/FAILED tail must not leak into a failure's root cause
+        self.assertNotIn("      FAILED (failures=1, errors=1)", plain)
+        # Long exception messages are truncated to keep the report compact
+        self.assertIn("…", plain)
+        self.assertLess(len(out), 1500)
+
+    def test_full_traceback_flag_keeps_frames(self):
+        from src.cli import summarize_unittest_output
+        out = summarize_unittest_output(self.RED, full_traceback=True)
+        self.assertIn("Traceback (most recent call last):", out)
+
+    def test_garbage_output_falls_back_to_tail(self):
+        from src.cli import summarize_unittest_output
+        out = summarize_unittest_output("ImportError: No module named 'broken_thing'\n")
+        self.assertIn("ImportError", out)
+
+    def _run_cli_tests(self, files, env_extra=None, cli_args=("tests",)):
+        tmp = tempfile.mkdtemp(prefix="tokensafe_cli_tests_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        # cli.py resolves PROJECT_ROOT as the PARENT of its own directory, so
+        # the cli copy must live at <tmp>/root/src/cli.py: then PROJECT_ROOT
+        # is <tmp>/root, `from src...` resolves via the src symlink, and the
+        # staged tests/ dir is the discovery target.
+        root = os.path.join(tmp, "root")
+        os.makedirs(os.path.join(root, "tests"))
+        src_real = os.path.join(PROJECT_ROOT, "src")
+        os.makedirs(os.path.join(root, "src"))
+        for entry in os.listdir(src_real):
+            if entry == "cli.py" or entry == "__pycache__":
+                continue
+            os.symlink(os.path.join(src_real, entry), os.path.join(root, "src", entry))
+        shutil.copy(os.path.join(src_real, "cli.py"), os.path.join(root, "src", "cli.py"))
+        for fname, body in files.items():
+            with open(os.path.join(root, "tests", fname), "w", encoding="utf-8") as f:
+                f.write(body)
+        env = {**os.environ, "TOKENSAFE_DATA_DIR": os.path.join(tmp, "data"), "TOKENSAFE_TELEMETRY_DISABLED": "1"}
+        if env_extra:
+            env.update(env_extra)
+        res = subprocess.run(
+            [sys.executable, os.path.join(root, "src", "cli.py")] + list(cli_args),
+            capture_output=True, text=True, timeout=120, env=env,
+        )
+        return res
+
+    def test_e2e_green_and_red_runs(self):
+        import re
+        ok = self._run_cli_tests({"test_ok.py": (
+            "import unittest\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_passes(self):\n"
+            "        self.assertTrue(True)\n")})
+        self.assertEqual(ok.returncode, 0, ok.stdout + ok.stderr)
+        self.assertIn("all tests passed", ok.stdout)
+
+        bad = self._run_cli_tests({"test_ok.py": (
+            "import unittest\n"
+            "class T(unittest.TestCase):\n"
+            "    def test_passes(self):\n"
+            "        self.assertTrue(True)\n"),
+            "test_bad.py": (
+            "import unittest\n"
+            "class B(unittest.TestCase):\n"
+            "    def test_fails(self):\n"
+            "        self.assertEqual('a', 'b')\n")})
+        self.assertEqual(bad.returncode, 1)
+        bad_plain = re.sub(r"\x1b\[[0-9;]*m", "", bad.stdout)
+        self.assertIn("✗", bad_plain)
+        self.assertIn("FAIL test_fails", bad_plain)
+        self.assertIn("AssertionError", bad_plain)
+
+    def test_e2e_pytest_launcher(self):
+        """`tokensafe tests pytest` forces -q --tb=short; a stubbed pytest
+        module on PYTHONPATH stands in for the real one."""
+        fake_pkg = (
+            "import sys\n"
+            "argv = sys.argv[1:]\n"
+            "assert '-q' in argv and '--tb=short' in argv, argv\n"
+            "print('1 passed in 0.01s')\n"
+            "sys.exit(0)\n")
+        res = self._run_cli_tests(
+            {"test_ok.py": "def test_x():\n    assert True\n"},
+            env_extra={"PYTHONPATH": self._fake_pytest_dir(fake_pkg)},
+            cli_args=("tests", "pytest"))
+        self.assertEqual(res.returncode, 0, res.stdout + res.stderr)
+        self.assertIn("1 passed in 0.01s", res.stdout)
+        self.assertIn("(pytest)", res.stdout)
+
+    def _fake_pytest_dir(self, body):
+        d = tempfile.mkdtemp(prefix="tokensafe_fake_pytest_")
+        self.addCleanup(shutil.rmtree, d, ignore_errors=True)
+        with open(os.path.join(d, "pytest.py"), "w", encoding="utf-8") as f:
+            f.write(body)
+        return d
 
 
 class TestSlicerGoRustSymbols(unittest.TestCase):

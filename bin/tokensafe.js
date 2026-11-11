@@ -57,6 +57,7 @@ Commands:
   tokensafe vacuum             Compact SQLite metrics database storage
   tokensafe prune              Prune granular telemetry events into lifetime rollup
   tokensafe digest             Preview or send weekly team ROI digest email
+  tokensafe tests              Run the unit test suite (compact failure report)
   tokensafe activate <key>     Activate commercial Solo or Team seat license key
   tokensafe license            Show current license status and active tier
   tokensafe update             One-click self-update for npm, pip & all AI agent rules

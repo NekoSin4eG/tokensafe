@@ -21,6 +21,77 @@ from src.dashboard import Dashboard, render_bar
 from src.compactor import PromptCompactor
 from src.tokenizer import count_tokens
 
+def summarize_unittest_output(raw: str, full_traceback: bool = False) -> str:
+    """Compacts `python3 -m unittest discover` output to what a developer
+    actually needs: one green line, or per-failure test name + root cause.
+    Keeps the suite run out of the context window (the raw output of a
+    300+ test run with tracebacks is thousands of tokens)."""
+    lines = raw.splitlines()
+    ran = status = ""
+    for ln in lines:
+        s = ln.strip()
+        if s.startswith("Ran ") and " test" in s:
+            ran = s
+        elif s == "OK" or s.startswith("FAILED"):
+            status = s
+    # Failure blocks: one '=' * 70 line PER failure, then the title line,
+    # a '-' * 70 rule and the traceback — each block is self-contained.
+    blocks, cur = [], None
+    for ln in lines:
+        if len(ln) >= 10 and set(ln) == {"="}:
+            if cur is not None:
+                blocks.append(cur)
+            cur = []
+            continue
+        if cur is not None:
+            cur.append(ln)
+    if cur is not None:
+        blocks.append(cur)
+
+    failures = []
+    for block in blocks:
+        title_idx = next((j for j, l in enumerate(block) if l.startswith(("FAIL: ", "ERROR: "))), None)
+        if title_idx is None:
+            continue
+        title = block[title_idx]
+        body = [l for l in block[title_idx + 1:]
+                if not (len(l) >= 10 and set(l) == {"-"})
+                and not l.strip().startswith(("Ran ", "FAILED", "OK"))]
+        kind, name = title.split(" ", 1)
+        if full_traceback:
+            detail = [l.rstrip() for l in body if l.strip()]
+        else:
+            loc = next((l.strip() for l in reversed(body) if l.strip().startswith('File "')), "")
+            cause_lines = [l.strip() for l in reversed(body)
+                           if l.strip() and not l.strip().startswith('File "')
+                           and not l.strip().startswith(("self.", "assert", "raise"))]
+            # assertEqual-style failures end with a diff block ('- a' / '+ b');
+            # the actual AssertionError line sits above it.
+            cause = next((l for l in cause_lines if not l.startswith(("+", "-", "?", "!"))),
+                         cause_lines[0] if cause_lines else "")
+            if len(cause) > 200:
+                cause = cause[:200] + " …"
+            detail = [l for l in (loc, cause) if l]
+        failures.append((kind.rstrip(": "), name, detail))
+
+    if not ran and not failures:
+        # Crash before unittest could report (import error, bad path):
+        # fall back to the tail, which carries the exception.
+        tail = [l for l in lines if l.strip()][-15:]
+        return "\n".join(tail) if tail else "(no unittest output captured)"
+
+    if status == "OK":
+        return f"\033[32m✓ {ran} — all tests passed\033[0m"
+
+    out = [f"\033[31m✗ {ran} — {status}\033[0m"]
+    for kind, name, detail in failures:
+        out.append(f"  \033[31m{kind}\033[0m {name}")
+        for d in detail:
+            out.append(f"      {d}")
+    out.append("Full output: python3 -m unittest discover tests  (or: tokensafe tests --traceback)")
+    return "\n".join(out)
+
+
 def main():
     args = sys.argv[1:]
     command = args[0] if args else "stats"
@@ -352,6 +423,39 @@ def main():
         print(f"\033[1mCompacted Tokens:\033[0m {res['compact_tokens']}")
         print(f"\033[1mTokens Saved:\033[0m     \033[32m\033[1m+{res['saved_tokens']} tokens\033[0m ({render_bar(res['reduction_pct'])})\n")
 
+    elif command in ("tests", "testsuite", "unittest"):
+        tests_dir = os.path.join(PROJECT_ROOT, "tests")
+        if not os.path.isdir(tests_dir):
+            print("No tests/ directory found — run from a repository checkout "
+                  "(installed packages do not ship the unit-test suite).")
+            sys.exit(1)
+        verbose = "--verbose" in args or "-v" in args
+        full_tb = "--traceback" in args or "-tb" in args
+        launcher = next((a for a in args[1:] if not a.startswith("-")), "unittest")
+        if launcher == "unittest":
+            cmd = [sys.executable, "-m", "unittest", "discover", "tests"]
+        elif launcher == "pytest":
+            # pytest is natively compact with quiet flags; the wrapper
+            # guarantees them instead of trusting the caller.
+            cmd = [sys.executable, "-m", "pytest", "-q", "--tb=short"]
+        else:
+            print(f"Unknown test launcher '{launcher}' — supported: unittest (default), pytest.")
+            sys.exit(1)
+        print(f"\n⚡ Running the unit test suite ({launcher})...")
+        try:
+            proc = subprocess.run(cmd, cwd=PROJECT_ROOT, capture_output=True, text=True)
+        except FileNotFoundError:
+            print(f"Launcher '{launcher}' is not available — install it (e.g. pip install pytest) and retry.")
+            sys.exit(1)
+        raw = (proc.stdout or "") + (proc.stderr or "")
+        if verbose:
+            print(raw)
+        elif launcher == "pytest":
+            print(raw.rstrip() or "(no output)")
+        else:
+            print(summarize_unittest_output(raw, full_traceback=full_tb))
+        sys.exit(proc.returncode)
+
     elif command in ("prune", "cleanup"):
         days = None
         max_events = None
@@ -468,6 +572,7 @@ def main():
             print("  digest [--send] [--email=...]  Compile (and optionally dispatch) the weekly team digest")
             print("  guard <command>                Pre-flight safety check for a shell command")
             print("  doctor                         Audit MCP tool overhead and token tax")
+            print("  tests [pytest] [--traceback]   Run the unit test suite (compact failure report)")
             print("  prune [--days N | --max N]     Compact metrics database (roll old events)")
             print("  vacuum                         Reclaim SQLite disk space")
             print("  reset                          Reset all local token metrics")
@@ -480,7 +585,7 @@ def main():
             print("  --version                      Print version and exit")
             sys.exit(0)
         print(f"Unknown command: {command}")
-        print("Available commands: stats, sync, html, test, doctor, providers, mcp, benchmark, proxy, graph, map, skeleton, guard, vacuum, prune, digest, activate, license, markdown, install, setup, update, check-update, reset. Run 'tokensafe help' for details.")
+        print("Available commands: stats, sync, html, test, tests, doctor, providers, mcp, benchmark, proxy, graph, map, skeleton, guard, vacuum, prune, digest, activate, license, markdown, install, setup, update, check-update, reset. Run 'tokensafe help' for details.")
         sys.exit(1)
 
 if __name__ == "__main__":

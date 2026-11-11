@@ -130,7 +130,8 @@ TOOLS = [
         "name": "sanitize_command",
         "description": "Per-stage shell command rewrites: prunes lockfiles, caps unbounded git log/show/blame/rg "
                      "and docker/kubectl logs, quiets npm/pip installs, bounds cat/curl output. Compound commands "
-                     "(a && b ; c) are optimized per stage without breaking operators.",
+                     "(a && b ; c) are optimized per stage without breaking operators. For unit-test runs prefer "
+                     "the `tests` CLI wrapper (tokensafe tests [pytest]) over raw `python3 -m unittest discover`.",
         "inputSchema": {
             "type": "object",
             "properties": {
