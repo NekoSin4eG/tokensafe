@@ -1,7 +1,11 @@
 import unittest
 import os
+import sys
 import json
 import time
+import subprocess
+import tempfile
+import shutil
 from src.version_checker import VersionChecker, semver_tuple
 
 class TestVersionChecker(unittest.TestCase):
@@ -140,6 +144,53 @@ class TestVersionChecker(unittest.TestCase):
             args, kwargs = mock_popen.call_args
             self.assertIn("--check-bg", args[0])
             self.assertIn("--force", args[0])
+
+    def test_check_bg_script_mode_imports_and_caches(self):
+        """Regression: `python3 src/version_checker.py --check-bg` used to die
+        on `from src.paths import ...` (sys.path[0] = src/, no PROJECT_ROOT on
+        the path) and the bare except swallowed it — version_cache.json was
+        never written. The subprocess must now exit cleanly and create the
+        cache (fallback payload via an unroutable version URL)."""
+        tmp_data = tempfile.mkdtemp(prefix="ts_vcheck_")
+        try:
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            env = dict(os.environ)
+            env["TOKENSAFE_DATA_DIR"] = tmp_data
+            env["TOKENSAFE_VERSION_URL"] = "http://127.0.0.1:9/api/version/check"
+            proc = subprocess.run(
+                [sys.executable, os.path.join(project_root, "src", "version_checker.py"), "--check-bg"],
+                cwd=project_root, env=env, capture_output=True, text=True, timeout=60
+            )
+            self.assertEqual(proc.returncode, 0, proc.stderr[-400:])
+            cache_path = os.path.join(tmp_data, "version_cache.json")
+            self.assertTrue(os.path.exists(cache_path), "background check must persist the version cache")
+            with open(cache_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.assertIn("client_version", data)
+        finally:
+            shutil.rmtree(tmp_data, ignore_errors=True)
+
+    def test_notify_marks_cache_only_after_dialog_dispatch(self):
+        """last_os_notify_version must be written only when the dialog actually
+        dispatched — a silently TCC-blocked osascript must not buy 24h of silence."""
+        from unittest.mock import patch
+        mock_data = {
+            "checked_at": int(time.time()),
+            "client_version": "1.2.0",
+            "latest_version": "1.3.0",
+            "update_available": True
+        }
+        VersionChecker.save_cache(mock_data)
+        with patch.object(VersionChecker, "show_os_dialog", return_value=False):
+            res = VersionChecker.notify_os_update(current_version="1.2.0", force=True)
+            self.assertFalse(res)
+            cached = VersionChecker.load_cache() or {}
+            self.assertNotIn("last_os_notify_version", cached)
+        with patch.object(VersionChecker, "show_os_dialog", return_value=True):
+            res = VersionChecker.notify_os_update(current_version="1.2.0", force=True)
+            self.assertTrue(res)
+            cached = VersionChecker.load_cache() or {}
+            self.assertEqual(cached.get("last_os_notify_version"), "1.3.0")
 
 
 if __name__ == "__main__":

@@ -104,19 +104,20 @@ TOOLS = [
     },
     {
         "name": "context_budget",
-        "description": "Context Budget HUD: estimates how much of the model's context window this session has consumed (tools/history/prompts breakdown, 50/80/95% thresholds). Call when deciding whether to compact or start fresh.",
+        "description": "Context Budget HUD: estimates how much of the model's context window this session has consumed (tools/history/prompts breakdown, 50/80/95% thresholds). Call before large multi-step tasks. When the threshold is warning or critical, immediately call tokensafe:compact_conversation on the session transcript.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "model": {"type": "string", "description": "Optional: model name to resolve window size (default: env TOKENSAFE_CONTEXT_WINDOW or 200k)"},
                 "window_tokens": {"type": "integer", "description": "Optional: explicit context window size in tokens"},
-                "session_id": {"type": "string", "description": "Optional: session identifier (default: mcp_session)"}
+                "session_id": {"type": "string", "description": "Optional: session identifier (default: mcp_session)"},
+                "transcript_path": {"type": "string", "description": "Optional: path to the session JSONL transcript; when provided, REAL history mass is measured instead of the instrumented floor (recommended)"}
             }
         }
     },
     {
         "name": "compact_conversation",
-        "description": "On-demand context compaction: folds a long agent conversation transcript into a compact Consolidated State Ledger. Use when the context window feels heavy or before starting a new subtask inside the same session.",
+        "description": "On-demand context compaction: folds a long agent conversation transcript into a compact Consolidated State Ledger. Use when tokensafe:context_budget reports warning/critical, when the context window feels heavy, or before starting a new subtask inside the same session. The transcript path comes from your host session (hook payload transcript_path / session start context).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -609,12 +610,16 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         model = str(args.get("model") or "")
         window_tokens = args.get("window_tokens")
         session_id = str(args.get("session_id") or _mcp_session_id())
+        transcript_path = str(args.get("transcript_path") or "")
         try:
             if window_tokens is not None:
                 window_tokens = int(window_tokens)
         except (TypeError, ValueError):
             window_tokens = None
-        budget = ContextBudget.estimate(tracker, session_id=session_id, model=model, window_tokens=window_tokens)
+        budget = ContextBudget.estimate(
+            tracker, session_id=session_id, model=model, window_tokens=window_tokens,
+            transcript_path=transcript_path
+        )
         return {"content": [{"type": "text", "text": json.dumps(budget, indent=2, ensure_ascii=False)}]}
 
     elif name == "compact_conversation":
@@ -632,13 +637,26 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                 "reason": "Transcript too short to fold (needs >= 4 steps and >= 1000 history tokens)"
             }, indent=2)}]}
         saved = max(0, orig_t - folded_t)
-        tracker.record_event(
-            session_id=_mcp_session_id(),
-            event_type="HISTORY_FOLD",
-            original_tokens=orig_t,
-            optimized_tokens=folded_t,
-            details={"mode": "manual_compact_conversation", "turns": invocation_num, **stats}
+        # Incremental metrics guard (same policy as the PreInvocation hook):
+        # repeated compaction of the SAME transcript must not re-record the
+        # full history mass — count only the delta since the last fold.
+        prev_event = tracker.get_last_event(_mcp_session_id(), "HISTORY_FOLD")
+        prev_same_path = bool(
+            prev_event and isinstance(prev_event.get("details"), dict)
+            and prev_event["details"].get("transcript_path") == transcript_path
         )
+        prev_orig = prev_event["details"].get("total_accum_orig", 0) if prev_same_path else 0
+        delta_orig = max(0, orig_t - prev_orig)
+        if not prev_same_path or delta_orig >= 1500:
+            inc_orig = orig_t if not prev_same_path else delta_orig
+            tracker.record_event(
+                session_id=_mcp_session_id(),
+                event_type="HISTORY_FOLD",
+                original_tokens=inc_orig,
+                optimized_tokens=folded_t,
+                details={"mode": "manual_compact_conversation", "turns": invocation_num,
+                         "transcript_path": transcript_path, "total_accum_orig": orig_t, **stats}
+            )
         return {"content": [{"type": "text", "text": json.dumps({
             "compactable": True,
             "ledger": ledger,

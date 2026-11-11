@@ -77,7 +77,9 @@ class TestClaudeCodeAdapter(AdapterBase):
         self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "SessionStart")
         self.assertIn("Mandatory Directives", out["hookSpecificOutput"]["additionalContext"])
         # One-shot injection records no metrics on its own
-        self.assertEqual(out["hookSpecificOutput"]["additionalContext"].count("tokensafe:"), 4)
+        # 6 tool mentions: scoped_search, smart_read_file, get_architecture_graph,
+        # get_api_surface, context_budget, compact_conversation
+        self.assertEqual(out["hookSpecificOutput"]["additionalContext"].count("tokensafe:"), 6)
 
     def test_short_prompt_passes_through_clean(self):
         out = self._run_hook({

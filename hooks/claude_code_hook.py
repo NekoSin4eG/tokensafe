@@ -35,6 +35,11 @@ def handle(event: str, payload: dict) -> dict:
         # hook): persistent directives instead of per-turn re-injection.
         # No matcher on `source` — inject for startup/resume/clear/compact.
         # Well under the 10k-char additionalContext cap.
+        try:
+            from src.version_checker import VersionChecker
+            VersionChecker.notify_os_update_background()
+        except Exception:
+            pass
         return {
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
@@ -44,16 +49,63 @@ def handle(event: str, payload: dict) -> dict:
 
     if event == "UserPromptSubmit":
         prompt = str(payload.get("prompt") or "")
+        parts = []
         context, meta = compact_for_injection(prompt, AGENT, session_id)
         if context and meta.get("compacted"):
+            parts.append(
+                f"{context}\n"
+                f"(TokenSafe: compacted ~{meta['saved_tokens']} prompt tokens, "
+                f"-{meta.get('reduction_pct', 0)}% — original intent preserved.)"
+            )
+
+        # History auto-fold (parity with the Antigravity PreInvocation hook):
+        # Claude Code ships transcript_path in every hook payload. Once the
+        # transcript holds enough turns, past turns are folded into a State
+        # Ledger and injected; savings are recorded incrementally to avoid
+        # double-counting the same history mass on every submit.
+        transcript_path = str(payload.get("transcript_path") or "")
+        if transcript_path:
+            try:
+                from src.history_compactor import HistoryCompactor
+                from src.metrics import MetricsTracker
+                turn = 0
+                with open(transcript_path, "r", encoding="utf-8", errors="replace") as tf:
+                    turn = sum(1 for ln in tf if ln.strip())
+                if turn >= 3:
+                    folded, orig_hist, folded_tok, stats = HistoryCompactor.fold_transcript(
+                        transcript_path, turn
+                    )
+                    if folded and stats.get("saved_tokens", 0) > 0:
+                        tracker = MetricsTracker()
+                        prev_event = tracker.get_last_event(session_id, "HISTORY_FOLD")
+                        prev_orig = 0
+                        if prev_event and isinstance(prev_event.get("details"), dict):
+                            prev_orig = prev_event["details"].get("total_accum_orig", 0) or prev_event.get("original_tokens", 0)
+                        delta_orig = max(0, orig_hist - prev_orig)
+                        if prev_event is None or delta_orig >= 1500:
+                            inc_orig = orig_hist if prev_event is None else delta_orig
+                            inc_saved = max(0, inc_orig - folded_tok)
+                            tracker.record_event(
+                                session_id=session_id,
+                                event_type="HISTORY_FOLD",
+                                original_tokens=inc_orig,
+                                optimized_tokens=folded_tok,
+                                details={"turns": turn, "total_accum_orig": orig_hist, "agent": AGENT},
+                            )
+                        parts.append(
+                            f"{folded}\n"
+                            f"(TokenSafe History Compactor: stabilized {orig_hist:,} tokens "
+                            f"of previous turns — saved {stats['saved_tokens']:,}. "
+                            f"Estimated per METRICS.md.)"
+                        )
+            except Exception:
+                pass
+
+        if parts:
             return {
                 "hookSpecificOutput": {
                     "hookEventName": "UserPromptSubmit",
-                    "additionalContext": (
-                        f"{context}\n"
-                        f"(TokenSafe: compacted ~{meta['saved_tokens']} prompt tokens, "
-                        f"-{meta.get('reduction_pct', 0)}% — original intent preserved.)"
-                    ),
+                    "additionalContext": "\n\n".join(parts),
                 }
             }
         return {}

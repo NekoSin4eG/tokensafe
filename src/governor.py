@@ -214,7 +214,16 @@ class ContextBudget:
 
     @classmethod
     def estimate(cls, tracker: MetricsTracker, session_id: str = "mcp_session",
-                 model: str = "", window_tokens: Optional[int] = None) -> Dict[str, Any]:
+                 model: str = "", window_tokens: Optional[int] = None,
+                 history_tokens: int = 0, transcript_path: str = "") -> Dict[str, Any]:
+        """Estimate context-window usage for the session.
+
+        history_tokens / transcript_path upgrade the HUD from a pure
+        instrumented floor to a semi-real estimate: the REAL mass of past
+        conversation turns (measured from the transcript by the caller via
+        HistoryCompactor) is counted into the history bucket. Callers that
+        only know the transcript path can pass transcript_path instead; the
+        transcript is probed with HistoryCompactor.measure_transcript."""
         window = cls.resolve_window(model, window_tokens)
         breakdown = {"tools": 0, "history": 0, "prompts": 0, "other": 0}
         instrumented_events = 0
@@ -234,6 +243,19 @@ class ContextBudget:
         except Exception:
             pass
 
+        # Real history mass (estimated label per METRICS.md): the transcript
+        # content genuinely sits in the model context even though no TokenSafe
+        # instrument metered it.
+        transcript_mass = int(history_tokens or 0)
+        if transcript_mass <= 0 and transcript_path:
+            try:
+                from src.history_compactor import HistoryCompactor
+                transcript_mass = HistoryCompactor.measure_transcript(transcript_path)
+            except Exception:
+                transcript_mass = 0
+        if transcript_mass > breakdown["history"]:
+            breakdown["history"] = transcript_mass
+
         used = sum(breakdown.values())
         pct = round(used / window * 100.0, 1) if window > 0 else 0.0
         if pct >= 95:
@@ -250,6 +272,14 @@ class ContextBudget:
         else:
             threshold, recommendation = "healthy", "Context budget healthy."
 
+        if transcript_mass > 0:
+            caveat = ("Semi-real estimate: history mass is measured from the session "
+                      "transcript; agent reasoning and output tokens stay invisible to "
+                      "local hooks, so this remains a lower bound.")
+        else:
+            caveat = ("Floor estimate: only TokenSafe-instrumented flows are counted "
+                      "(agent reasoning/output is invisible to local hooks).")
+
         return {
             "window_tokens": window,
             "used_estimated": used,
@@ -258,7 +288,6 @@ class ContextBudget:
             "instrumented_events": instrumented_events,
             "threshold": threshold,
             "recommendation": recommendation,
-            "caveat": "Floor estimate: only TokenSafe-instrumented flows are counted "
-                      "(agent reasoning/output is invisible to local hooks).",
+            "caveat": caveat,
             "measurement": "estimated",
         }

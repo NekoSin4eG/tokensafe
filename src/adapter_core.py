@@ -32,6 +32,8 @@ TOKENSAFE_DIRECTIVES = (
     "• To inspect component or function definitions: call 'tokensafe:smart_read_file(path, symbol)'.\n"
     "• To locate dependencies & God Nodes: call 'tokensafe:get_architecture_graph(project_path)'.\n"
     "• To inspect all exported types/interfaces: call 'tokensafe:get_api_surface(project_path)'.\n"
+    "• Before large multi-step tasks: call 'tokensafe:context_budget(model=...)' to check the context window budget.\n"
+    "• When context_budget reports warning/critical: call 'tokensafe:compact_conversation(transcript_path=...)' to fold history before continuing.\n"
     "• Prefer 'edit_file' over 'write_file' for existing files."
 )
 

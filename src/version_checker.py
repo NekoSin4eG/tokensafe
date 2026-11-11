@@ -24,9 +24,18 @@ CACHE_TTL = 86400  # 24 hours
 # "broken" while the backend was redeploying).
 FALLBACK_CACHE_TTL = 900  # 15 minutes
 
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# Script-mode guard: notify_os_update_background spawns this file directly
+# (`python3 src/version_checker.py --check-bg`), which sets sys.path[0] to the
+# src/ directory — `import src.*` fails unless PROJECT_ROOT is on the path
+# FIRST. The old ordering (import before path setup) made every background
+# update check die silently in the bare except of __main__, so version_cache.json
+# was never written and the update dialog never appeared.
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
+
 from src.paths import resolve_data_dir
 
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DATA_DIR = resolve_data_dir()
 CACHE_FILE = os.path.join(DATA_DIR, "version_cache.json")
 CLOUD_CHECK_URL = os.environ.get("TOKENSAFE_VERSION_URL", "https://api.tokensafe.dev/api/version/check")
@@ -352,18 +361,21 @@ class VersionChecker:
             pass  # claim is best-effort; never block the dialog entirely on fs errors
 
         try:
-            cached["last_os_notify_version"] = latest
-            cached["last_os_notify_at"] = now
-            cls.save_cache(cached)
-        except Exception:
-            pass
-
-        try:
             dispatched = cls.show_os_dialog(
                 current_version=current_version,
                 latest_version=latest,
                 update_command=cmd
             )
+            if dispatched:
+                # Mark "notified" only after the dialog actually dispatched.
+                # Writing it earlier let a silently TCC-blocked osascript buy
+                # 24h of dialog silence without the user ever seeing anything.
+                try:
+                    cached["last_os_notify_version"] = latest
+                    cached["last_os_notify_at"] = now
+                    cls.save_cache(cached)
+                except Exception:
+                    pass
             return dispatched
         finally:
             # Release the dialog claim so a future version can notify again.

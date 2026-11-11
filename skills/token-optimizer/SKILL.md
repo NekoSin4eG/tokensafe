@@ -40,6 +40,10 @@ folds multi-turn conversation history, slices verbose tool outputs, and guards a
 6. **SECRET LEAK PREVENTION (ZERO HARDCODED FALLBACKS)**:
    - Never provide real private keys, API secrets, or credentials as fallback values in `os.environ.get()` or `process.env`. Real credentials must exist strictly in environment variables.
 
+7. **CONTEXT BUDGET BEFORE HEAVY WORK (`context_budget` → `compact_conversation`)**:
+   - Before large multi-step tasks, call `tokensafe:context_budget(model=...)` to check the window budget (tools/history/prompts breakdown, 50/80/95% thresholds).
+   - When it reports `warning` or `critical`, call `tokensafe:compact_conversation(transcript_path=...)` to fold past turns into a State Ledger before continuing — do not let context exhaustion degrade code quality mid-task.
+
 ---
 
 ## Core MCP Tools (`tokensafe`)

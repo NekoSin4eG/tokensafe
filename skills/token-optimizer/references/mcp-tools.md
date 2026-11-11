@@ -99,3 +99,27 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
 }
 ```
 *Validates commands and code snippets before execution; returns structured pass/block verdict with check_name.*
+
+### 5. Context Budget → Smart Compact Workflow
+```json
+{
+  "ServerName": "tokensafe",
+  "ToolName": "context_budget",
+  "Arguments": {
+    "model": "claude-x"
+  }
+}
+```
+*Run before large multi-step tasks. When the response reports `threshold: "warning"` or `"critical"`, immediately chain the compact call:*
+
+```json
+{
+  "ServerName": "tokensafe",
+  "ToolName": "compact_conversation",
+  "Arguments": {
+    "transcript_path": "/Users/.../.claude/projects/<session>/transcript.jsonl",
+    "invocation_num": 12
+  }
+}
+```
+*Folds past turns into a Consolidated State Ledger (-80% to -95% history tokens) so long sessions never degrade into context starvation. The transcript path is provided by the host session (hook payload `transcript_path` / session start context).*

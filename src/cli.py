@@ -123,6 +123,15 @@ def main():
         except Exception:
             pass
         print(dashboard.render_terminal())
+        # Update banner in the most-reliable visibility channel: the stats
+        # output itself. Best-effort — never break the dashboard render.
+        try:
+            from src.version_checker import VersionChecker
+            banner = VersionChecker.get_banner()
+            if banner:
+                print(banner)
+        except Exception:
+            pass
 
     elif command in ("html", "web"):
         from src.paths import resolve_data_dir

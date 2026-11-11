@@ -33,6 +33,7 @@ Execute the specified action directly based on these extracted parameters.
 5. **Bounded Reads**: Never call `read_file` without `StartLine`/`EndLine` on files > 100 lines unless inspecting a skeleton.
 6. **Directory Navigation**: Never run verbose `ls -la` or `ls -l`; use `tokensafe:list_dir(path, depth=2)` to inspect directory trees without permissions, timestamps, or lockfiles (-90% tokens).
 7. **Style & Design Tokens**: When inspecting CSS/SCSS/LESS/Tailwind, `tokensafe:smart_read_file` automatically preserves all design tokens (`:root`, `@theme`, CSS variables) in full while folding component selectors.
+8. **Context Budget & Smart Compaction**: Before large multi-step tasks, call `tokensafe:context_budget(model=...)` to check window usage (tools/history/prompts breakdown, 50/80/95% thresholds). When it reports `warning` or `critical`, call `tokensafe:compact_conversation(transcript_path=...)` to fold past turns into a State Ledger instead of letting code quality degrade.
 
 ### 4. Turn Token Savings Footer (Proof-of-Savings — always in English)
 At the end of your response for any turn where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer:

@@ -25,6 +25,7 @@ from src.history_compactor import HistoryCompactor
 from src.metrics import MetricsTracker
 from src.governor import ContextBudget
 from src.license_manager import LicenseManager
+from src.adapter_core import TOKENSAFE_DIRECTIVES as PROTOCOL_DIRECTIVES
 from src.paths import resolve_data_dir
 
 def _model_name(payload: dict) -> str:
@@ -175,46 +176,57 @@ def main():
                 }
             })
 
+    # 3b. Real history mass for the Context Budget HUD: the fold already
+    #     measured it when active; on early turns probe the transcript lightly
+    #     so the estimate reflects the history that genuinely sits in context.
+    history_mass = 0
+    if folded_text is not None:
+        history_mass = orig_hist_tokens
+    elif transcript_path:
+        try:
+            history_mass = HistoryCompactor.measure_transcript(transcript_path)
+        except Exception:
+            history_mass = 0
+
     # 4. Adaptive Protocol Enforcement Reminder (Guard-triggered only).
     #    Full directives are injected once per session by session_start.py as a
     #    persistent systemMessage; here they are re-shown only when the guard
     #    just fired or fresh history was folded.
     recent_guard = tracker.get_last_event(conversation_id, "GUARD_RAW_CODE_SEARCH")
     if folded_text is not None or recent_guard is not None:
-        protocol_reminder = (
-            "[TokenSafe Mandatory Directives]:\n"
-            "• Terminal code searches (grep/rg/find on source files) are BLOCKED by TokenSafe Guard.\n"
-            "• To search keywords, symbols, or configs: call 'tokensafe:scoped_search(query, scope)'.\n"
-            "• To inspect component or function definitions: call 'tokensafe:smart_read_file(path, symbol)'.\n"
-            "• To locate dependencies & God Nodes: call 'tokensafe:get_architecture_graph(project_path)'.\n"
-            "• To inspect all exported types/interfaces: call 'tokensafe:get_api_surface(project_path)'.\n"
-            "• Prefer 'edit_file' over 'write_file' for existing files."
-        )
         # systemMessage nested form (hooks.md contract): ephemeralMessage is
         # deprecated and is converted to a hidden system message anyway. This
         # reminder only fires on guard violations / fresh history folds, so
         # persistence here is intentional reinforcement, not per-turn bloat.
         inject_steps.append({
             "systemMessage": {
-                "systemMessage": protocol_reminder,
+                "systemMessage": PROTOCOL_DIRECTIVES,
                 "metadata": {}
             }
         })
 
     # 5. Context Budget HUD warning: inject once per session when the
-    #    instrumented context crosses 80% of the estimated window.
+    #    context crosses 80% of the estimated window. history_mass upgrades
+    #    the instrumented floor to a semi-real estimate, so the threshold is
+    #    actually reachable; the warning carries a ready-to-run compact command.
     try:
         budget = ContextBudget.estimate(
             tracker, session_id=conversation_id,
-            model=_model_name(payload)
+            model=_model_name(payload),
+            history_tokens=history_mass,
+            transcript_path=transcript_path
         )
         if budget["used_pct"] >= 80 and budget["instrumented_events"] >= 3:
             already = tracker.get_last_event(conversation_id, "BUDGET_WARNING")
             if not already:
+                if transcript_path:
+                    action = (f"Call tokensafe:compact_conversation(transcript_path='{transcript_path}') "
+                              f"now to fold past turns before continuing.")
+                else:
+                    action = budget["recommendation"]
                 warn = (
                     f"🧠 **Context Budget:** ~{budget['used_pct']}% of the estimated window used "
-                    f"({budget['used_estimated']:,}/{budget['window_tokens']:,} tokens, instrumented floor). "
-                    f"{budget['recommendation']}"
+                    f"({budget['used_estimated']:,}/{budget['window_tokens']:,} tokens). {action}"
                 )
                 inject_steps.append({
                     "systemMessage": {
