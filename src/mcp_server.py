@@ -241,7 +241,7 @@ def build_dir_tree(dir_path: str, max_depth: int = 2, max_entries: int = 80) -> 
     """
     IGNORE_DIRS = {
         'node_modules', '.git', 'dist', 'build', '.next', 'coverage',
-        '__pycache__', '.turbo', '.vite', '.output', '.bunny', 'data',
+        '__pycache__', '.turbo', '.vite', '.output', 'data',
         '.venv', 'venv', '.cache', '.idea', '.vscode',
         'Library', 'Applications', 'Movies', 'Music', 'Pictures'
     }

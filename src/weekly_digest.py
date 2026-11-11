@@ -24,13 +24,13 @@ CLOUD_DB_PATH = os.environ.get("TOKENSAFE_CLOUD_DB_PATH", os.path.join(DATA_DIR,
 
 @contextmanager
 def _open_digest_db(db_path: str):
-    """Yields BunnyDB/cloud connection for default DB path, or local sqlite3 for custom paths."""
+    """Yields Cloud DB/cloud connection for default DB path, or local sqlite3 for custom paths."""
     if db_path == CLOUD_DB_PATH:
         try:
             from src.cloud.db import get_db_connection
-            from src.cloud.config import BUNNY_DB_URL, BUNNY_DB_TOKEN, CLOUD_DB_PATH as CLOUD_CFG_DB_PATH
+            from src.cloud.config import CLOUD_DB_URL, CLOUD_DB_TOKEN, CLOUD_DB_PATH as CLOUD_CFG_DB_PATH
 
-            if (BUNNY_DB_URL and BUNNY_DB_TOKEN) or os.path.exists(CLOUD_CFG_DB_PATH):
+            if (CLOUD_DB_URL and CLOUD_DB_TOKEN) or os.path.exists(CLOUD_CFG_DB_PATH):
                 with get_db_connection() as conn:
                     yield conn
                 return
@@ -71,7 +71,7 @@ class WeeklyDigestGenerator:
     ) -> Optional[Dict[str, Any]]:
         """
         Retrieves 7-day telemetry for team owned by owner_email.
-        Supports both BunnyDB (cloud) and local SQLite databases.
+        Supports both Cloud DB (cloud) and local SQLite databases.
         Returns aggregated digest data or None if no eligible records found.
         """
         clean_email = (owner_email or "").strip().lower()

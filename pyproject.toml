@@ -44,9 +44,9 @@ dependencies = []
 
 [project.urls]
 Homepage = "https://tokensafe.dev"
-Repository = "https://github.com/tokensafe-dev/tokensafe"
+Repository = "https://github.com/NekoSin4eG/tokensafe"
 Documentation = "https://tokensafe.dev"
-Issues = "https://github.com/tokensafe-dev/tokensafe/issues"
+Issues = "https://github.com/NekoSin4eG/tokensafe/issues"
 
 [project.scripts]
 tokensafe = "src.cli:main"

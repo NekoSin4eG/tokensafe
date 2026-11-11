@@ -528,15 +528,12 @@ agy-token-optimizer/
 │   ├── metrics.py              # Persistent SQLite metrics engine
 │   ├── dashboard.py            # Visual ANSI terminal, Markdown & reactive SSE web dashboard
 │   ├── license_manager.py      # Ed25519 cryptographic license verification
-│   ├── mailer.py               # Transactional email & Friday ROI digest dispatcher
 │   ├── mcp_server.py           # Native Model Context Protocol (MCP) server
 │   ├── installer.py            # Multi-IDE agent auto-installer & config wizard
-│   └── cloud_backend.py        # Cloud REST backend & team telemetry API
 ├── hooks/
 │   ├── pre_invocation.py       # PreInvocation hook entry point
 │   ├── pre_tool_use.py         # PreToolUse hook entry point
 │   └── post_tool_use.py        # PostToolUse hook entry point
-├── frontend/                   # React / Vite / Tailwind Web App & Dashboard
 ├── bin/
 │   ├── tokensafe.js            # Node.js npm launcher (npx tokensafe)
 │   └── tokensafe               # Python CLI launcher (pip / standalone)

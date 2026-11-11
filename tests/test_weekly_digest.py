@@ -91,7 +91,7 @@ class TestWeeklyDigest(unittest.TestCase):
         self.assertEqual(dispatch_res["status"], "success")
         self.assertEqual(dispatch_res["dispatched"], 1)
 
-    def test_uses_cloud_db_connection_when_bunny_enabled_and_local_file_absent(self):
+    def test_uses_cloud_db_connection_when_cloud_enabled_and_local_file_absent(self):
         mem = sqlite3.connect(":memory:")
         mem.row_factory = sqlite3.Row
         now = int(time.time())
@@ -103,8 +103,8 @@ class TestWeeklyDigest(unittest.TestCase):
             CREATE TABLE telemetry (customer_email TEXT, event_type TEXT, original_tokens INTEGER, saved_tokens INTEGER, usd_saved REAL, timestamp INTEGER);
             """
         )
-        mem.execute("INSERT INTO customers VALUES ('bunny@digest-test.com', 'team', 5, 'active')")
-        mem.execute("INSERT INTO telemetry VALUES ('bunny@digest-test.com', 'AST_SKELETON', 1000, 800, 0.02, ?)", (now,))
+        mem.execute("INSERT INTO customers VALUES ('cloud@digest-test.com', 'team', 5, 'active')")
+        mem.execute("INSERT INTO telemetry VALUES ('cloud@digest-test.com', 'AST_SKELETON', 1000, 800, 0.02, ?)", (now,))
         mem.commit()
 
         from contextlib import contextmanager
@@ -113,10 +113,10 @@ class TestWeeklyDigest(unittest.TestCase):
             yield mem
 
         with patch("src.cloud.db.get_db_connection", fake_conn), \
-             patch("src.cloud.config.BUNNY_DB_URL", "https://bunny.example"), \
-             patch("src.cloud.config.BUNNY_DB_TOKEN", "tok_123"), \
+             patch("src.cloud.config.CLOUD_DB_URL", "https://bunny.example"), \
+             patch("src.cloud.config.CLOUD_DB_TOKEN", "tok_123"), \
              patch("src.cloud.config.CLOUD_DB_PATH", "/tmp/nonexistent-tokensafe-cloud-test.db"):
-            digest = WeeklyDigestGenerator.get_team_weekly_stats("bunny@digest-test.com", now=now)
+            digest = WeeklyDigestGenerator.get_team_weekly_stats("cloud@digest-test.com", now=now)
         mem.close()
 
         self.assertIsNotNone(digest)

@@ -268,7 +268,6 @@ class PromptCompactor:
         (re.compile(r"\b(mysql)\b", re.I), "mysql"),
         (re.compile(r"\b(prisma|призма)\b", re.I), "prisma"),
         (re.compile(r"\b(docker|докер)\b", re.I), "docker"),
-        (re.compile(r"\b(bunny|банни)\b", re.I), "bunny"),
         (re.compile(r"\b(jwt|токен\w*|auth|авторизац\w*|autenticaci[oó]n|authentification|token)\b|(认证|認証)", re.I), "jwt"),
         (re.compile(r"\b(oauth)\b", re.I), "oauth"),
         (re.compile(r"\b(zero_alloc|без\s+аллокаций|sin\s+asignaciones|ohne\s+allokation)\b", re.I), "zero_alloc"),

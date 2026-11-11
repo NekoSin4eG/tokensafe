@@ -4,5 +4,5 @@ contact_links:
     url: https://tokensafe.dev
     about: Please consult the documentation and FAQ before submitting a bug.
   - name: 🔒 Security Advisories
-    url: https://github.com/tokensafe-dev/tokensafe/security/advisories/new
+    url: https://github.com/NekoSin4eG/tokensafe/security/advisories/new
     about: Report security vulnerabilities privately.

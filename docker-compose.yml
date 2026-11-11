@@ -47,8 +47,6 @@ services:
       - JWT_SECRET=${JWT_SECRET:-}
       - TOKENSAFE_PRIVATE_KEY=${TOKENSAFE_PRIVATE_KEY:-}
       - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET:-}
-      - BUNNY_DATABASE_URL=${BUNNY_DATABASE_URL:-}
-      - BUNNY_DATABASE_AUTH_TOKEN=${BUNNY_DATABASE_AUTH_TOKEN:-}
     volumes:
       - tokensafe_data:/app/data
     healthcheck:

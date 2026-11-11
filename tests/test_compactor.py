@@ -84,7 +84,7 @@ class TestPromptCompactor(unittest.TestCase):
         # 'задеплой' must map to DEPLOY
         res_deploy = PromptCompactor.compact("задеплой проект в bunny и проверь статус", enable_deepseek=False)
         self.assertEqual(res_deploy["action"], "DEPLOY")
-        self.assertIn("bunny", res_deploy["traits"])
+        self.assertNotIn("bunny", res_deploy["traits"])
 
     def test_symbol_backticks_and_cases(self):
         # Russian case inflections ('в методе')
