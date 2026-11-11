@@ -250,10 +250,10 @@ def verify_version_consistency(expected: Optional[str] = None) -> Tuple[bool, Li
     """Checks that every file the bumper touches actually carries `expected`
     (defaults to package.json version). Returns (ok, problems).
 
-    Server-side files (src/cloud/*, cloud tests) are OPTIONAL: the public
-    export (bin/sync-public.sh) strips them, and the consistency gate runs
-    there too. Missing optional files are skipped silently; a missing
-    required file is drift."""
+    Server-side files (src/cloud/*, cloud tests) are OPTIONAL: they live in
+    the private tokensafe-cloud repository, and this orchestrator runs from
+    the public client checkout. Missing optional files are skipped
+    silently; a missing required file is drift."""
     version = expected or get_current_version()
     problems: List[str] = []
     optional_files = {
@@ -610,27 +610,6 @@ def run_release(target: str, otp: Optional[str] = None, no_bump: bool = False):
                 print("  ⚠ npm package not published yet — registry needs it. Re-run after npm.")
             pending.append("mcp-publisher publish")
 
-    # Phase 8: public repo ---------------------------------------------------------
-    print("── Phase 8: public repo sync")
-    sync_sh = os.path.join(PROJECT_ROOT, "bin", "sync-public.sh")
-    stale_lock = os.path.join(PROJECT_ROOT, "data", ".sync.lock")
-    if os.path.exists(stale_lock):
-        try:
-            pid = int(open(stale_lock).read().strip())
-            import signal as _signal
-            os.kill(pid, 0)
-            print("  ⚠ telemetry sync is running; skipping public sync")
-            pending.append("bin/sync-public.sh (sync lock busy)")
-        except (ValueError, ProcessLookupError, PermissionError, OSError):
-            os.remove(stale_lock)
-    if not pending or not any("sync-public" in p for p in pending):
-        if os.path.exists(sync_sh):
-            code, out = _sh(["bash", sync_sh], timeout=300)
-            if code != 0:
-                print(out[-400:]); pending.append("bin/sync-public.sh")
-            else:
-                print("  ✔ public repo synced + tag pushed")
-
     # Phase 9: rollout verification --------------------------------------------------
     print("── Phase 9: rollout verification")
     health_ok = wait_for_prod_version(next_v, attempts=8, delay=15)
@@ -640,7 +619,7 @@ def run_release(target: str, otp: Optional[str] = None, no_bump: bool = False):
     print(f"  {'✔' if npm_version_published(next_v) else '⚠'} npm {next_v}")
     print(f"  {'✔' if registry_version_published(next_v) else '⚠'} MCP Registry {next_v} active")
 
-    # Public repo CI (sync-public.sh just force-pushed there)
+    # Public repo CI (the release commit pushed main here)
     public_ci_ok = False
     for _ in range(4):
         code, out = _sh(["gh", "run", "list", "-R", "tokensafe-dev/tokensafe",
