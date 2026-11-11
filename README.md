@@ -291,7 +291,7 @@ TokenSafe distills verbose prompts into compact TOCP S-expressions (`-40% to -70
 |---|---|---|---|---|
 | **TokenSafe Cloud (SaaS)** | **Engineering Team & Solo** | **Google Gemini Flash-Lite** (`gemini-flash-lite-latest`) | **None (Zero keys needed)** | Included in subscription, ready immediately |
 | **Local Regex Compactor** | **Developer Sandbox (Free)** | **Deterministic Multilingual Regex** (9 languages) | **None** | Local execution only (`500,000` tokens/mo) |
-| **Self-Hosted Docker** | **Enterprise / Team** | **BYOK Multi-Provider** (Gemini, DeepSeek, OpenAI, Claude) | `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, etc. | Private VPC container deployment |
+| **Self-Hosted Docker** | **Enterprise & VPC** | **BYOK Multi-Provider** (Gemini, DeepSeek, OpenAI, Claude) | `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, etc. | Private VPC container deployment |
 
 > **Zero External Keys for Team & Solo**: Developers never have to create or manage personal Google, OpenAI, or DeepSeek billing accounts to use cloud prompt distillation.
 
@@ -312,16 +312,7 @@ Inspect your active license tier, distillation mode, and cache stats anytime:
 tokensafe providers
 ```
 
-For self-hosted Docker environments (`TOKENSAFE_SELF_HOSTED=1`), configure providers in `data/config.json`:
-```json
-{
-  "preferred_provider": "gemini",
-  "gemini_api_key": "YOUR_GEMINI_API_KEY",
-  "gemini_model": "gemini-flash-lite-latest",
-  "llm_distill_min_tokens": 100,
-  "distill_max_tokens": 60
-}
-```
+Self-hosted VPC deployment (BYOK provider keys, zero-telemetry / air-gapped isolation) is part of the **Enterprise & VPC** plan — deployment and support are handled by the TokenSafe engineering team. Contact `corp@tokensafe.dev`.
 
 ---
 
