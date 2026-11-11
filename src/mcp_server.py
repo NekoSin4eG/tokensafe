@@ -131,11 +131,14 @@ TOOLS = [
         "description": "Per-stage shell command rewrites: prunes lockfiles, caps unbounded git log/show/blame/rg "
                      "and docker/kubectl logs, quiets npm/pip installs, bounds cat/curl output. Compound commands "
                      "(a && b ; c) are optimized per stage without breaking operators. For unit-test runs prefer "
-                     "the `tests` CLI wrapper (tokensafe tests [pytest]) over raw `python3 -m unittest discover`.",
+                     "the `tests` CLI wrapper (tokensafe tests [pytest]) over raw `python3 -m unittest discover`. "
+                     "Pass cwd for test-runner commands: the guard reads <cwd>/package.json to force jest/vitest "
+                     "into run-once mode (CI=true, --watch=false, --forceExit) so agents never hang on watch mode.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "command": {"type": "string", "description": "Raw bash command line"}
+                "command": {"type": "string", "description": "Raw bash command line"},
+                "cwd": {"type": "string", "description": "Optional working directory the command will run in; enables the package.json peek that identifies the runner behind opaque yarn/npm test scripts"}
             },
             "required": ["command"]
         }
@@ -668,8 +671,9 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             }
             return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
 
-        # Step 2: Command sanitization
-        new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
+        # Step 2: Command sanitization (cwd unlocks the package.json peek for
+        # opaque yarn/npm test scripts; None keeps the conservative fallback)
+        new_cmd, saved, reason = CommandSanitizer.sanitize(cmd, cwd=args.get("cwd") or None)
         result = {
             "original_command": cmd,
             "sanitized_command": new_cmd or cmd,
