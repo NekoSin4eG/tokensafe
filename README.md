@@ -7,7 +7,7 @@
 
 <p align="center">
   <b>Local-First AI Guardrails, Focused Context &amp; Auditable Team ROI</b><br>
-  Reduce your AI bills by up to 90%. Let your team ship code faster and cheaper.<br>
+  Reduce your AI bills by up to 90%. Let your team ship clean code faster and cheaper.<br>
   TokenSafe runs locally between your agents and your repos: agents read only the code they need (context spend 60-90% lower, measured / estimated) and secrets get blocked before commit.<br>
   Built for teams using <b>Cursor, Claude Code, Codex, Windsurf, Google Antigravity, Gemini CLI, and ChatGPT</b>.
 </p>
