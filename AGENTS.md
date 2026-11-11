@@ -1,11 +1,11 @@
-# Antigravity Token Optimizer Project Instructions
+# TokenSafe Project Instructions
 
-Welcome to the **agy-token-optimizer** project repository.
+Welcome to the **TokenSafe** project repository.
 
 ## Project Overview
-This repository implements a high-performance token economy plugin for Google Antigravity (AGY).
-It intercepts user prompts via lifecycle hooks, compiles natural language into lean TOCP S-expressions,
-slices bulky tool calls (such as full-file reads), and provides real-time SQLite metrics tracking.
+This repository implements the TokenSafe local engine for AI coding agents.
+It intercepts user prompts via lifecycle hooks, compiles natural language into compact intent expressions,
+slices bulky tool calls (such as full-file reads), guards secrets and unsafe commands, and provides real-time SQLite metrics tracking.
 
 ## Architecture Guidelines
 - `src/tokenizer.py`: Zero-dependency, calibrated BPE token counter.

@@ -2,7 +2,7 @@
   "name": "tokensafe",
   "displayName": "TokenSafe",
   "version": "2.4.0",
-  "description": "Zero-Loss Token Economy & Context Optimizer for AI Agents. Compresses prompts, slices AST/tool outputs, and prevents stuck loops.",
+  "description": "Local-first guardrails, focused context & auditable team ROI for AI coding agents. Agents read only the code they need, secrets get blocked before commit.",
   "logo": "assets/logo.svg",
   "author": {
     "name": "Oleg Savelev",
