@@ -537,7 +537,7 @@ TokenSafe Cloud Backend enforces strict zero-trust boundaries across client and 
 | `POST` | `/api/telemetry/sync` | **License Auth** | JSON `{ license_key, email, events: [...] }` | Syncs batch telemetry events (enforces max 50 events/batch). |
 | `POST` | `/webhook/stripe` | **HMAC Sig** | `Stripe-Signature: t=...,v1=...` | Verifies Stripe webhook payload against `STRIPE_WEBHOOK_SECRET`. |
 
-> **Note:** administrative endpoints are intentionally omitted from the public API surface (including their paths). They require a dedicated admin secret or admin JWT and reside strictly in internal operational documentation. Seat and license management is available through the [dashboard](https://dashboard.tokensafe.dev).
+> **Note:** administrative endpoints are intentionally **not documented in the public API surface** (including their paths). They require a dedicated admin secret or admin JWT and reside strictly in internal operational documentation. Seat and license management is available through the [dashboard](https://dashboard.tokensafe.dev).
 
 ### 3. Server Configuration & Environment Variables
 
