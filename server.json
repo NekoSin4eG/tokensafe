@@ -58,5 +58,25 @@
         }
       ]
     }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.tokensafe.dev/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "value": "Bearer {tokensafe_license_key}",
+          "isSecret": true,
+          "variables": {
+            "tokensafe_license_key": {
+              "description": "TokenSafe license key (TS1./TS2.) from tokensafe.dev. Optional: public tools (stats, docs, setup) work without it.",
+              "isSecret": true,
+              "required": false
+            }
+          }
+        }
+      ]
+    }
   ]
 }
