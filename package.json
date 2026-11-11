@@ -1,7 +1,7 @@
 {
   "name": "tokensafe",
   "mcpName": "dev.tokensafe/tokensafe",
-  "version": "2.2.0",
+  "version": "2.2.1",
   "description": "Local-first AI coding guardrails, context slicing, and team ROI telemetry for AI coding agents",
   "main": "bin/tokensafe.js",
   "bin": {
