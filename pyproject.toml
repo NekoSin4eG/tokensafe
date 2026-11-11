@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tokensafe"
-version = "2.3.0"
+version = "2.4.0"
 description = "Local-first AI coding guardrails, context slicing, and team ROI telemetry for AI coding agents"
 readme = "README.md"
 authors = [

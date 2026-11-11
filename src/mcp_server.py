@@ -39,7 +39,7 @@ from src.scoped_search import ScopedSearch
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
-    "version": "2.3.0"
+    "version": "2.4.0"
 }
 
 # MCP client attribution: the initialize handshake carries clientInfo, which
