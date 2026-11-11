@@ -48,6 +48,8 @@ pip install tokensafe && tokensafe
 curl -fsSL https://tokensafe.dev/install.sh | bash
 ```
 
+On **Google Antigravity**, the installer additionally symlinks the plugin into `~/.gemini/config/plugins/agy-token-optimizer` — Antigravity loads it automatically on startup.
+
 ### Optional Dependency: `cryptography` (Recommended)
 
 The local TokenSafe engine uses Python's standard library only and runs out of the box. One optional package, [`cryptography`](https://pypi.org/project/cryptography/), is installed automatically by `install.sh` and `requirements.txt` when available:
@@ -522,7 +524,7 @@ TokenSafe Cloud Backend enforces strict zero-trust boundaries across client and 
 - **Asymmetric RFC 8032 Ed25519 Signatures (`TS2.*`)**: Client instances verify digital signatures offline using an embedded 32-byte public key. The private signing key never leaves the cloud environment.
 - **JWT Session Tokens**: Cloud endpoints verify sessions via HS256 JWT bearer tokens or Clerk session tokens.
 - **Dual Bearer Support**: Client endpoints accept either a signed license key (`TS2.*` / `TS1.*`) or a JWT in `Authorization: Bearer <token>`.
-- **Zero Hardcoded Secrets**: SMTP, Stripe, admin, and signing secrets load strictly from runtime environment variables.
+- **Zero Hardcoded Secrets**: all server credentials load strictly from runtime environment variables — nothing is hardcoded in the codebase.
 
 ### 2. Cloud API Endpoint Reference
 
@@ -535,22 +537,8 @@ TokenSafe Cloud Backend enforces strict zero-trust boundaries across client and 
 | `POST` | `/api/team/seat/create` | **Bearer Auth** | `Authorization: Bearer <jwt\|key>`, JSON `{ owner_email, member_email }` | Generates a cryptographically signed seat license for a team member. |
 | `POST` | `/api/team/seat/revoke` | **Bearer Auth** | `Authorization: Bearer <jwt\|key>`, JSON `{ owner_email, license_key }` | Revokes an active team seat license key. |
 | `POST` | `/api/telemetry/sync` | **License Auth** | JSON `{ license_key, email, events: [...] }` | Syncs batch telemetry events (enforces max 50 events/batch). |
-| `POST` | `/webhook/stripe` | **HMAC Sig** | `Stripe-Signature: t=...,v1=...` | Verifies Stripe webhook payload against `STRIPE_WEBHOOK_SECRET`. |
 
-> **Note:** administrative endpoints are intentionally **not documented in the public API surface** (including their paths). They require a dedicated admin secret or admin JWT and reside strictly in internal operational documentation. Seat and license management is available through the [dashboard](https://dashboard.tokensafe.dev).
-
-### 3. Server Configuration & Environment Variables
-
-| Variable | Required | Default / Description |
-|---|---|---|
-| `TOKENSAFE_PRIVATE_KEY` | Production | 64-character hex Ed25519 seed for issuing `TS2.` licenses. |
-| `ADMIN_SECRET_KEY` | Yes | High-entropy secret for administrative API access (`X-Admin-Secret`). |
-| `ADMIN_EMAILS` | Optional | Comma-separated admin emails (e.g. `admin@yourcompany.com`). |
-| `STRIPE_WEBHOOK_SECRET` | Production | Webhook secret (`whsec_...`) used to verify Stripe webhooks. |
-| `SMTP_PASS` | Production | Password/token for transactional mail delivery via ImprovMX SMTP. |
-| `JWT_SECRET` | Optional | Shared HMAC secret for verifying custom JWT tokens. Set a persistent value in production so sessions do not reset on restart. |
-| `CLERK_JWT_KEY` | Production (web) | Clerk public key (PEM) or HMAC key for verifying Clerk session tokens. Without it (or without `cryptography`), Clerk tokens are rejected (fail-closed). |
-| `TOKENSAFE_TELEMETRY_DISABLED` | Optional | Set to `1` to disable cloud telemetry sync (privacy / offline / CI). |
+Seat and license management is available through the [dashboard](https://dashboard.tokensafe.dev). Privacy controls (e.g. `TOKENSAFE_TELEMETRY_DISABLED=1` to disable cloud telemetry sync) are documented in [METRICS.md](METRICS.md).
 
 ---
 
@@ -606,7 +594,7 @@ agy-token-optimizer/
 │   ├── mailer.py               # Transactional email & Friday ROI digest dispatcher
 │   ├── mcp_server.py           # Native Model Context Protocol (MCP) server
 │   ├── installer.py            # Multi-IDE agent auto-installer & config wizard
-│   └── cloud_backend.py        # Cloud REST backend, telemetry sync & Stripe webhooks
+│   └── cloud_backend.py        # Cloud REST backend & team telemetry API
 ├── hooks/
 │   ├── pre_invocation.py       # PreInvocation hook entry point
 │   ├── pre_tool_use.py         # PreToolUse hook entry point
@@ -619,13 +607,3 @@ agy-token-optimizer/
 ├── install.sh                  # One-click installer for Antigravity
 └── README.md
 ```
-
----
-
-## Antigravity Plugin Setup
-
-Run the local plugin installer:
-```bash
-./install.sh
-```
-This symlinks the plugin into `~/.gemini/config/plugins/agy-token-optimizer` so Antigravity loads it on startup.
