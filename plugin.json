@@ -2,7 +2,7 @@
   "name": "tokensafe",
   "displayName": "TokenSafe",
   "version": "2.4.2",
-  "description": "Local-first guardrails, focused context & auditable team ROI for AI coding agents. Agents read only the code they need (60-90% less token spend), secrets get blocked before commit.",
+  "description": "Local-first AI guardrails: reduce AI bills by up to 90%, focused context, zero leaked secrets.",
   "logo": "assets/logo.svg",
   "author": {
     "name": "Oleg Savelev",

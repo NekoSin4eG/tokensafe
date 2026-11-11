@@ -2,7 +2,7 @@
   "name": "tokensafe",
   "mcpName": "dev.tokensafe/tokensafe",
   "version": "2.4.2",
-  "description": "Local-first AI coding guardrails, 60-90% token savings via AST context slicing, and team ROI telemetry",
+  "description": "Local-first AI guardrails: reduce AI bills by up to 90%, focused context, zero leaked secrets.",
   "main": "bin/tokensafe.js",
   "bin": {
     "tokensafe": "bin/tokensafe.js"
