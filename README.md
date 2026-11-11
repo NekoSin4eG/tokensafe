@@ -7,7 +7,7 @@
 
 <p align="center">
   <b>Local-First AI Guardrails, Focused Context &amp; Auditable Team ROI</b><br>
-  Stop paying for AI hallucinations and secret leaks. TokenSafe sits locally between your team's coding agents and your repositories: agents read only the code they need, exposed secrets and unsafe edits get blocked before commit, and engineering leads get an auditable per-seat ROI report every Friday.<br>
+  Stop paying for AI hallucinations, secret leaks, and runaway token bills. TokenSafe sits locally between your team's coding agents and your repositories: agents read only the code they need, cutting context token spend by 60-90% (measured and estimated per METRICS.md), exposed secrets and unsafe edits get blocked before commit, and engineering leads get an auditable per-seat ROI report every Friday.<br>
   Built for teams using <b>Cursor, Claude Code, Codex, Windsurf, Google Antigravity, Gemini CLI, and ChatGPT</b>.
 </p>
 
