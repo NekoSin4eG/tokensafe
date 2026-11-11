@@ -45,6 +45,9 @@ def main():
     args = tool_call.get("args", {})
     conversation_id = payload.get("conversationId", "default_session")
     last_user_input = payload.get("lastUserInput", "")
+    # Working directory of the tool call: lets the Command Sanitizer peek at
+    # package.json to identify the runner behind opaque `yarn/npm test` scripts
+    hook_cwd = payload.get("cwd") or os.getcwd()
 
     tracker = MetricsTracker()
     quota = LicenseManager.check_quota(tracker)
@@ -245,7 +248,7 @@ def main():
 
         if is_quota_exceeded:
             # Free tier quota reached: pass through without AST diff slicing or savings tracking
-            new_cmd, est_saved, reason = CommandSanitizer.sanitize(cmd)
+            new_cmd, est_saved, reason = CommandSanitizer.sanitize(cmd, cwd=hook_cwd)
             if new_cmd and est_saved > 0:
                 response["overwrite"] = {"CommandLine": new_cmd}
             print(json.dumps(response))
@@ -258,7 +261,7 @@ def main():
         diff_cmd, diff_saved, diff_reason = DiffSlicer.optimize_git_diff_command(cmd)
         if diff_cmd:
             cmd = diff_cmd
-        new_cmd, san_saved, san_reason = CommandSanitizer.sanitize(cmd)
+        new_cmd, san_saved, san_reason = CommandSanitizer.sanitize(cmd, cwd=hook_cwd)
         if new_cmd:
             est_saved = san_saved + (diff_saved if diff_cmd else 0)
             reason = (f"{diff_reason}; {san_reason}" if diff_cmd else san_reason)

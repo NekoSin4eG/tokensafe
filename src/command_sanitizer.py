@@ -9,6 +9,8 @@ so rewrites never leak pathspecs into an unrelated stage (e.g. lockfile
 excludes landing on `npm test` after `git diff && npm test`).
 """
 
+import json
+import os
 import re
 from typing import Tuple, Dict, Any, List, Optional
 
@@ -27,6 +29,7 @@ class CommandSanitizer:
     _JEST_FINGERPRINT_RE = re.compile(r"--watchAll|--detectOpenHandles|--testPathPattern|--testMatch|--runInBand")
     _BARE_WATCH_RE = re.compile(r"\s--watch(?=[\s]|$)")
     _NPM_TEST_RE = re.compile(r"\bnpm\s+(?:run\s+)?test[\w:./-]*")
+    _CD_RE = re.compile(r'^\s*cd\s+(["\']?)(.+?)\1\s*$')
 
     # Lockfiles and binary patterns that should never be dumped in git diffs or searches
     LOCKFILE_EXCLUDES = [
@@ -164,7 +167,7 @@ class CommandSanitizer:
         return bool(re.search(r"(^|\s)[0-9&]*>{1,2}", stage))
 
     @classmethod
-    def _optimize_stage(cls, stage: str) -> Optional[Tuple[str, int, str, Optional[Tuple[str, int]]]]:
+    def _optimize_stage(cls, stage: str, cwd: Optional[str] = None) -> Optional[Tuple[str, int, str, Optional[Tuple[str, int]]]]:
         """
         Applies one rewrite rule to a single stage.
         Returns (new_stage, est_saved, reason, cap_spec) or None.
@@ -205,7 +208,7 @@ class CommandSanitizer:
 
         # test runners: agents block on these in the background; watch mode or
         # an unclosed jest handle means the process never exits (infinite wait)
-        guard = cls._optimize_test_stage(stage)
+        guard = cls._optimize_test_stage(stage, cwd)
         if guard:
             return guard
 
@@ -293,7 +296,7 @@ class CommandSanitizer:
         return None
 
     @classmethod
-    def _optimize_test_stage(cls, stage: str) -> Optional[Tuple[str, int, str, None]]:
+    def _optimize_test_stage(cls, stage: str, cwd: Optional[str] = None) -> Optional[Tuple[str, int, str, None]]:
         """
         Forces run-once mode on JS test-runner stages. Agents launch these in
         the background and block until process exit; watch mode or an unclosed
@@ -307,9 +310,11 @@ class CommandSanitizer:
             silently swallows them otherwise, leaving default watch mode on),
           - prepends CI=true as a run-once fallback for opaque package scripts
             (CRA and vitest both gate watch mode on the CI variable).
-        An opaque `yarn/npm test` script is only classified as jest when it
-        carries a jest-only flag fingerprint (--watchAll, --detectOpenHandles...),
-        so unknown runners just get the safe CI=true fallback.
+        An opaque `yarn/npm test` script is classified via a jest-only flag
+        fingerprint (--watchAll, --detectOpenHandles...) when present; without
+        one, `cwd` unlocks a package.json peek at scripts.test ("react-scripts
+        test" -> script-jest, "vitest" -> script-vitest). No cwd or an
+        unrecognized script falls back to the conservative generic treatment.
         """
         if cls._TOKENSAFE_TESTS_RE.search(stage):
             return None
@@ -318,7 +323,11 @@ class CommandSanitizer:
         elif cls._JEST_RE.match(stage) or cls._JEST_SCRIPT_RE.search(stage):
             runner = "jest"
         elif cls._PKG_MANAGER_TEST_RE.search(stage):
-            runner = "jest" if cls._JEST_FINGERPRINT_RE.search(stage) else "generic"
+            if cls._JEST_FINGERPRINT_RE.search(stage):
+                runner = "jest"
+            else:
+                script_runner = cls._peek_test_script_runner(cwd)
+                runner = {"jest": "script-jest", "vitest": "script-vitest"}.get(script_runner, "generic")
         else:
             return None
 
@@ -326,16 +335,16 @@ class CommandSanitizer:
         reasons: List[str] = []
         saved = 0
 
-        if runner == "vitest":
+        if runner in ("vitest", "script-vitest"):
             if cls._BARE_WATCH_RE.search(new_stage):
                 new_stage = cls._BARE_WATCH_RE.sub("", new_stage)
                 reasons.append("Dropped bare --watch from vitest command")
                 saved += 300
-            if not re.search(r"\bvitest\s+run\b", new_stage):
+            if runner == "vitest" and not re.search(r"\bvitest\s+run\b", new_stage):
                 new_stage = re.sub(r"\bvitest\b", "vitest run", new_stage, count=1)
                 reasons.append("Rewrote vitest to one-shot `vitest run`")
                 saved += 400
-        elif runner == "jest":
+        elif runner in ("jest", "script-jest"):
             if cls._BARE_WATCH_RE.search(new_stage):
                 new_stage = cls._BARE_WATCH_RE.sub(" --watch=false", new_stage)
                 reasons.append("Normalized bare --watch to --watch=false")
@@ -344,6 +353,12 @@ class CommandSanitizer:
                 new_stage = re.sub(r"\s--watchAll(?=[\s]|$)", " --watchAll=false", new_stage)
                 reasons.append("Normalized bare --watchAll to --watchAll=false")
                 saved += 400
+            if runner == "script-jest" and "--watch=false" not in new_stage:
+                # A script like "jest --watch" can bake watch mode in; jest's
+                # yargs parser takes the last flag, so this one wins over it
+                new_stage += " --watch=false"
+                reasons.append("Appended --watch=false (package.json script may bake watch mode in)")
+                saved += 300
             if "--forceExit" not in new_stage:
                 new_stage += " --forceExit"
                 reasons.append("Appended --forceExit so jest exits despite open handles")
@@ -370,11 +385,43 @@ class CommandSanitizer:
         return new_stage, saved, "; ".join(reasons), None
 
     @classmethod
-    def sanitize(cls, command: str) -> Tuple[Optional[str], int, str]:
+    def _peek_test_script_runner(cls, cwd: Optional[str]) -> Optional[str]:
+        """
+        Classifies the runner behind an opaque package.json test script
+        (e.g. "test": "react-scripts test" -> "jest"). Returns "jest",
+        "vitest", or None when cwd is unknown, package.json is missing or
+        unreadable, or the script is an unrecognized runner — callers then
+        fall back to the conservative generic treatment.
+        """
+        if not cwd:
+            return None
+        try:
+            with open(os.path.join(cwd, "package.json"), "r", encoding="utf-8") as fh:
+                data = json.load(fh)
+        except (OSError, ValueError):
+            return None
+        if not isinstance(data, dict):
+            return None
+        scripts = data.get("scripts")
+        script = scripts.get("test") if isinstance(scripts, dict) else None
+        if not isinstance(script, str):
+            return None
+        if re.search(r"\bvitest\b", script):
+            return "vitest"
+        if re.search(r"\bjest\b", script) or cls._JEST_SCRIPT_RE.search(script):
+            return "jest"
+        return None
+
+    @classmethod
+    def sanitize(cls, command: str, cwd: Optional[str] = None) -> Tuple[Optional[str], int, str]:
         """
         Analyzes a shell command stage by stage. If any stage creates massive
         token waste, returns (rewritten_command, est_tokens_saved, reason).
         If no change is needed, returns (None, 0, "").
+        `cwd` is the working directory the command will run in; when provided,
+        the test-runner guard may read <cwd>/package.json to identify the
+        runner behind an opaque test script. A `cd` stage updates that
+        directory for the stages that follow (cd app && yarn test ...).
         """
         if not command or not command.strip():
             return None, 0, ""
@@ -384,9 +431,18 @@ class CommandSanitizer:
         total_saved = 0
         reasons: List[str] = []
         cap_spec: Optional[Tuple[str, int]] = None
+        current_dir = os.path.abspath(os.path.expanduser(cwd)) if cwd else None
 
         for i, (op, stage) in enumerate(pairs):
-            res = cls._optimize_stage(stage)
+            cd_match = cls._CD_RE.match(stage)
+            if cd_match:
+                target = os.path.expanduser(cd_match.group(2).strip())
+                if target and target != "-":
+                    base = current_dir or os.getcwd()
+                    current_dir = os.path.normpath(
+                        target if os.path.isabs(target) else os.path.join(base, target)
+                    )
+            res = cls._optimize_stage(stage, current_dir)
             if not res:
                 continue
             new_stage, saved, reason, rule_cap = res

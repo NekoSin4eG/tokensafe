@@ -1,3 +1,6 @@
+import json
+import os
+import tempfile
 import unittest
 from src.command_sanitizer import CommandSanitizer
 
@@ -182,6 +185,64 @@ class TestTestRunnerWatchGuard(unittest.TestCase):
         self.assertFalse(new_cmd.startswith("CI=true CI=true"))
         self.assertIn("--watch=false", new_cmd)
         self.assertIn("--forceExit", new_cmd)
+
+    # -- package.json peek (opaque test scripts) ----------------------------------
+
+    def test_package_json_jest_script_unlocks_full_treatment(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "package.json"), "w", encoding="utf-8") as fh:
+                json.dump({"scripts": {"test": "react-scripts test"}}, fh)
+            new_cmd, saved, reason = CommandSanitizer.sanitize("yarn test src/a.test.tsx", cwd=tmp)
+            self.assertEqual(new_cmd, "CI=true yarn test src/a.test.tsx --watch=false --forceExit")
+            self.assertIn("forceExit", reason)
+
+    def test_package_json_jest_script_with_baked_watch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "package.json"), "w", encoding="utf-8") as fh:
+                json.dump({"scripts": {"test": "jest --watch"}}, fh)
+            new_cmd, saved, reason = CommandSanitizer.sanitize("yarn test", cwd=tmp)
+            self.assertEqual(new_cmd, "CI=true yarn test --watch=false --forceExit")
+
+    def test_package_json_vitest_script_stays_ci_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "package.json"), "w", encoding="utf-8") as fh:
+                json.dump({"scripts": {"test": "vitest"}}, fh)
+            new_cmd, saved, reason = CommandSanitizer.sanitize("yarn test src/a.test.tsx", cwd=tmp)
+            self.assertEqual(new_cmd, "CI=true yarn test src/a.test.tsx")
+
+    def test_package_json_unknown_script_stays_ci_only(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "package.json"), "w", encoding="utf-8") as fh:
+                json.dump({"scripts": {"test": "mocha --watch"}}, fh)
+            new_cmd, saved, reason = CommandSanitizer.sanitize("yarn test src/a.test.tsx", cwd=tmp)
+            self.assertEqual(new_cmd, "CI=true yarn test src/a.test.tsx")
+            self.assertNotIn("--forceExit", new_cmd)
+
+    def test_missing_package_json_falls_back_to_generic(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            new_cmd, saved, reason = CommandSanitizer.sanitize("yarn test src/a.test.tsx", cwd=tmp)
+            self.assertEqual(new_cmd, "CI=true yarn test src/a.test.tsx")
+
+    def test_cd_prefix_resolves_package_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app_dir = os.path.join(tmp, "app")
+            os.mkdir(app_dir)
+            with open(os.path.join(app_dir, "package.json"), "w", encoding="utf-8") as fh:
+                json.dump({"scripts": {"test": "react-scripts test"}}, fh)
+            new_cmd, saved, reason = CommandSanitizer.sanitize("cd app && yarn test src/a.test.tsx", cwd=tmp)
+            self.assertEqual(
+                new_cmd,
+                "cd app && CI=true yarn test src/a.test.tsx --watch=false --forceExit",
+            )
+
+    def test_quoted_cd_target_resolves_package_json(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            app_dir = os.path.join(tmp, "my app")
+            os.mkdir(app_dir)
+            with open(os.path.join(app_dir, "package.json"), "w", encoding="utf-8") as fh:
+                json.dump({"scripts": {"test": "react-scripts test"}}, fh)
+            new_cmd, saved, reason = CommandSanitizer.sanitize('cd "my app" && yarn test', cwd=tmp)
+            self.assertEqual(new_cmd, 'cd "my app" && CI=true yarn test --watch=false --forceExit')
 
 
 if __name__ == "__main__":
