@@ -209,11 +209,20 @@ class AgentInstaller:
             return False, f"Unknown agent: {agent_key}"
 
         if info["type"] == "plugin":
-            # Symlink plugin directory
+            # Symlink the plugin under its canonical name only. Antigravity keys
+            # plugin enable-state by directory name (plugins.md), so a second
+            # legacy-named symlink registers the plugin twice and runs every
+            # hook twice per turn. Remove only stale legacy SYMLINKS — a real
+            # directory there is user data and must not be touched.
             target = info["target_path"]
             cls._symlink_dir(PROJECT_ROOT, target)
-            if "legacy_path" in info:
-                cls._symlink_dir(PROJECT_ROOT, info["legacy_path"])
+            legacy = info.get("legacy_path")
+            if legacy:
+                try:
+                    if os.path.islink(legacy):
+                        os.unlink(legacy)
+                except Exception:
+                    pass
             return True, f"Symlinked plugin into {target}"
 
         elif info["type"] == "cursor_env":
@@ -657,11 +666,17 @@ class AgentInstaller:
         so auto-reconnecting IDEs (Antigravity, Cursor, Claude Code) spawn the updated version.
         """
         try:
-            data_dir = os.path.join(PROJECT_ROOT, "data")
-            os.makedirs(data_dir, exist_ok=True)
-            reload_marker = os.path.join(data_dir, ".mcp_reload")
-            with open(reload_marker, "w", encoding="utf-8") as f:
-                f.write(str(time.time()))
+            # Touch the marker in every candidate data dir: an MCP server launched
+            # inside the Antigravity plugin context resolves PLUGIN_DATA, while a
+            # bare CLI installer run does not — cover both so reloads are always
+            # seen. The legacy candidate follows THIS module's PROJECT_ROOT (the
+            # patchable checkout root), not paths.py's import-time constant.
+            from src.paths import resolve_data_dir
+            for data_dir in {resolve_data_dir(), os.path.join(PROJECT_ROOT, "data")}:
+                os.makedirs(data_dir, exist_ok=True)
+                reload_marker = os.path.join(data_dir, ".mcp_reload")
+                with open(reload_marker, "w", encoding="utf-8") as f:
+                    f.write(str(time.time()))
         except Exception:
             pass
 
@@ -829,10 +844,11 @@ class AgentInstaller:
 
         # 5. Refresh local version cache
         try:
-            data_dir = os.path.join(PROJECT_ROOT, "data")
-            cache_file = os.path.join(data_dir, "version_cache.json")
-            if os.path.exists(cache_file):
-                os.remove(cache_file)
+            from src.paths import resolve_data_dir, legacy_data_dir
+            for data_dir in {resolve_data_dir(), legacy_data_dir()}:
+                cache_file = os.path.join(data_dir, "version_cache.json")
+                if os.path.exists(cache_file):
+                    os.remove(cache_file)
         except Exception:
             pass
 

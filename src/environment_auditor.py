@@ -2,19 +2,30 @@
 Environment Auditor & Context Bloat Guard for Antigravity Token Optimizer.
 Detects heavy MCP servers, redundant tool schemas, and excessive skills that bloat
 the system prompt on every API turn. Provides one-click enable/disable toggles.
+Also audits always-on rule files against the Antigravity limits (rules.md):
+24 KB per file after @[label](path) expansion, 20,000-token shared budget.
 """
 
 import os
+import re
 import json
 from typing import Dict, List, Any, Optional
+
+from src.tokenizer import count_tokens
 
 EST_TOKENS_PER_TOOL = 25
 EST_TOKENS_PER_SKILL = 180
 CRITICAL_TOOL_COUNT_THRESHOLD = 40
 
+# rules.md contract limits
+RULE_FILE_LIMIT_BYTES = 24000   # per rule file, after @[label](path) expansion
+RULES_BUDGET_TOKENS = 20000     # shared always-on/global rules budget
+
+_RULE_INCLUDE_RE = re.compile(r"@\[[^\]]*\]\(([^)]+)\)")
+
 
 class EnvironmentAuditor:
-    """Scans and audits static context overhead (MCP servers and skills)."""
+    """Scans and audits static context overhead (MCP servers, skills, rules)."""
 
     @classmethod
     def get_config_paths(cls) -> List[str]:
@@ -29,12 +40,15 @@ class EnvironmentAuditor:
         return os.path.join(os.path.expanduser("~"), ".gemini", "antigravity", "mcp")
 
     @classmethod
-    def get_skills_dirs(cls) -> List[str]:
+    def get_skills_dirs(cls, workspace_root: Optional[str] = None) -> List[str]:
+        """Global skill roots plus the workspace `.agents/` customization dir
+        (json_configs.md: one level deep, entries scanned for SKILL.md)."""
         home = os.path.expanduser("~")
         dirs = [
             os.path.join(home, ".gemini", "config", "skills"),
             os.path.join(home, ".gemini", "config", "plugins"),
             os.path.join(home, ".gemini", "antigravity", "builtin", "skills"),
+            os.path.join(workspace_root or os.getcwd(), ".agents"),
         ]
         return [d for d in dirs if os.path.isdir(d)]
 
@@ -51,8 +65,75 @@ class EnvironmentAuditor:
         return {}
 
     @classmethod
-    def audit(cls) -> Dict[str, Any]:
-        """Audits all active MCP servers and skills for context footprint."""
+    def _load_rule_text(cls, path: str, depth: int = 1) -> str:
+        """Reads a rule file with one level of @[label](path) include expansion."""
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                text = f.read()
+        except Exception:
+            return ""
+
+        if depth <= 0:
+            return text
+
+        def _sub(match: "re.Match[str]") -> str:
+            inc = match.group(1)
+            if not os.path.isabs(inc):
+                inc = os.path.join(os.path.dirname(path), inc)
+            try:
+                with open(inc, "r", encoding="utf-8", errors="replace") as f:
+                    return f.read()
+            except Exception:
+                return ""
+
+        return _RULE_INCLUDE_RE.sub(_sub, text)
+
+    @classmethod
+    def audit_rules(cls, workspace_root: Optional[str] = None) -> Dict[str, Any]:
+        """Audits workspace rule files against the rules.md limits.
+
+        Scans AGENTS.md / GEMINI.md at the workspace root and .agents/rules/*.md.
+        Per-file: effective byte size after include expansion vs the 24 KB cap.
+        Aggregate: token count vs the 20,000-token always-on rules budget
+        (exceeding it demotes rules to file-path pointers)."""
+        root = workspace_root or os.getcwd()
+        candidates = [
+            os.path.join(root, "AGENTS.md"),
+            os.path.join(root, "GEMINI.md"),
+        ]
+        rules_dir = os.path.join(root, ".agents", "rules")
+        if os.path.isdir(rules_dir):
+            for entry in sorted(os.listdir(rules_dir)):
+                if entry.endswith(".md"):
+                    candidates.append(os.path.join(rules_dir, entry))
+
+        violations: List[Dict[str, Any]] = []
+        total_tokens = 0
+        files_count = 0
+        for path in candidates:
+            if not os.path.isfile(path):
+                continue
+            files_count += 1
+            text = cls._load_rule_text(path)
+            effective_bytes = len(text.encode("utf-8", errors="replace"))
+            total_tokens += count_tokens(text)
+            if effective_bytes > RULE_FILE_LIMIT_BYTES:
+                violations.append({
+                    "path": os.path.relpath(path, root),
+                    "effective_bytes": effective_bytes,
+                    "limit_bytes": RULE_FILE_LIMIT_BYTES,
+                })
+
+        return {
+            "files": files_count,
+            "total_tokens": total_tokens,
+            "budget_exceeded": total_tokens > RULES_BUDGET_TOKENS,
+            "violations": violations,
+        }
+
+    @classmethod
+    def audit(cls, workspace_root: Optional[str] = None) -> Dict[str, Any]:
+        """Audits all active MCP servers, skills and rules for context footprint."""
         configured = cls.get_configured_mcp_servers()
         schemas_dir = cls.get_mcp_schemas_dir()
 
@@ -97,10 +178,13 @@ class EnvironmentAuditor:
 
         # 2. Count skills
         skills_count = 0
-        for sdir in cls.get_skills_dirs():
+        for sdir in cls.get_skills_dirs(workspace_root):
             for root, dirs, files in os.walk(sdir):
                 if "SKILL.md" in files:
                     skills_count += 1
+
+        # 3. Rule files (rules.md limits)
+        rules = cls.audit_rules(workspace_root)
 
         total_mcp_tools = sum(s["tool_count"] for s in servers.values() if s["active"])
         total_mcp_tokens = sum(s["est_tokens_per_turn"] for s in servers.values() if s["active"])
@@ -118,23 +202,42 @@ class EnvironmentAuditor:
             "skills_tokens_per_turn": total_skills_tokens,
             "total_static_tokens_per_turn": total_static_tokens,
             "bloated_servers": bloated_servers,
-            "has_critical_bloat": len(bloated_servers) > 0
+            "has_critical_bloat": len(bloated_servers) > 0,
+            "rules": rules
         }
 
     @classmethod
-    def get_bloat_warning(cls) -> Optional[str]:
-        """Returns a formatted warning string if critical context bloat is detected."""
-        report = cls.audit()
-        if not report["has_critical_bloat"]:
-            return None
+    def get_bloat_warning(cls, workspace_root: Optional[str] = None) -> Optional[str]:
+        """Returns a formatted warning string if critical context bloat or
+        rule-file overruns are detected."""
+        report = cls.audit(workspace_root)
+        parts: List[str] = []
 
-        bloated = report["bloated_servers"]
-        names = ", ".join([f"`{b['name']}` ({b['tool_count']} tools, ~{b['est_tokens_per_turn']:,} tokens/turn)" for b in bloated])
-        return (
-            f"⚠️ **TokenSafe Bloat Alert**: Heavy MCP server detected: {names}. "
-            f"Static context overhead per turn: **~{report['total_static_tokens_per_turn']:,} tokens**. "
-            f"Disable unused servers via `tokensafe mcp disable <name>`."
-        )
+        if report["has_critical_bloat"]:
+            bloated = report["bloated_servers"]
+            names = ", ".join([f"`{b['name']}` ({b['tool_count']} tools, ~{b['est_tokens_per_turn']:,} tokens/turn)" for b in bloated])
+            parts.append(
+                f"Heavy MCP server detected: {names}. "
+                f"Static context overhead per turn: **~{report['total_static_tokens_per_turn']:,} tokens**. "
+                f"Disable unused servers via `tokensafe mcp disable <name>`."
+            )
+
+        rules = report.get("rules") or {}
+        if rules.get("budget_exceeded"):
+            parts.append(
+                f"Always-on rule files total ~{rules['total_tokens']:,} tokens — over the "
+                f"{RULES_BUDGET_TOKENS:,}-token rules budget; over-budget rules degrade to file-path pointers. "
+                f"Trim AGENTS.md / .agents/rules/*.md."
+            )
+        for v in rules.get("violations", []):
+            parts.append(
+                f"Rule file `{v['path']}` is {v['effective_bytes']:,} bytes after @[label](path) expansion — "
+                f"over the {RULE_FILE_LIMIT_BYTES:,}-byte per-file cap; it will be truncated."
+            )
+
+        if not parts:
+            return None
+        return "⚠️ **TokenSafe Bloat Alert**: " + " ".join(parts)
 
     @classmethod
     def disable_mcp(cls, server_name: str) -> Dict[str, Any]:
@@ -227,9 +330,9 @@ class EnvironmentAuditor:
         }
 
     @classmethod
-    def format_cli_report(cls) -> str:
+    def format_cli_report(cls, workspace_root: Optional[str] = None) -> str:
         """Formats visual CLI report for tokensafe doctor."""
-        report = cls.audit()
+        report = cls.audit(workspace_root)
         lines = [
             "\n\033[1m\033[36m⚡ TOKENSAFE ENVIRONMENT AUDIT (CONTEXT TAX DOCTOR) ⚡\033[0m\n",
             f"  \033[1mTotal Base Context Tax:\033[0m ~{report['total_static_tokens_per_turn']:,} tokens on EVERY API turn\n",
@@ -247,6 +350,13 @@ class EnvironmentAuditor:
             lines.append(f"    {status}")
 
         lines.append(f"\n  \033[1mInstalled Skills:\033[0m {report['total_skills']} skills (~{report['skills_tokens_per_turn']:,} tokens/turn)")
+
+        rules = report.get("rules") or {}
+        if rules.get("files"):
+            budget_flag = "\033[33mover budget\033[0m" if rules.get("budget_exceeded") else "\033[32mwithin budget\033[0m"
+            lines.append(f"  \033[1mRule Files:\033[0m {rules['files']} files, ~{rules['total_tokens']:,}/20,000 tokens [{budget_flag}]")
+            for v in rules.get("violations", []):
+                lines.append(f"    \033[31m✖ {v['path']}: {v['effective_bytes']:,} bytes > {RULE_FILE_LIMIT_BYTES:,} cap\033[0m")
 
         if report["has_critical_bloat"]:
             lines.append("\n  \033[33m\033[1mDiagnostic Recommendation:\033[0m")

@@ -44,125 +44,18 @@ folds multi-turn conversation history, slices verbose tool outputs, and guards a
 
 ## Core MCP Tools (`tokensafe`)
 
-All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
+The full tool table with efficiency impact, JSON workflow examples, the Guard check matrix, and the CLI reference live in `references/` — read only the file you need:
 
-| MCP Tool | Description | Efficiency Impact |
-|---|---|---|
-| `tokensafe:smart_read_file` | Graph-guided AST reader with target `symbol` body retention and 1-hop dependency inlining. | **-85% to -92%** token reduction |
-| `tokensafe:scoped_search` | Safe, token-bounded keyword, symbol, or config search across the codebase (supports `path`, 4s safety timeout, system root protection). | **-90% to -95%** vs raw grep/find |
-| `tokensafe:list_dir` | Token-efficient directory tree without lockfiles, timestamps, or ignored folders (node_modules, .git, dist, .env). Replaces `ls -la`. | **-90%** vs verbose `ls` |
-| `tokensafe:get_architecture_graph` | Computes dependency topology, hub centrality, and identifies top God Nodes for `project_path`. | **~200 tokens** (replaces 50k crawl) |
-| `tokensafe:get_api_surface` | Generates a compact markdown map of all exported types, interfaces, and classes. | **~500 tokens** for entire project |
-| `tokensafe:sanitize_command` | Per-stage command rewrites: lockfile diffs, unbounded `git log`/`git show`/`git blame`/`rg`, docker/kubectl log caps, quiet npm/pip installs, bounded `cat`/`curl` output. Compound commands (`a && b ; c`) are optimized per stage without breaking operators. Pass the optional `cwd` argument for test-runner commands: the guard reads `<cwd>/package.json` to identify the runner behind opaque `yarn/npm test` scripts and forces jest/vitest into run-once mode (`CI=true`, `--watch=false`, `--forceExit`) so agents never hang waiting on watch mode. | Saves **10k-50k tokens** per run |
-| `tokensafe:slice_diff` | Slices unified git diffs, eliminating lockfiles and minimizing hunk context lines. | **-50% to -80%** diff size |
-| `tokensafe:compress_prompt` | Compresses verbose user instructions into lean TOCP S-expressions via DeepSeek/Regex. | **-40% to -65%** prompt tokens |
-| `tokensafe:compact_conversation` | On-demand context compaction: folds a long JSONL session transcript into a lean Consolidated State Ledger (`transcript_path`, optional `invocation_num`). Call when the context window feels heavy or before a new subtask. | **-80% to -95%** history tokens |
-| `tokensafe:context_budget` | Context Budget HUD: estimated window usage (`model`/`window_tokens`/`session_id`) with tools/history/prompts breakdown and 50/80/95% thresholds. Call before deciding to compact. | Floor estimate, always labeled estimated |
-| `tokensafe:guard_inspect` | Pre-flight security & hygiene audit: denies literal secrets/destructive commands in shell lines (secrets, TLS, SQLi, raw grep); advisory for never-terminating streams (`tail -f`, `watch`, `docker attach`) and TLS bypasses. | **Zero-Risk** pre-flight gate |
-| `tokensafe:get_token_savings_metrics` | Returns cumulative analytics: tokens saved (measured/estimated split), context ratio, ≈USD value (derived), and optimization source breakdown. | Persistent SQLite analytics |
+- [`references/mcp-tools.md`](references/mcp-tools.md) — Core MCP Tools table + Agent Workflow JSON examples
+- [`references/guard-checks.md`](references/guard-checks.md) — Security & Hygiene Guard check matrix (deny/ask per operation)
+- [`references/cli-reference.md`](references/cli-reference.md) — `tokensafe` CLI command reference
 
----
+Quick pointers:
 
-## Agent Workflows
-
-### 1. Architecture Exploration Workflow
-```json
-{
-  "ServerName": "tokensafe",
-  "ToolName": "get_architecture_graph",
-  "Arguments": {
-    "project_path": "/Users/.../projects/my-app"
-  }
-}
-```
-*Identifies core architectural hubs and dependency weights before inspecting files.*
-
-### 2. Scoped Code & Config Search Workflow
-```json
-{
-  "ServerName": "tokensafe",
-  "ToolName": "scoped_search",
-  "Arguments": {
-    "query": "HARDCODED_VERSION",
-    "path": "/Users/.../projects/my-app/src",
-    "scope": "code"
-  }
-}
-```
-*Locates exact occurrences with file and line references in < 100 tokens. Always pass explicit `path` or `project_path` (auto-guarded against system roots with 4s safety timeout).*
-
-### 2b. Directory Navigation Workflow (`list_dir`)
-```json
-{
-  "ServerName": "tokensafe",
-  "ToolName": "list_dir",
-  "Arguments": {
-    "path": "/Users/.../projects/my-app/src",
-    "depth": 2
-  }
-}
-```
-*Renders a clean directory tree without permissions, timestamps, lockfiles, or heavy directories (`node_modules`, `.git`, `dist`).*
-
-### 3. Targeted Symbol Inspection Workflow
-```json
-{
-  "ServerName": "tokensafe",
-  "ToolName": "smart_read_file",
-  "Arguments": {
-    "path": "/Users/.../projects/my-app/src/views/StatsView.tsx",
-    "symbol": "LuckyWheelTab",
-    "include_deps": false
-  }
-}
-```
-*Extracts only the targeted `LuckyWheelTab` implementation with inert code and docstrings folded. Omit `include_deps` or set `true` to also inline 1-hop internal dependencies.*
-
-### 3. Public API Map Workflow
-```json
-{
-  "ServerName": "tokensafe",
-  "ToolName": "get_api_surface",
-  "Arguments": {
-    "project_path": "/Users/.../projects/my-app"
-  }
-}
-```
-*Returns all exported interfaces and types without reading hundreds of module files.*
-
-### 4. Pre-flight Security & Hygiene Audit
-```json
-{
-  "ServerName": "tokensafe",
-  "ToolName": "guard_inspect",
-  "Arguments": {
-    "command": "git add .env",
-    "code": "const key = process.env.JWT_SECRET || 'hardcoded_secret';",
-    "file_path": "src/auth.ts"
-  }
-}
-```
-*Validates commands and code snippets before execution; returns structured pass/block verdict with check_name.*
-
----
-
-## Security & Hygiene Engine (TokenSafe Guard)
-
-TokenSafe Guard automatically intercepts dangerous operations in `PreToolUse`:
-
-| Guard Check | Monitored Operation | Action Taken |
-|---|---|---|
-| **RAW_CODE_SEARCH** | Terminal `grep`, `egrep`, `rg`, `find` on source code | **Blocked** (`decision: deny`), directs to `scoped_search` / `smart_read_file` |
-| **SECRET_FALLBACK** | Hardcoded secrets in `os.environ.get()` / `process.env` | **Blocked** (`decision: deny`), prevents credential commit |
-| **TLS_VERIFY_BYPASS** | Insecure TLS bypass (`verify=False` / `rejectUnauthorized: false`) | **Blocked** (`decision: deny`), MitM attack prevention |
-| **SQL_INJECTION** | Unsafe f-string / template string interpolation in queries | **Blocked** (`decision: deny`), enforces parameterized queries |
-| **GIT_SECRET_STAGING** | `git add .env` or blanket staging with unignored secrets | **Blocked** (`decision: deny`), prevents staging credentials |
-| **DESTRUCTIVE_RM** | `rm -rf /`, `rm -rf ~`, `rm -rf *` | **Blocked** (`decision: deny`), prevents catastrophic deletion |
-| **DATA_EXFILTRATION** | Piping `.env` or private keys to `curl`/`wget` | **Blocked** (`decision: deny`), prevents secret leakage |
-| **PACKAGE_TYPOSQUAT** | Installing known typosquatted packages | **Warning** injected into turn context |
-| **INFINITE_STREAM** (adapters) | Never-terminating commands: `tail -f`, `watch`, `docker attach`, `docker/kubectl logs -f`, `vitest` (watch by default — use `vitest run`), `jest`/`vitest --watch` | **Asked** (`decision: ask`) — intentional runs proceed via confirmation |
-
-Adapter-level checks (Claude Code / Cursor / ZCode hooks) classify command-level TLS bypass (`curl -k`, `git -c http.sslVerify=false`, `GIT_SSL_NO_VERIFY=1`) and infinite streams as `ask`, and hard-deny raw recursive code search (`grep -rn src/`, `rg`, `find` over source trees) as `RAW_CODE_SEARCH` with a redirect to `tokensafe:scoped_search` — TokenSafe Guard's code-level checks above remain `deny`.
+- Search: `tokensafe:scoped_search(query, scope)` — never raw grep.
+- Inspect: `tokensafe:smart_read_file(path, symbol)` — definition + 1-hop deps.
+- Navigate: `tokensafe:get_architecture_graph(project_path)` / `tokensafe:get_api_surface(project_path)`.
+- Context: `tokensafe:compact_conversation(transcript_path)` / `tokensafe:context_budget`.
 
 ---
 
@@ -183,44 +76,9 @@ For long-running autonomous sessions, TokenSafe actively manages context bloat:
 
 ---
 
-## CLI Reference (`tokensafe`)
-
-Run standalone in the terminal or invoke via agent:
-
-```bash
-tokensafe --version           # Print version and exit (no metrics side effects)
-
-# Telemetry & Economics
-tokensafe stats               # View terminal report with tokens saved & USD ROI
-tokensafe html                # Launch interactive Apple-style HTML dashboard
-tokensafe benchmark           # Run the zero-context-loss benchmark suite (simulated SWE-bench harness; see BENCHMARK_REPORT.md)
-tokensafe tests [pytest]      # Run the unit test suite (compact failure report; --traceback for full stacks)
-
-# Code Intelligence & Architecture
-tokensafe graph [path]        # Inspect God Nodes and centrality ranking
-tokensafe map [path]          # Generate tokensafe-out/API_SURFACE.md
-tokensafe skeleton <file>     # View AST skeleton for a specific file
-
-# Multi-Agent Ecosystem Management
-tokensafe install             # Interactive agent installer (Cursor, Windsurf, Claude, etc.)
-tokensafe install --all       # Automatically configure all 9 detected agent environments
-tokensafe update              # One-click self-update & multi-agent re-synchronization
-
-# System Health & Hygiene
-tokensafe guard "<command>"   # Pre-flight check command safety (rm, secrets, grep)
-tokensafe guard audit [path]  # Recursively audit project files for security violations
-tokensafe doctor              # Audit MCP tool overhead and token tax
-tokensafe prune               # Compact metrics database and prune old events
-tokensafe vacuum              # Reclaim SQLite database disk space
-tokensafe test "<prompt>"     # Test TOCP S-expression prompt compaction
-```
-
----
-
 ## Proof-of-Savings Turn Footer (always in English)
 
 At the end of any response where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer in English:
 `⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens (≈$<usd> approx)`
 
 The USD figure is **derived** (tokens × $1.5/M blended rate) — an approximation for planning, never a bill. Cumulative analytics distinguish `measured` (metered I/O delta) from `estimated` (counterfactual baseline) savings — see METRICS.md.
-

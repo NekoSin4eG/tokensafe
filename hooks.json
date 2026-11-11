@@ -1,6 +1,13 @@
 {
   "token-optimizer": {
     "enabled": true,
+    "SessionStart": [
+      {
+        "type": "command",
+        "command": "python3 hooks/session_start.py",
+        "timeout": 10
+      }
+    ],
     "PreInvocation": [
       {
         "type": "command",
@@ -10,7 +17,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "read_file|run_command|write_file",
+        "matcher": "read_file|view_file|run_command|write_file|edit_file",
         "hooks": [
           {
             "type": "command",
@@ -30,6 +37,13 @@
             "timeout": 10
           }
         ]
+      }
+    ],
+    "Stop": [
+      {
+        "type": "command",
+        "command": "python3 hooks/stop_hook.py",
+        "timeout": 10
       }
     ]
   }

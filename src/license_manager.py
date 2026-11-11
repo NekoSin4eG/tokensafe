@@ -14,8 +14,10 @@ import base64
 import threading
 from typing import Dict, Any, Tuple, Optional
 
+from src.paths import resolve_data_dir
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+DATA_DIR = resolve_data_dir()
 LICENSE_FILE = os.path.join(DATA_DIR, "license.json")
 GLOBAL_DATA_DIR = os.path.expanduser("~/.tokensafe")
 GLOBAL_LICENSE_FILE = os.path.join(GLOBAL_DATA_DIR, "license.json")

@@ -31,7 +31,9 @@ if PROJECT_ROOT not in sys.path:
 from src.license_manager import LicenseManager
 from src.metrics import resolve_measurement
 
-DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+from src.paths import resolve_data_dir
+
+DATA_DIR = resolve_data_dir()
 METRICS_DB_PATH = os.path.join(DATA_DIR, "metrics.db")
 SYNC_STATE_PATH = os.path.join(DATA_DIR, "sync_state.json")
 SYNC_LOCK_PATH = os.path.join(DATA_DIR, ".sync.lock")

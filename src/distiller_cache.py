@@ -12,6 +12,8 @@ from collections import OrderedDict
 from datetime import datetime
 from typing import Optional, Dict, Any
 
+from src.paths import resolve_data_dir
+
 class DistillationCache:
     """Thread-safe two-tier cache (In-Memory LRU + Persistent SQLite)."""
 
@@ -39,8 +41,7 @@ class DistillationCache:
         if cls._db_path:
             return cls._db_path
 
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        data_dir = os.environ.get("TOKENSAFE_DATA_DIR", os.path.join(base_dir, "data"))
+        data_dir = resolve_data_dir()
         os.makedirs(data_dir, exist_ok=True)
         cls._db_path = os.path.join(data_dir, "metrics.db")
         return cls._db_path

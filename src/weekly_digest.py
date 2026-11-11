@@ -17,8 +17,10 @@ import sqlite3
 from contextlib import contextmanager
 from typing import Dict, List, Any, Optional, Tuple
 
+from src.paths import resolve_data_dir
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.environ.get("TOKENSAFE_DATA_DIR", os.path.join(PROJECT_ROOT, "data"))
+DATA_DIR = resolve_data_dir()
 CLOUD_DB_PATH = os.environ.get("TOKENSAFE_CLOUD_DB_PATH", os.path.join(DATA_DIR, "cloud.db"))
 
 

@@ -132,11 +132,13 @@ def main():
                 }))
                 return
 
-    # 3. read_file Optimization (AST Windowing & Skeletonization)
-    elif tool_name == "read_file":
-        path = args.get("Path", "")
-        start_line = args.get("StartLine")
-        end_line = args.get("EndLine")
+    # 3. read_file Optimization (AST Windowing & Skeletonization).
+    #    'view_file' is the IDE-surface name for the same tool (hooks.md) —
+    #    route it through the same optimization pipeline.
+    elif tool_name in ("read_file", "view_file"):
+        path = args.get("Path") or args.get("path") or args.get("FilePath") or ""
+        start_line = args.get("StartLine") or args.get("startLine")
+        end_line = args.get("EndLine") or args.get("endLine")
 
         if is_quota_exceeded:
             # Free tier quota reached: pass through raw read_file without AST skeletonization

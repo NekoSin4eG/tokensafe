@@ -13,6 +13,8 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any, Generator
 
+from src.paths import resolve_data_dir
+
 USD_PER_TOKEN = 1.50 / 1_000_000.0
 
 # Event types whose `original_tokens` baseline is a counterfactual estimate rather
@@ -62,10 +64,7 @@ class MetricsTracker:
 
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
-            data_dir = os.environ.get("TOKENSAFE_DATA_DIR")
-            if not data_dir:
-                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                data_dir = os.path.join(base_dir, "data")
+            data_dir = resolve_data_dir()
             os.makedirs(data_dir, exist_ok=True)
             db_path = os.environ.get("TOKENSAFE_DB_PATH", os.path.join(data_dir, "metrics.db"))
 

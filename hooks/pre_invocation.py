@@ -6,6 +6,10 @@ Fires before the LLM is invoked.
 2. Folds multi-turn history into Consolidated State Ledger if turns >= 3
 3. Records metrics in SQLite
 4. Injects compressed context and visual savings badge
+
+One-shot session concerns (quota/bloat banners, protocol directives, version
+check) live in session_start.py per the SessionStart hook contract — this
+hook stays per-turn lean.
 """
 
 import sys
@@ -20,8 +24,19 @@ from src.compactor import PromptCompactor
 from src.history_compactor import HistoryCompactor
 from src.metrics import MetricsTracker
 from src.governor import ContextBudget
-from src.environment_auditor import EnvironmentAuditor
 from src.license_manager import LicenseManager
+from src.paths import resolve_data_dir
+
+def _model_name(payload: dict) -> str:
+    """hooks.md contract: all payload keys are camelCase, the model arrives as
+    'modelName'. Tolerate the legacy 'model' key and env fallbacks."""
+    return (
+        payload.get("modelName")
+        or payload.get("model")
+        or os.environ.get("AGY_MODEL")
+        or os.environ.get("MODEL")
+        or ""
+    )
 
 def _proxy_is_active() -> bool:
     """True when the local tokensafe-proxy recently served agent traffic.
@@ -31,10 +46,7 @@ def _proxy_is_active() -> bool:
     duplicate the optimization and double-count it in metrics."""
     try:
         import time as _time
-        marker = os.path.join(
-            os.environ.get("TOKENSAFE_DATA_DIR", os.path.join(PROJECT_ROOT, "data")),
-            ".proxy_active",
-        )
+        marker = os.path.join(resolve_data_dir(), ".proxy_active")
         if os.path.exists(marker):
             return _time.time() - os.path.getmtime(marker) < 120.0
     except Exception:
@@ -68,38 +80,11 @@ def main():
     except Exception:
         pass
 
-    # 1. Quota and Environment Audits (Fires on first invocation)
+    # 1. Quota check gates compaction tiers. Its warning banner is injected
+    #    once per session by session_start.py, not on every turn here.
     quota = LicenseManager.check_quota(tracker)
-    if invocation_num <= 1:
-        try:
-            from src.version_checker import VersionChecker
-            VersionChecker.notify_os_update_background()
-        except Exception:
-            pass
-        if quota.get("warning"):
-            inject_steps.append({
-                "systemMessage": {
-                    "systemMessage": "",
-                    "metadata": {
-                        "user_markdown": quota["warning"]
-                    }
-                }
-            })
-        try:
-            bloat_warning = EnvironmentAuditor.get_bloat_warning()
-            if bloat_warning:
-                inject_steps.append({
-                    "systemMessage": {
-                        "systemMessage": "",
-                        "metadata": {
-                            "user_markdown": bloat_warning
-                        }
-                    }
-                })
-        except Exception:
-            pass
 
-    # 1. Prompt Compaction (Tier 2 LLM Distillation paused if community quota exceeded).
+    # 2. Prompt Compaction (Tier 2 LLM Distillation paused if community quota exceeded).
     #    Skipped while the proxy is in the loop: it already replaced the prompt.
     if last_user_input and len(last_user_input.strip()) >= 5 and not _proxy_is_active():
         enable_distill = not quota.get("is_quota_exceeded", False)
@@ -120,7 +105,7 @@ def main():
                     "symbol": compaction["symbol"],
                     "traits": compaction["traits"],
                     "tier": tier,
-                    "model": payload.get("model") or os.environ.get("AGY_MODEL") or os.environ.get("MODEL") or "gemini-3.8-flash"
+                    "model": _model_name(payload) or "gemini-3.8-flash"
                 }
             )
 
@@ -144,7 +129,7 @@ def main():
                 }
             })
 
-    # 2. Multi-turn History Compaction (Paused when community quota is exceeded)
+    # 3. Multi-turn History Compaction (Paused when community quota is exceeded)
     folded_text = None
     if not quota.get("is_quota_exceeded", False) and invocation_num >= 3 and transcript_path:
         folded_text, orig_hist_tokens, folded_tokens, stats = HistoryCompactor.fold_transcript(
@@ -172,7 +157,7 @@ def main():
                         "total_accum_orig": orig_hist_tokens,
                         "read_files": stats.get("read_files_count", 0),
                         "edited_files": stats.get("edited_files_count", 0),
-                        "model": payload.get("model") or os.environ.get("AGY_MODEL") or os.environ.get("MODEL") or "gemini-3.8-flash"
+                        "model": _model_name(payload) or "gemini-3.8-flash"
                     }
                 )
 
@@ -190,17 +175,12 @@ def main():
                 }
             })
 
-    # 3. Adaptive Protocol Enforcement Reminder (Dynamic Deduplication)
-    # Injects full directives on initial turns, after history folding, or upon guard violations.
-    # Otherwise suppresses repetitive blocks, saving ~60 tokens per invocation.
+    # 4. Adaptive Protocol Enforcement Reminder (Guard-triggered only).
+    #    Full directives are injected once per session by session_start.py as a
+    #    persistent systemMessage; here they are re-shown only when the guard
+    #    just fired or fresh history was folded.
     recent_guard = tracker.get_last_event(conversation_id, "GUARD_RAW_CODE_SEARCH")
-    should_inject_full = (
-        invocation_num <= 2 or
-        folded_text is not None or
-        recent_guard is not None
-    )
-
-    if should_inject_full:
+    if folded_text is not None or recent_guard is not None:
         protocol_reminder = (
             "[TokenSafe Mandatory Directives]:\n"
             "• Terminal code searches (grep/rg/find on source files) are BLOCKED by TokenSafe Guard.\n"
@@ -213,21 +193,13 @@ def main():
         inject_steps.append({
             "ephemeralMessage": protocol_reminder
         })
-    elif invocation_num % 5 == 0:
-        inject_steps.append({
-            "ephemeralMessage": "[Protocol: TokenSafe Active | Use 'tokensafe:scoped_search' & 'smart_read_file']"
-        })
 
-    response = {}
-    if inject_steps:
-        response["injectSteps"] = inject_steps
-
-    # 4. Context Budget HUD warning: inject once per session when the
+    # 5. Context Budget HUD warning: inject once per session when the
     #    instrumented context crosses 80% of the estimated window.
     try:
         budget = ContextBudget.estimate(
             tracker, session_id=conversation_id,
-            model=payload.get("model") or os.environ.get("AGY_MODEL") or os.environ.get("MODEL") or ""
+            model=_model_name(payload)
         )
         if budget["used_pct"] >= 80 and budget["instrumented_events"] >= 3:
             already = tracker.get_last_event(conversation_id, "BUDGET_WARNING")
@@ -253,6 +225,7 @@ def main():
     except Exception:
         pass
 
+    response = {}
     if inject_steps:
         response["injectSteps"] = inject_steps
 

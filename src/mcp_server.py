@@ -975,10 +975,15 @@ def _execute_with_timeout(tool_name: str, tool_args: dict, timeout: float = MCP_
 
 def _get_watched_mtimes() -> Tuple[Optional[float], ...]:
     """Returns mtimes for core server/package files and the update reload marker."""
+    try:
+        from src.paths import resolve_data_dir, legacy_data_dir
+        reload_markers = [os.path.join(d, ".mcp_reload") for d in {resolve_data_dir(), legacy_data_dir()}]
+    except Exception:
+        reload_markers = [os.path.join(BASE_DIR, "data", ".mcp_reload")]
     watched_paths = (
         os.path.abspath(__file__),
         os.path.join(BASE_DIR, "package.json"),
-        os.path.join(BASE_DIR, "data", ".mcp_reload"),
+        *reload_markers,
     )
     mtimes: List[Optional[float]] = []
     for p in watched_paths:

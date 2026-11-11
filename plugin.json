@@ -1,5 +1,5 @@
 {
-  "name": "agy-token-optimizer",
+  "name": "tokensafe",
   "displayName": "TokenSafe",
   "version": "2.2.1",
   "description": "Zero-Loss Token Economy & Context Optimizer for AI Agents. Compresses prompts, slices AST/tool outputs, and prevents stuck loops.",

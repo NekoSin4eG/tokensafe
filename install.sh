@@ -3,11 +3,20 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TARGET_DIR="${HOME}/.gemini/config/plugins/agy-token-optimizer"
+TARGET_DIR="${HOME}/.gemini/config/plugins/tokensafe"
 
 echo "⚡ Installing TokenSafe Plugin..."
 
 mkdir -p "${HOME}/.gemini/config/plugins"
+
+# Migrate away from the legacy plugin directory name: Antigravity keys plugin
+# enable-state by folder name, so a stale legacy symlink would register the
+# plugin twice and run every hook twice per turn. Remove only symlinks.
+LEGACY_DIR="${HOME}/.gemini/config/plugins/agy-token-optimizer"
+if [ -L "${LEGACY_DIR}" ]; then
+    echo "  Removing legacy symlink at ${LEGACY_DIR}..."
+    rm -f "${LEGACY_DIR}"
+fi
 
 if [ -L "${TARGET_DIR}" ] || [ -d "${TARGET_DIR}" ]; then
     echo "  Removing existing installation at ${TARGET_DIR}..."

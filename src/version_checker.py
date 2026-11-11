@@ -24,8 +24,10 @@ CACHE_TTL = 86400  # 24 hours
 # "broken" while the backend was redeploying).
 FALLBACK_CACHE_TTL = 900  # 15 minutes
 
+from src.paths import resolve_data_dir
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(PROJECT_ROOT, "data")
+DATA_DIR = resolve_data_dir()
 CACHE_FILE = os.path.join(DATA_DIR, "version_cache.json")
 CLOUD_CHECK_URL = os.environ.get("TOKENSAFE_VERSION_URL", "https://api.tokensafe.dev/api/version/check")
 

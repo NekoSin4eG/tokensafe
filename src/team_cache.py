@@ -28,8 +28,9 @@ class TeamCache:
         """Checks if current active license belongs to a Team tier subscription."""
         key = os.environ.get("TOKENSAFE_LICENSE_KEY", "").strip()
         if not key:
+            from src.paths import resolve_data_dir
             candidate_paths = [
-                os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "license.json"),
+                os.path.join(resolve_data_dir(), "license.json"),
                 os.path.join(os.getcwd(), "data", "license.json"),
                 os.path.expanduser("~/.tokensafe/license.json")
             ]

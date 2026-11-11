@@ -26,6 +26,7 @@ from src.secret_redactor import SecretRedactor
 from src.graph_engine import GraphEngine
 from src.cache_normalizer import PromptCacheNormalizer
 from src.governor import ContextGovernor
+from src.paths import resolve_data_dir
 
 DEFAULT_PORT = 8765
 DEFAULT_HOST = os.environ.get("HOST", os.environ.get("TOKENSAFE_HOST", "0.0.0.0"))
@@ -164,10 +165,7 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
         when the proxy is in the loop it REPLACES the last user message with the
         TOCP form, so hook-side injection would double-count the same prompt."""
         try:
-            marker = os.path.join(
-                os.environ.get("TOKENSAFE_DATA_DIR", os.path.join(BASE_DIR, "data")),
-                ".proxy_active",
-            )
+            marker = os.path.join(resolve_data_dir(), ".proxy_active")
             with open(marker, "w", encoding="utf-8") as f:
                 f.write(str(int(__import__("time").time())))
         except Exception:
@@ -253,7 +251,7 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
         custom_url = os.environ.get("TOKENSAFE_UPSTREAM_URL", "")
 
         # Supported keys from environment or config
-        data_dir = os.environ.get("TOKENSAFE_DATA_DIR", os.path.join(BASE_DIR, "data"))
+        data_dir = resolve_data_dir()
         conf_keys = {}
         config_path = os.path.join(data_dir, "config.json")
         if os.path.exists(config_path):

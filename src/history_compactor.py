@@ -54,8 +54,10 @@ class HistoryCompactor:
                 for tc in tool_calls:
                     name = tc.get("name", "")
                     args = tc.get("args", {})
-                    if name == "read_file":
-                        p = args.get("Path", "")
+                    if name in ("read_file", "view_file"):
+                        # 'view_file' is the IDE-surface name for read_file;
+                        # arg keys keep proto casing but tolerate lowercase.
+                        p = args.get("Path") or args.get("path") or args.get("FilePath") or ""
                         if p:
                             read_files.add(os.path.basename(p))
                     elif name in ("edit_file", "write_file"):
