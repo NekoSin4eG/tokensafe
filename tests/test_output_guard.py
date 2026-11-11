@@ -60,6 +60,28 @@ class TestOutputGuard(unittest.TestCase):
         res = json.loads(proc.stdout)
         self.assertEqual(res["decision"], "allow")
 
+    def test_edit_file_reaches_guard_branch(self):
+        """hooks.json matcher now includes edit_file; the guard branch
+        (pre_tool_use.py: write/edit tuple check) must fire for it."""
+        from types import SimpleNamespace
+        from unittest.mock import patch
+        import io
+        from hooks.pre_tool_use import main as hook_main
+        from src.guard import TokenSafeGuard
+
+        payload = {
+            "toolCall": {"name": "edit_file", "args": {"Path": "a.py", "Replacement": "x = 1"}},
+            "conversationId": "guard_edit_sess",
+        }
+        guard_res = SimpleNamespace(blocked=True, check_name="SECRET_FALLBACK", reason="boom")
+        with patch("sys.stdin", io.StringIO(json.dumps(payload))), \
+             patch("sys.stdout", new_callable=io.StringIO) as mock_out, \
+             patch.object(TokenSafeGuard, "inspect_file_write", staticmethod(lambda p, c: guard_res)):
+            hook_main()
+            res = json.loads(mock_out.getvalue())
+        self.assertEqual(res["decision"], "deny")
+        self.assertIn("TokenSafe Guard", res["reason"])
+
     def test_read_file_unmodified_when_quota_exceeded(self):
         # Create a file with 100 lines
         with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".py") as f:

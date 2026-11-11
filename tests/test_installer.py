@@ -131,6 +131,7 @@ class TestAgentInstaller(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as tmpdir, \
              patch("src.installer.PROJECT_ROOT", tmpdir), \
+             patch("src.paths.PROJECT_ROOT", tmpdir), \
              patch("src.installer.subprocess.run", return_value=mock_proc), \
              patch("src.installer.os.kill", side_effect=fake_kill), \
              patch("src.installer.time.sleep"):
@@ -139,6 +140,94 @@ class TestAgentInstaller(unittest.TestCase):
 
         self.assertEqual(count, 2)
         self.assertEqual(killed, [(54321, signal.SIGTERM), (54322, signal.SIGTERM)])
+
+
+class TestAntigravityPluginInstall(unittest.TestCase):
+    """Antigravity keys plugin enable-state by directory name (plugins.md):
+    a canonical symlink must be created and any stale legacy-named symlink
+    removed — otherwise every hook runs twice per turn."""
+
+    def setUp(self):
+        self.repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def test_canonical_symlink_created_and_legacy_symlink_removed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugins = os.path.join(tmpdir, "plugins")
+            os.makedirs(plugins)
+            target = os.path.join(plugins, "tokensafe")
+            legacy = os.path.join(plugins, "agy-token-optimizer")
+            os.symlink(self.repo_root, legacy)  # stale legacy symlink
+
+            orig_entry = AGENTS_REGISTRY["antigravity"]
+            AGENTS_REGISTRY["antigravity"] = {
+                "name": "Google Antigravity",
+                "type": "plugin",
+                "target_path": target,
+                "legacy_path": legacy,
+                "detect_path": tmpdir,
+            }
+            try:
+                ok, msg = AgentInstaller.install_mcp_config("antigravity")
+                self.assertTrue(ok)
+                self.assertTrue(os.path.islink(target))
+                self.assertEqual(os.path.realpath(target), os.path.realpath(self.repo_root))
+                self.assertFalse(os.path.lexists(legacy), "stale legacy symlink must be removed")
+            finally:
+                AGENTS_REGISTRY["antigravity"] = orig_entry
+                if os.path.islink(target):
+                    os.unlink(target)
+
+    def test_real_legacy_directory_is_not_touched(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugins = os.path.join(tmpdir, "plugins")
+            os.makedirs(plugins)
+            target = os.path.join(plugins, "tokensafe")
+            legacy = os.path.join(plugins, "agy-token-optimizer")
+            os.makedirs(legacy)
+            sentinel = os.path.join(legacy, "user-data.txt")
+            with open(sentinel, "w", encoding="utf-8") as f:
+                f.write("keep me")
+
+            orig_entry = AGENTS_REGISTRY["antigravity"]
+            AGENTS_REGISTRY["antigravity"] = {
+                "name": "Google Antigravity",
+                "type": "plugin",
+                "target_path": target,
+                "legacy_path": legacy,
+                "detect_path": tmpdir,
+            }
+            try:
+                ok, msg = AgentInstaller.install_mcp_config("antigravity")
+                self.assertTrue(ok)
+                self.assertTrue(os.path.isdir(legacy))
+                self.assertTrue(os.path.isfile(sentinel))
+                self.assertTrue(os.path.islink(target))
+            finally:
+                AGENTS_REGISTRY["antigravity"] = orig_entry
+                if os.path.islink(target):
+                    os.unlink(target)
+
+    def test_install_without_legacy_key(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugins = os.path.join(tmpdir, "plugins")
+            os.makedirs(plugins)
+            target = os.path.join(plugins, "tokensafe")
+
+            orig_entry = AGENTS_REGISTRY["antigravity"]
+            AGENTS_REGISTRY["antigravity"] = {
+                "name": "Google Antigravity",
+                "type": "plugin",
+                "target_path": target,
+                "detect_path": tmpdir,
+            }
+            try:
+                ok, msg = AgentInstaller.install_mcp_config("antigravity")
+                self.assertTrue(ok)
+                self.assertTrue(os.path.islink(target))
+            finally:
+                AGENTS_REGISTRY["antigravity"] = orig_entry
+                if os.path.islink(target):
+                    os.unlink(target)
 
 if __name__ == "__main__":
     unittest.main()
