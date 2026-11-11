@@ -225,6 +225,64 @@ class TestViewFileRouting(unittest.TestCase):
             if os.path.exists(path):
                 os.remove(path)
 
+    def test_view_file_filepath_key_gets_matching_overwrite(self):
+        """The overwrite merge replaces top-level keys — the optimized content
+        must arrive under the SAME argument key the agent sent ("FilePath"),
+        not under a brand-new "Path" key."""
+        from hooks.pre_tool_use import main as hook_main
+        with tempfile.TemporaryDirectory() as tmp:
+            _fresh_env(tmp)
+            with tempfile.NamedTemporaryFile("w+", delete=False, suffix=".py") as f:
+                # One fat function: the skeleton (signature + folded body) is
+                # much smaller than the raw file, so a skeleton branch fires.
+                f.write("def big_fn():\n")
+                for i in range(600):
+                    f.write(f"    x = {i}  # filler body line\n")
+                path = f.name
+
+            payload = {
+                "toolCall": {"name": "view_file", "args": {"FilePath": path}},
+                "lastUserInput": "look at big_fn",
+                "conversationId": "view_file_filepath_sess",
+            }
+            with patch("sys.stdin", io.StringIO(json.dumps(payload))), \
+                 patch("sys.stdout", new_callable=io.StringIO) as out:
+                hook_main()
+                res = json.loads(out.getvalue())
+
+            self.assertEqual(res["decision"], "allow")
+            self.assertTrue(res.get("overwrite"), "expected a skeleton overwrite")
+            self.assertIn("FilePath", res["overwrite"], "overwrite must reuse the agent's own key")
+            self.assertNotIn("Path", res["overwrite"])
+            if os.path.exists(path):
+                os.remove(path)
+
+
+class TestProtocolReminderFormat(unittest.TestCase):
+    def test_guard_triggered_reminder_uses_system_message_not_ephemeral(self):
+        """ephemeralMessage is deprecated by the hooks contract (converted to a
+        hidden system message anyway) — reminders must be sent in the nested
+        systemMessage form."""
+        from hooks import pre_invocation
+        with tempfile.TemporaryDirectory() as tmp:
+            _fresh_env(tmp)
+            payload = {"lastUserInput": "x", "conversationId": "rem_fmt_sess", "invocationNum": 1}
+            with patch("src.license_manager.LicenseManager.check_quota",
+                       return_value={"is_quota_exceeded": False}), \
+                 patch("src.metrics.MetricsTracker.get_last_event",
+                       return_value={"event_type": "GUARD_RAW_CODE_SEARCH"}), \
+                 patch("sys.stdin", io.StringIO(json.dumps(payload))), \
+                 patch("sys.stdout", new_callable=io.StringIO) as out:
+                pre_invocation.main()
+            data = json.loads(out.getvalue() or "{}")
+            steps = data.get("injectSteps", [])
+            self.assertTrue(steps, "guard-triggered reminder expected")
+            self.assertTrue(any(
+                "systemMessage" in s and "Mandatory Directives" in s["systemMessage"]["systemMessage"]
+                for s in steps
+            ))
+            self.assertFalse(any("ephemeralMessage" in s for s in steps))
+
 
 if __name__ == "__main__":
     unittest.main()

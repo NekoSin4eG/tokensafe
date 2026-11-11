@@ -61,7 +61,7 @@ class HistoryCompactor:
                         if p:
                             read_files.add(os.path.basename(p))
                     elif name in ("edit_file", "write_file"):
-                        p = args.get("Path", "")
+                        p = args.get("Path") or args.get("path") or args.get("FilePath") or ""
                         if p:
                             edited_files.add(os.path.basename(p))
                     elif name == "run_command":

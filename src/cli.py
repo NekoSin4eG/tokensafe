@@ -32,7 +32,8 @@ def summarize_unittest_output(raw: str, full_traceback: bool = False) -> str:
         s = ln.strip()
         if s.startswith("Ran ") and " test" in s:
             ran = s
-        elif s == "OK" or s.startswith("FAILED"):
+        elif s.startswith("OK") or s.startswith("FAILED"):
+            # "OK (skipped=N)" must count as success too, not just bare "OK".
             status = s
     # Failure blocks: one '=' * 70 line PER failure, then the title line,
     # a '-' * 70 rule and the traceback — each block is self-contained.
@@ -80,7 +81,7 @@ def summarize_unittest_output(raw: str, full_traceback: bool = False) -> str:
         tail = [l for l in lines if l.strip()][-15:]
         return "\n".join(tail) if tail else "(no unittest output captured)"
 
-    if status == "OK":
+    if status.startswith("OK"):
         return f"\033[32m✓ {ran} — all tests passed\033[0m"
 
     out = [f"\033[31m✗ {ran} — {status}\033[0m"]

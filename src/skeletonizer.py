@@ -11,6 +11,7 @@ import hashlib
 import json
 from typing import Optional, Tuple, Set
 from src.tokenizer import count_tokens
+from src.paths import resolve_data_dir
 
 CONTROL_KEYWORDS = {
     'if', 'else', 'for', 'while', 'do', 'switch', 'case', 'default',
@@ -168,7 +169,7 @@ class Skeletonizer:
             out.append("".join(res))
         return out
 
-    CACHE_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "skeletons")
+    CACHE_DIR = os.path.join(resolve_data_dir(), "skeletons")
 
     @classmethod
     def skeletonize_code(cls, code: str, file_ext: str, keep_symbols: Optional[Set[str]] = None) -> str:

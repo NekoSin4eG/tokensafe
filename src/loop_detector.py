@@ -10,10 +10,12 @@ import hashlib
 from contextlib import contextmanager
 from typing import Dict, Any, Tuple
 
+from src.paths import resolve_data_dir
+
 class LoopDetector:
     """Tracks tool invocation signatures to detect hallucination loops."""
 
-    STATE_FILE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "loop_state.json")
+    STATE_FILE = os.path.join(resolve_data_dir(), "loop_state.json")
     MAX_IDENTICAL_REPEATS = 3
     SESSION_TTL_SECONDS = 48 * 3600  # prune sessions idle for more than 2 days
 

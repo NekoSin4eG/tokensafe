@@ -79,6 +79,52 @@ class TestEnvironmentAuditor(unittest.TestCase):
             self.assertNotIn("bloated_server", cfg_en.get("disabledMcpServers", {}))
             self.assertTrue(os.path.isdir(os.path.join(self.schemas_dir, "bloated_server")))
 
+class TestConfiguredServersMergeAndDisabledPlugins(unittest.TestCase):
+    def _make_plugin(self, plugins_dir, name, server_name, manifest=None):
+        d = os.path.join(plugins_dir, name)
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "mcp_config.json"), "w", encoding="utf-8") as f:
+            json.dump({"mcpServers": {server_name: {"command": "echo"}}}, f)
+        if manifest is not None:
+            with open(os.path.join(d, "plugin.json"), "w", encoding="utf-8") as f:
+                json.dump(manifest, f)
+
+    def test_disabled_plugins_are_not_audited(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            plugins = os.path.join(tmp, "plugins")
+            self._make_plugin(plugins, "good", "good_server")
+            self._make_plugin(plugins, "bad1", "bad1_server", manifest={"disabled": True})
+            self._make_plugin(plugins, "bad2", "bad2_server")
+            state_path = os.path.join(tmp, "config.json")
+            with open(state_path, "w", encoding="utf-8") as f:
+                json.dump({"plugins": {"bad2": {"enabled": False}}}, f)
+
+            with patch.object(EnvironmentAuditor, "get_plugins_dir", return_value=plugins), \
+                 patch.object(EnvironmentAuditor, "get_enable_state_path", return_value=state_path), \
+                 patch.object(EnvironmentAuditor, "get_config_paths", return_value=[]):
+                servers = EnvironmentAuditor.get_configured_mcp_servers()
+
+            self.assertIn("good_server", servers)
+            self.assertNotIn("bad1_server", servers)
+            self.assertNotIn("bad2_server", servers)
+
+    def test_both_config_paths_are_merged(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg1 = os.path.join(tmp, "one.json")
+            cfg2 = os.path.join(tmp, "two.json")
+            with open(cfg1, "w", encoding="utf-8") as f:
+                json.dump({"mcpServers": {"a": {"command": "echo"}}}, f)
+            with open(cfg2, "w", encoding="utf-8") as f:
+                json.dump({"mcpServers": {"b": {"command": "echo"}}}, f)
+
+            with patch.object(EnvironmentAuditor, "get_config_paths", return_value=[cfg1, cfg2]), \
+                 patch.object(EnvironmentAuditor, "get_plugins_dir", return_value=os.path.join(tmp, "nope")):
+                servers = EnvironmentAuditor.get_configured_mcp_servers()
+
+            self.assertIn("a", servers)
+            self.assertIn("b", servers)
+
+
 class TestAuditorWorkspaceAndRules(unittest.TestCase):
     """rules.md contract: 24 KB per rule file (after @[label](path) expansion),
     20,000-token shared always-on budget; workspace `.agents/` counts as a

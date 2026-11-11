@@ -139,6 +139,13 @@ def main():
         path = args.get("Path") or args.get("path") or args.get("FilePath") or ""
         start_line = args.get("StartLine") or args.get("startLine")
         end_line = args.get("EndLine") or args.get("endLine")
+        # The overwrite merge is shallow top-level key replacement — we must
+        # rewrite the SAME keys the agent actually sent, or a "path"/"FilePath"
+        # read would get the optimized content under a brand-new "Path" key
+        # while its original argument still points at the full file.
+        path_key = next((k for k in ("Path", "path", "FilePath") if k in args), "Path")
+        start_key = next((k for k in ("StartLine", "startLine") if k in args), "StartLine")
+        end_key = next((k for k in ("EndLine", "endLine") if k in args), "EndLine")
 
         if is_quota_exceeded:
             # Free tier quota reached: pass through raw read_file without AST skeletonization
@@ -167,7 +174,7 @@ def main():
             skel_path, orig_t, skel_t = Skeletonizer.get_skeleton_file(path, target_symbol=target_sym)
             if skel_path and orig_t > skel_t:
                 saved = orig_t - skel_t
-                response["overwrite"] = {"Path": skel_path}
+                response["overwrite"] = {path_key: skel_path}
                 response["reason"] = f"Token Optimizer: Graph-guided AST view for '{target_sym}' (Saved ~{saved} tokens)"
                 tracker.record_event(
                     session_id=conversation_id,
@@ -184,7 +191,10 @@ def main():
                 return
 
         if overwrite_args and metrics.get("saved_tokens", 0) > 0:
-            response["overwrite"] = overwrite_args
+            response["overwrite"] = {
+                start_key: overwrite_args["StartLine"],
+                end_key: overwrite_args["EndLine"],
+            }
             response["reason"] = (
                 f"Token Optimizer: Sliced read window to lines "
                 f"{overwrite_args['StartLine']}-{overwrite_args['EndLine']} (Saved ~{metrics['saved_tokens']} tokens)"
@@ -209,7 +219,7 @@ def main():
             skeleton_path, orig_t, skel_t = Skeletonizer.get_skeleton_file(path)
             if skeleton_path and orig_t > skel_t:
                 saved = orig_t - skel_t
-                response["overwrite"] = {"Path": skeleton_path}
+                response["overwrite"] = {path_key: skeleton_path}
                 response["reason"] = (
                     f"Token Optimizer: Provided AST skeleton view (Saved ~{saved} tokens). "
                     f"Call read_file with StartLine/EndLine to inspect specific method bodies."

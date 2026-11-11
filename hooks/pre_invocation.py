@@ -190,8 +190,15 @@ def main():
             "• To inspect all exported types/interfaces: call 'tokensafe:get_api_surface(project_path)'.\n"
             "• Prefer 'edit_file' over 'write_file' for existing files."
         )
+        # systemMessage nested form (hooks.md contract): ephemeralMessage is
+        # deprecated and is converted to a hidden system message anyway. This
+        # reminder only fires on guard violations / fresh history folds, so
+        # persistence here is intentional reinforcement, not per-turn bloat.
         inject_steps.append({
-            "ephemeralMessage": protocol_reminder
+            "systemMessage": {
+                "systemMessage": protocol_reminder,
+                "metadata": {}
+            }
         })
 
     # 5. Context Budget HUD warning: inject once per session when the

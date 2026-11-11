@@ -53,22 +53,65 @@ class EnvironmentAuditor:
         return [d for d in dirs if os.path.isdir(d)]
 
     @classmethod
+    def get_plugins_dir(cls) -> str:
+        return os.path.join(os.path.expanduser("~"), ".gemini", "config", "plugins")
+
+    @classmethod
+    def get_enable_state_path(cls) -> str:
+        return os.path.join(os.path.expanduser("~"), ".gemini", "config", "config.json")
+
+    @classmethod
+    def _get_disabled_plugin_names(cls) -> set:
+        """Plugin directory names that are switched off. plugins.md: the
+        enable-state lives in config.json under a `plugins` map keyed by the
+        plugin's directory name; a `plugin.json` `"disabled": true` also ships
+        a plugin switched off."""
+        disabled = set()
+        state_path = cls.get_enable_state_path()
+        if os.path.isfile(state_path):
+            try:
+                with open(state_path, "r", encoding="utf-8") as f:
+                    plugins_state = json.load(f).get("plugins", {})
+                for name, state in plugins_state.items():
+                    if isinstance(state, dict) and state.get("enabled") is False:
+                        disabled.add(name)
+            except Exception:
+                pass
+        plugins_dir = cls.get_plugins_dir()
+        if os.path.isdir(plugins_dir):
+            for entry in os.listdir(plugins_dir):
+                manifest = os.path.join(plugins_dir, entry, "plugin.json")
+                if os.path.isfile(manifest):
+                    try:
+                        with open(manifest, "r", encoding="utf-8") as f:
+                            if json.load(f).get("disabled") is True:
+                                disabled.add(entry)
+                    except Exception:
+                        pass
+        return disabled
+
+    @classmethod
     def get_configured_mcp_servers(cls) -> Dict[str, Any]:
         configured: Dict[str, Any] = {}
+        # Merge EVERY present config file: both ~/.gemini/config and the
+        # antigravity dir can legitimately carry servers (they are merged by
+        # Antigravity too), so breaking on the first one undercounts.
         for p in cls.get_config_paths():
             if os.path.isfile(p):
                 try:
                     with open(p, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                        configured.update(data.get("mcpServers", {}))
-                        break
+                        configured.update(json.load(f).get("mcpServers", {}))
                 except Exception:
                     continue
         # Plugin-declared servers (plugins/<name>/mcp_config.json) are loaded
-        # by Antigravity together with the plugin — audit them too.
-        plugins_dir = os.path.join(os.path.expanduser("~"), ".gemini", "config", "plugins")
+        # by Antigravity together with the plugin — audit them too, unless the
+        # plugin itself is disabled.
+        disabled = cls._get_disabled_plugin_names()
+        plugins_dir = cls.get_plugins_dir()
         if os.path.isdir(plugins_dir):
             for entry in sorted(os.listdir(plugins_dir)):
+                if entry in disabled or entry.endswith(".disabled"):
+                    continue
                 plugin_cfg = os.path.join(plugins_dir, entry, "mcp_config.json")
                 if not os.path.isfile(plugin_cfg):
                     continue
