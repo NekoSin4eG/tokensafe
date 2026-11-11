@@ -130,6 +130,38 @@ Connect TokenSafe to **Claude Desktop** (`claude_desktop_config.json`) or **Curs
 }
 ```
 
+### Cloud MCP — team metrics & managed distillation
+
+The stdio server slices your local files. Cloud features (team savings metrics, license status, server-side prompt distillation, shared team cache, billing) live on the remote streamable-HTTP endpoint:
+
+```
+https://api.tokensafe.dev/mcp
+```
+
+Auth: `Authorization: Bearer <TS1./TS2. license key>` (from [tokensafe.dev](https://tokensafe.dev)). Public tools — `get_public_stats`, `check_latest_version`, `get_setup_instructions`, `search_docs` — work without a key.
+
+### ChatGPT (custom connector — nothing to install)
+
+1. **Settings → Connectors → Create**, paste `https://api.tokensafe.dev/mcp`
+2. Authentication: **None** — the four public tools work immediately
+3. Ask ChatGPT to "show TokenSafe public stats" or "search TokenSafe docs"
+
+License-gated tools (team metrics, distillation) return a clear upgrade hint when called without a key — the funnel is intentional: see the value, then bring the same endpoint into Codex / Claude Code with your Bearer key to unlock the paid tools.
+
+### Codex CLI (`~/.codex/config.toml`, shared with the IDE extension)
+
+```toml
+[mcp_servers.tokensafe]              # local engine: AST slicing, guards
+command = "npx"
+args = ["-y", "tokensafe", "mcp"]
+
+[mcp_servers.tokensafe-cloud]        # cloud features
+url = "https://api.tokensafe.dev/mcp"
+bearer_token_env_var = "TOKENSAFE_LICENSE"
+```
+
+Set `export TOKENSAFE_LICENSE="TS2.…"`, then run `get_setup_instructions` via any connected agent for per-agent snippets (cursor, claude_desktop, claude_code, codex, windsurf, antigravity, gemini_cli, chatgpt).
+
 ---
 
 ## Three Outcomes for Engineering Teams
