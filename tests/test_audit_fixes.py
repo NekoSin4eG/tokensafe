@@ -948,17 +948,39 @@ class TestPublicSurfaceHygiene(unittest.TestCase):
         admin_doc_path = os.path.join(PROJECT_ROOT, "docs", "ADMIN_API.md")
         brand_doc_path = os.path.join(PROJECT_ROOT, "docs", "BRAND_IDENTITY_PRIVATE.md")
         if os.path.exists(sync_path):
-            # Private repo: ops and brand docs exist and are excluded by the public exporter...
+            # Private repo: ops and brand docs exist and the exporter is
+            # deny-by-default — they must never appear in the allowlist.
             self.assertTrue(os.path.exists(admin_doc_path))
             self.assertTrue(os.path.exists(brand_doc_path))
             with open(sync_path, encoding="utf-8") as f:
                 sync_script = f.read()
-            self.assertIn("docs/ADMIN_API.md", sync_script)
-            self.assertIn("docs/BRAND_IDENTITY_PRIVATE.md", sync_script)
+            self.assertIn(".public_allowlist", sync_script, "exporter must build the export from an explicit allowlist")
+            allow_section = sync_script.split("ALLOWLIST_EOF")[1] if "ALLOWLIST_EOF" in sync_script else sync_script
+            self.assertNotIn("docs/ADMIN_API.md", allow_section, "private ops doc must not be allow-listed")
+            self.assertNotIn("docs/BRAND_IDENTITY_PRIVATE.md", allow_section, "private brand doc must not be allow-listed")
         else:
             # Public export: private docs and exporter script must be stripped.
             self.assertFalse(os.path.exists(admin_doc_path))
             self.assertFalse(os.path.exists(brand_doc_path))
+            # Receiving-side infra gate: no private infrastructure markers
+            # (Bunny tooling) may survive anywhere in the exported tree.
+            markers = ("bunny-cli", "bunny.net", "bunnyway", "bunnydb", "bunny_",
+                       "bunny.jsonc", "банни")
+            for dirpath, dirnames, filenames in os.walk(PROJECT_ROOT):
+                dirnames[:] = [d for d in dirnames
+                               if d not in (".git", "__pycache__", "node_modules")]
+                for fn in filenames:
+                    p = os.path.join(dirpath, fn)
+                    try:
+                        if os.path.getsize(p) > 1_500_000:
+                            continue
+                        with open(p, "r", encoding="utf-8", errors="ignore") as fh:
+                            text = fh.read().lower()
+                    except OSError:
+                        continue
+                    for m in markers:
+                        if m in text:
+                            self.fail(f"private infra marker '{m}' leaked into exported file: {p}")
         # ...and README stays silent about the whole admin/ops surface:
         # seat and license management is pointed at the dashboard only.
         with open(os.path.join(PROJECT_ROOT, "README.md"), encoding="utf-8") as f:
