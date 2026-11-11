@@ -15,6 +15,19 @@ from typing import Tuple, Dict, Any, List, Optional
 class CommandSanitizer:
     """Optimizes terminal command lines to eliminate token waste."""
 
+    # Test-runner guard: spots jest/vitest/package-manager test stages so they
+    # can be forced into run-once mode (a watch-mode command never exits, and
+    # an agent blocked on its completion waits forever)
+    _TOKENSAFE_TESTS_RE = re.compile(r"\btokensafe\s+tests?\b")
+    _VITEST_RE = re.compile(r"^\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:sudo\s+)?(?:npx\s+|yarn\s+|pnpm\s+|bunx\s+)?vitest(?:\s|$)")
+    _JEST_RE = re.compile(r"^\s*(?:[A-Za-z_]\w*=\S*\s+)*(?:sudo\s+)?(?:npx\s+|yarn\s+|pnpm\s+|bunx\s+)?jest(?:\s|$)")
+    _JEST_SCRIPT_RE = re.compile(r"\b(?:react-scripts|craco)\s+test\b")
+    _PKG_MANAGER_TEST_RE = re.compile(r"\b(?:yarn|npm|pnpm|bun)\s+(?:run\s+)?test\b")
+    # Jest-only flags positively fingerprint jest behind an opaque test script
+    _JEST_FINGERPRINT_RE = re.compile(r"--watchAll|--detectOpenHandles|--testPathPattern|--testMatch|--runInBand")
+    _BARE_WATCH_RE = re.compile(r"\s--watch(?=[\s]|$)")
+    _NPM_TEST_RE = re.compile(r"\bnpm\s+(?:run\s+)?test[\w:./-]*")
+
     # Lockfiles and binary patterns that should never be dumped in git diffs or searches
     LOCKFILE_EXCLUDES = [
         "':!package-lock.json'",
@@ -190,6 +203,12 @@ class CommandSanitizer:
             if not has_tb:
                 return f"{stage} -q --tb=short", 800, "Applied short traceback to pytest", None
 
+        # test runners: agents block on these in the background; watch mode or
+        # an unclosed jest handle means the process never exits (infinite wait)
+        guard = cls._optimize_test_stage(stage)
+        if guard:
+            return guard
+
         # find: prune unbounded recursion
         if re.search(r"\bfind\s+(\.|\/|\w+)\s*$", stage) or re.search(r"\bfind\s+\.\s+-name\b", stage):
             if "node_modules" not in stage and ".git" not in stage:
@@ -272,6 +291,83 @@ class CommandSanitizer:
                 return new_stage, 380, "Replaced verbose ls flags with compact, secret-safe format (-1 -p)", None
 
         return None
+
+    @classmethod
+    def _optimize_test_stage(cls, stage: str) -> Optional[Tuple[str, int, str, None]]:
+        """
+        Forces run-once mode on JS test-runner stages. Agents launch these in
+        the background and block until process exit; watch mode or an unclosed
+        jest handle ("Jest did not exit one second after the test run has
+        completed") means the process never terminates and the agent waits
+        forever. The guard:
+          - normalizes bare --watch / --watchAll to =false for jest-family,
+          - rewrites bare `vitest` to `vitest run` (--watch=false is unreliable),
+          - appends --forceExit for jest-family so open handles cannot stall exit,
+          - inserts ` -- ` after `npm test` so args reach the runner (npm
+            silently swallows them otherwise, leaving default watch mode on),
+          - prepends CI=true as a run-once fallback for opaque package scripts
+            (CRA and vitest both gate watch mode on the CI variable).
+        An opaque `yarn/npm test` script is only classified as jest when it
+        carries a jest-only flag fingerprint (--watchAll, --detectOpenHandles...),
+        so unknown runners just get the safe CI=true fallback.
+        """
+        if cls._TOKENSAFE_TESTS_RE.search(stage):
+            return None
+        if cls._VITEST_RE.match(stage):
+            runner = "vitest"
+        elif cls._JEST_RE.match(stage) or cls._JEST_SCRIPT_RE.search(stage):
+            runner = "jest"
+        elif cls._PKG_MANAGER_TEST_RE.search(stage):
+            runner = "jest" if cls._JEST_FINGERPRINT_RE.search(stage) else "generic"
+        else:
+            return None
+
+        new_stage = stage
+        reasons: List[str] = []
+        saved = 0
+
+        if runner == "vitest":
+            if cls._BARE_WATCH_RE.search(new_stage):
+                new_stage = cls._BARE_WATCH_RE.sub("", new_stage)
+                reasons.append("Dropped bare --watch from vitest command")
+                saved += 300
+            if not re.search(r"\bvitest\s+run\b", new_stage):
+                new_stage = re.sub(r"\bvitest\b", "vitest run", new_stage, count=1)
+                reasons.append("Rewrote vitest to one-shot `vitest run`")
+                saved += 400
+        elif runner == "jest":
+            if cls._BARE_WATCH_RE.search(new_stage):
+                new_stage = cls._BARE_WATCH_RE.sub(" --watch=false", new_stage)
+                reasons.append("Normalized bare --watch to --watch=false")
+                saved += 400
+            if re.search(r"\s--watchAll(?=[\s]|$)", new_stage):
+                new_stage = re.sub(r"\s--watchAll(?=[\s]|$)", " --watchAll=false", new_stage)
+                reasons.append("Normalized bare --watchAll to --watchAll=false")
+                saved += 400
+            if "--forceExit" not in new_stage:
+                new_stage += " --forceExit"
+                reasons.append("Appended --forceExit so jest exits despite open handles")
+                saved += 800
+
+        # npm silently swallows args without ` -- `: in `npm test --watchAll=false`
+        # the flag never reaches jest, which then stays on its default watch mode
+        npm_match = cls._NPM_TEST_RE.search(new_stage)
+        if npm_match and " -- " not in new_stage and new_stage[npm_match.end():].strip():
+            new_stage = new_stage[:npm_match.end()] + " -- " + new_stage[npm_match.end():].lstrip()
+            reasons.append("Inserted ` -- ` so npm forwards args to the test runner")
+            saved += 600
+
+        if not re.search(r"\bCI=", new_stage):
+            new_stage = f"CI=true {new_stage}"
+            saved += 300
+            if runner == "generic":
+                reasons.append("Prepended CI=true so an unknown test runner stays in run-once mode")
+            else:
+                reasons.append("Prepended CI=true for run-once mode")
+
+        if not reasons:
+            return None
+        return new_stage, saved, "; ".join(reasons), None
 
     @classmethod
     def sanitize(cls, command: str) -> Tuple[Optional[str], int, str]:

@@ -143,7 +143,9 @@ class TestNewCommandRules(unittest.TestCase):
             new_cmd, _, _ = self.cs.sanitize(cmd)
             self.assertIsNotNone(new_cmd, cmd)
             self.assertIn("--no-progress --no-fund --no-audit", new_cmd)
-        self.assertIsNone(self.cs.sanitize("npm test")[0])
+        # npm test is not an install command: the test-runner guard gives it
+        # run-once mode, the install silencer must not touch it
+        self.assertEqual(self.cs.sanitize("npm test")[0], "CI=true npm test")
         self.assertIsNone(self.cs.sanitize("npm install express --no-audit")[0])
 
     def test_pip_install_quiet(self):
