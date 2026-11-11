@@ -912,12 +912,36 @@ class TestTeamCachePrewarm(unittest.TestCase):
 
 class TestPublicSurfaceHygiene(unittest.TestCase):
     """README ships to the PUBLIC tokensafe repo via bin/sync-public.sh;
-    it must never advertise the administrative API surface."""
+    it must never mention the administrative API surface or server-side
+    secrets — the public docs describe only the dashboard/client-facing API."""
+
+    # Server-side / internal identifiers that must never appear in the
+    # public README (client-facing provider keys are fine).
+    _INTERNAL_LEAKS = (
+        "/api/admin",
+        "ADMIN_SECRET_KEY",
+        "ADMIN_EMAILS",
+        "X-Admin-Secret",
+        "TOKENSAFE_PRIVATE_KEY",
+        "STRIPE_WEBHOOK_SECRET",
+        "SMTP_PASS",
+        "CLERK_JWT_KEY",
+    )
 
     def test_readme_has_no_admin_endpoints(self):
         with open(os.path.join(PROJECT_ROOT, "README.md"), encoding="utf-8") as f:
             readme = f.read()
         self.assertNotIn("/api/admin", readme, "README leaks admin endpoint paths to the public repo")
+
+    def test_readme_has_no_internal_server_variables(self):
+        with open(os.path.join(PROJECT_ROOT, "README.md"), encoding="utf-8") as f:
+            readme = f.read()
+        for leak in self._INTERNAL_LEAKS:
+            self.assertNotIn(leak, readme, f"README leaks internal ops detail to the public repo: {leak}")
+        # JWT_SECRET appears only inside Guard *examples* of blocked code
+        # (`process.env.JWT_SECRET || ...`), never as a documented server
+        # variable — so guard the backticked table-cell form only.
+        self.assertNotIn("`JWT_SECRET`", readme, "README documents JWT_SECRET as a server variable")
 
     def test_admin_docs_are_private_and_stripped_from_export(self):
         sync_path = os.path.join(PROJECT_ROOT, "bin", "sync-public.sh")
@@ -935,10 +959,12 @@ class TestPublicSurfaceHygiene(unittest.TestCase):
             # Public export: private docs and exporter script must be stripped.
             self.assertFalse(os.path.exists(admin_doc_path))
             self.assertFalse(os.path.exists(brand_doc_path))
-        # ...and README points admins to it without printing the surface.
+        # ...and README stays silent about the whole admin/ops surface:
+        # seat and license management is pointed at the dashboard only.
         with open(os.path.join(PROJECT_ROOT, "README.md"), encoding="utf-8") as f:
             readme = f.read()
-        self.assertIn("not documented in the public API surface", readme)
+        for leak in self._INTERNAL_LEAKS:
+            self.assertNotIn(leak, readme, f"README leaks internal ops detail to the public repo: {leak}")
 
 
 class TestUpdaterNpmDiscovery(unittest.TestCase):
