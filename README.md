@@ -356,7 +356,7 @@ TokenSafe follows an open-core model: verify local context savings and guardrail
 |---|---|---|---|
 | **Developer Sandbox** | **$0** forever | **500,000 tokens / mo** | 9-Language Local Regex Compactor, Local AST Slicer CLI, Local Secret & `.env` Guard, SQLite & Terminal Dashboard |
 | **Engineering Team** *(Recommended)* | **$29 / seat / mo** *(~$24 / seat / mo billed $290/yr)* | **Unlimited** | **7-Day Free Trial**, **Shared Team Cache (L3 Monorepo Hits)**, Org-Wide Guard & Git Leak Shield, Friday Per-Seat ROI Digest, Centralized Ed25519 Seat Provisioning & Revoke, Managed Cloud Distillation (zero keys needed) |
-| **Enterprise & VPC** | **Custom** | **Unlimited** | Self-Hosted Docker VPC Proxy (Private BYOK), Zero-Telemetry / Air-Gapped Mode, SAML SSO, Custom Guard Policies & SLA |
+| **Enterprise & VPC** | **Custom** | **Unlimited** | Org Audit Log (Guard forensics: who / what / when, CSV & SIEM export), Central Guard Policies, Self-Hosted VPC Proxy (Private BYOK), Zero-Telemetry / Air-Gapped Mode, SAML / OIDC SSO, Dedicated Onboarding & SLA |
 
 *Working solo? [Individual Solo plans](https://tokensafe.dev#pricing) start at **$9 / mo** ($89 / yr).*
 
@@ -433,6 +433,9 @@ tokensafe digest
 # Run the SWE-bench verification suite
 tokensafe benchmark
 
+# Run the unit test suite (compact failure report, full: --traceback / -v)
+tokensafe tests
+
 # Run the local transparent AI proxy (0.0.0.0:8765/v1)
 tokensafe proxy
 
@@ -442,68 +445,11 @@ tokensafe activate TS2.eyJlbWFpbCI6...
 
 ---
 
-## Docker Deployment (Multi-Provider Support)
+## Self-Hosted Docker Deployment
 
-TokenSafe ships with a hardened multi-stage production Docker image, non-root execution (`uid: 1000`), and multi-provider LLM routing.
+The repository ships a hardened multi-stage `Dockerfile` (non-root `uid: 1000`) and a `docker-compose.yml` for containerized runs, and the local proxy is available directly via `tokensafe proxy` (`0.0.0.0:8765/v1`).
 
-### 1. Multi-Provider Environment Keys
-
-Configure any preferred LLM provider keys for self-hosted deployments:
-
-| Environment Variable | Provider Supported | Default Model |
-|---|---|---|
-| `GEMINI_API_KEY` | Google Gemini (Lowest cost & latency) | `gemini-flash-lite-latest` |
-| `PREFERRED_PROVIDER` | Explicit provider priority (`gemini`, `deepseek`, etc.) | `gemini` |
-| `DEEPSEEK_API_KEY` | DeepSeek API | `deepseek-chat` |
-| `OPENAI_API_KEY` | OpenAI API | `gpt-4o-mini` |
-| `ANTHROPIC_API_KEY` | Anthropic Claude | `claude-3-5-haiku-20241022` |
-| `TOKENSAFE_UPSTREAM_KEY` | Unified / Custom Gateway | Custom Upstream |
-
-### 2. Docker Compose Quickstart
-
-Run TokenSafe as a centralized team gateway:
-
-```yaml
-version: '3.8'
-
-services:
-  tokensafe:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: tokensafe
-    restart: unless-stopped
-    ports:
-      - "8765:8765"
-    environment:
-      - TOKENSAFE_HOST=0.0.0.0
-      - TOKENSAFE_PORT=8765
-      - TOKENSAFE_DATA_DIR=/app/data
-      # Choose your provider(s):
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
-      - GEMINI_API_KEY=${GEMINI_API_KEY:-}
-      - TOKENSAFE_LICENSE_KEY=${TOKENSAFE_LICENSE_KEY:-}
-    volumes:
-      - ./data:/app/data
-    healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/api/health')"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-```
-
-Start the container in detached mode:
-```bash
-docker compose up -d
-```
-
-### 3. Verification & Live SSE Streaming
-
-- **Health check**: `curl http://localhost:8765/api/health`
-- **Live SSE Event Stream**: `curl -N http://localhost:8765/api/events`
-- **Point your AI Agents**: Configure your IDE or agent to use `http://localhost:8765/v1` as the upstream base URL.
+Supported, production-grade self-hosting — private VPC, BYOK provider keys (Gemini, DeepSeek, OpenAI, Claude), zero-telemetry / air-gapped mode, SAML/OIDC SSO — is part of the **Enterprise & VPC** plan and is deployed together with our engineering team: [corp@tokensafe.dev](mailto:corp@tokensafe.dev).
 
 ---
 
