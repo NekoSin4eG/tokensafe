@@ -54,15 +54,30 @@ class EnvironmentAuditor:
 
     @classmethod
     def get_configured_mcp_servers(cls) -> Dict[str, Any]:
+        configured: Dict[str, Any] = {}
         for p in cls.get_config_paths():
             if os.path.isfile(p):
                 try:
                     with open(p, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                        return data.get("mcpServers", {})
+                        configured.update(data.get("mcpServers", {}))
+                        break
                 except Exception:
                     continue
-        return {}
+        # Plugin-declared servers (plugins/<name>/mcp_config.json) are loaded
+        # by Antigravity together with the plugin — audit them too.
+        plugins_dir = os.path.join(os.path.expanduser("~"), ".gemini", "config", "plugins")
+        if os.path.isdir(plugins_dir):
+            for entry in sorted(os.listdir(plugins_dir)):
+                plugin_cfg = os.path.join(plugins_dir, entry, "mcp_config.json")
+                if not os.path.isfile(plugin_cfg):
+                    continue
+                try:
+                    with open(plugin_cfg, "r", encoding="utf-8") as f:
+                        configured.update(json.load(f).get("mcpServers", {}))
+                except Exception:
+                    continue
+        return configured
 
     @classmethod
     def _load_rule_text(cls, path: str, depth: int = 1) -> str:

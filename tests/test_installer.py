@@ -130,8 +130,7 @@ class TestAgentInstaller(unittest.TestCase):
             killed.append((pid, sig))
 
         with tempfile.TemporaryDirectory() as tmpdir, \
-             patch("src.installer.PROJECT_ROOT", tmpdir), \
-             patch("src.paths.PROJECT_ROOT", tmpdir), \
+             patch.dict(os.environ, {"TOKENSAFE_DATA_DIR": os.path.join(tmpdir, "data")}), \
              patch("src.installer.subprocess.run", return_value=mock_proc), \
              patch("src.installer.os.kill", side_effect=fake_kill), \
              patch("src.installer.time.sleep"):
@@ -167,10 +166,13 @@ class TestAntigravityPluginInstall(unittest.TestCase):
                 "detect_path": tmpdir,
             }
             try:
-                ok, msg = AgentInstaller.install_mcp_config("antigravity")
+                # PROJECT_ROOT patched: the tmpdir has no mcp_config.json, so the
+                # user-level MCP migration (a real-config side effect) must not run.
+                with patch("src.installer.PROJECT_ROOT", tmpdir):
+                    ok, msg = AgentInstaller.install_mcp_config("antigravity")
                 self.assertTrue(ok)
                 self.assertTrue(os.path.islink(target))
-                self.assertEqual(os.path.realpath(target), os.path.realpath(self.repo_root))
+                self.assertEqual(os.path.realpath(target), os.path.realpath(tmpdir))
                 self.assertFalse(os.path.lexists(legacy), "stale legacy symlink must be removed")
             finally:
                 AGENTS_REGISTRY["antigravity"] = orig_entry
@@ -197,7 +199,8 @@ class TestAntigravityPluginInstall(unittest.TestCase):
                 "detect_path": tmpdir,
             }
             try:
-                ok, msg = AgentInstaller.install_mcp_config("antigravity")
+                with patch("src.installer.PROJECT_ROOT", tmpdir):
+                    ok, msg = AgentInstaller.install_mcp_config("antigravity")
                 self.assertTrue(ok)
                 self.assertTrue(os.path.isdir(legacy))
                 self.assertTrue(os.path.isfile(sentinel))
@@ -221,13 +224,129 @@ class TestAntigravityPluginInstall(unittest.TestCase):
                 "detect_path": tmpdir,
             }
             try:
-                ok, msg = AgentInstaller.install_mcp_config("antigravity")
+                with patch("src.installer.PROJECT_ROOT", tmpdir):
+                    ok, msg = AgentInstaller.install_mcp_config("antigravity")
                 self.assertTrue(ok)
                 self.assertTrue(os.path.islink(target))
             finally:
                 AGENTS_REGISTRY["antigravity"] = orig_entry
                 if os.path.islink(target):
                     os.unlink(target)
+
+
+class TestUserLevelMcpMigration(unittest.TestCase):
+    """Once the plugin declares its own mcp_config.json, leftover user-level
+    tokensafe MCP entries in Antigravity's configs would register the server
+    twice — the installer migrates them away (with a backup)."""
+
+    def setUp(self):
+        self.repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def _fake_home_and_repo(self, tmpdir, plugin_declares_mcp):
+        home = os.path.join(tmpdir, "home")
+        config_dir = os.path.join(home, ".gemini", "config")
+        os.makedirs(config_dir)
+        cfg = os.path.join(config_dir, "mcp_config.json")
+        with open(cfg, "w", encoding="utf-8") as f:
+            json.dump({
+                "mcpServers": {
+                    "tokensafe": {"command": "node", "args": ["tokensafe", "mcp"]},
+                    "other-server": {"command": "echo"},
+                }
+            }, f)
+
+        fake_repo = os.path.join(tmpdir, "repo")
+        os.makedirs(fake_repo)
+        if plugin_declares_mcp:
+            with open(os.path.join(fake_repo, "mcp_config.json"), "w", encoding="utf-8") as f:
+                json.dump({"mcpServers": {"tokensafe": {"command": "sh"}}}, f)
+        return home, cfg, fake_repo
+
+    def _install_antigravity(self, tmpdir, fake_repo):
+        plugins = os.path.join(tmpdir, "plugins")
+        target = os.path.join(plugins, "tokensafe")
+        orig_entry = AGENTS_REGISTRY["antigravity"]
+        AGENTS_REGISTRY["antigravity"] = {
+            "name": "Google Antigravity",
+            "type": "plugin",
+            "target_path": target,
+            "detect_path": tmpdir,
+        }
+        try:
+            with patch("src.installer.PROJECT_ROOT", fake_repo), \
+                 patch("src.installer.HOME", os.path.join(tmpdir, "home")):
+                ok, msg = AgentInstaller.install_mcp_config("antigravity")
+        finally:
+            AGENTS_REGISTRY["antigravity"] = orig_entry
+            if os.path.islink(target):
+                os.unlink(target)
+        return ok, msg
+
+    def test_removes_user_level_entry_with_backup(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home, cfg, fake_repo = self._fake_home_and_repo(tmpdir, plugin_declares_mcp=True)
+            ok, msg = self._install_antigravity(tmpdir, fake_repo)
+            self.assertTrue(ok)
+            self.assertIn("migrated", msg)
+            with open(cfg, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.assertNotIn("tokensafe", data["mcpServers"])
+            self.assertIn("other-server", data["mcpServers"])
+            self.assertTrue(os.path.exists(cfg + ".backup"))
+
+    def test_noop_when_plugin_does_not_declare_mcp(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            home, cfg, fake_repo = self._fake_home_and_repo(tmpdir, plugin_declares_mcp=False)
+            ok, msg = self._install_antigravity(tmpdir, fake_repo)
+            self.assertTrue(ok)
+            self.assertNotIn("migrated", msg)
+            with open(cfg, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            self.assertIn("tokensafe", data["mcpServers"])
+            self.assertFalse(os.path.exists(cfg + ".backup"))
+
+
+class TestAgentsPluginsConfig(unittest.TestCase):
+    """install_project(agents_plugin_path=...) writes/merges .agents/plugins.json
+    (json_configs.md) for team sharing on Antigravity."""
+
+    def test_creates_config_with_relative_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            plugin_dir = os.path.join(tmpdir, "vendor", "tokensafe")
+            os.makedirs(plugin_dir)
+            with patch("os.getcwd", return_value=tmpdir):
+                res = AgentInstaller.install_project(tmpdir, agents_plugin_path=plugin_dir)
+            self.assertIn(".agents/plugins.json", res["created_rules"])
+            cfg_path = os.path.join(tmpdir, ".agents", "plugins.json")
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            self.assertEqual(cfg["entries"], [{"path": "vendor/tokensafe"}])
+
+    def test_merges_into_existing_config_without_duplicates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            agents_dir = os.path.join(tmpdir, ".agents")
+            os.makedirs(agents_dir)
+            cfg_path = os.path.join(agents_dir, "plugins.json")
+            with open(cfg_path, "w", encoding="utf-8") as f:
+                json.dump({"inherits": ["base.json"], "entries": [{"path": "other-plugin"}]}, f)
+
+            outside = tempfile.mkdtemp()
+            self.addCleanup(__import__("shutil").rmtree, outside, True)
+            with patch("os.getcwd", return_value=tmpdir):
+                AgentInstaller.install_project(tmpdir, agents_plugin_path=outside)
+                AgentInstaller.install_project(tmpdir, agents_plugin_path=outside)
+
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                cfg = json.load(f)
+            self.assertEqual(cfg["inherits"], ["base.json"])
+            self.assertEqual(len(cfg["entries"]), 2)
+            self.assertEqual(cfg["entries"][0], {"path": "other-plugin"})
+            self.assertEqual(cfg["entries"][1], {"path": outside})
+
+    def test_not_created_without_opt_in(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            AgentInstaller.install_project(tmpdir)
+            self.assertFalse(os.path.exists(os.path.join(tmpdir, ".agents", "plugins.json")))
 
 if __name__ == "__main__":
     unittest.main()

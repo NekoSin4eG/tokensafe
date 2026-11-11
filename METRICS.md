@@ -13,7 +13,7 @@ Every optimization event carries a `measurement` label:
 
 Both labels appear in every surface that aggregates savings:
 
-- local `data/metrics.db` (`events.measurement` column, exposed by `tokensafe stats`)
+- local `~/.tokensafe/data/metrics.db` (`events.measurement` column, exposed by `tokensafe stats`; shared across agents, `TOKENSAFE_DATA_DIR` overrides)
 - the cloud dashboard (`metrics.saved_tokens_measured` / `metrics.saved_tokens_estimated`)
 - the public landing stats (`saved_tokens_measured` / `saved_tokens_estimated` in `/api/public/stats`)
 
@@ -50,7 +50,7 @@ Both labels appear in every surface that aggregates savings:
 ```
 hooks (pre_invocation / pre_tool_use / post_tool_use)      MCP server (tools)
         │                                                       │
-        └──────────────► data/metrics.db ◄──────────────────────┘
+        └──────────────► ~/.tokensafe/data/metrics.db ◄─────────┘
                              │  events.measurement
                              ▼
                     telemetry sync (hourly, opt-out via

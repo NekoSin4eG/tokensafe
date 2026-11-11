@@ -22,6 +22,19 @@ PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+# One-shot session directives, injected once per session by every agent's
+# SessionStart surface (Antigravity hooks/session_start.py as a persistent
+# systemMessage, Claude Code as hookSpecificOutput.additionalContext).
+TOKENSAFE_DIRECTIVES = (
+    "[TokenSafe Mandatory Directives]:\n"
+    "• Terminal code searches (grep/rg/find on source files) are BLOCKED by TokenSafe Guard.\n"
+    "• To search keywords, symbols, or configs: call 'tokensafe:scoped_search(query, scope)'.\n"
+    "• To inspect component or function definitions: call 'tokensafe:smart_read_file(path, symbol)'.\n"
+    "• To locate dependencies & God Nodes: call 'tokensafe:get_architecture_graph(project_path)'.\n"
+    "• To inspect all exported types/interfaces: call 'tokensafe:get_api_surface(project_path)'.\n"
+    "• Prefer 'edit_file' over 'write_file' for existing files."
+)
+
 # High-precision deny patterns: secrets and irreversible destruction only.
 _SECRET_PATTERNS = [
     r"sk_live_[0-9a-zA-Z]{10,}",

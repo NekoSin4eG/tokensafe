@@ -68,6 +68,17 @@ class TestClaudeCodeAdapter(AdapterBase):
         self.assertEqual(s["breakdown"].get("PROMPT", {}).get("count", 0), 1)
         self.assertGreater(s["total_saved_tokens_estimated"], 0)
 
+    def test_session_start_injects_directives_once(self):
+        out = self._run_hook({
+            "hook_event_name": "SessionStart",
+            "session_id": "cc_test_session",
+            "source": "startup",
+        })
+        self.assertEqual(out["hookSpecificOutput"]["hookEventName"], "SessionStart")
+        self.assertIn("Mandatory Directives", out["hookSpecificOutput"]["additionalContext"])
+        # One-shot injection records no metrics on its own
+        self.assertEqual(out["hookSpecificOutput"]["additionalContext"].count("tokensafe:"), 4)
+
     def test_short_prompt_passes_through_clean(self):
         out = self._run_hook({
             "hook_event_name": "UserPromptSubmit",

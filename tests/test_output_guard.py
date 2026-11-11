@@ -69,9 +69,12 @@ class TestOutputGuard(unittest.TestCase):
         from hooks.pre_tool_use import main as hook_main
         from src.guard import TokenSafeGuard
 
+        import uuid
         payload = {
             "toolCall": {"name": "edit_file", "args": {"Path": "a.py", "Replacement": "x = 1"}},
-            "conversationId": "guard_edit_sess",
+            # Unique per run: the shared persistent metrics DB would otherwise
+            # trip the Loop Guard on the second test-suite run (identical call).
+            "conversationId": f"guard_edit_{uuid.uuid4().hex[:8]}",
         }
         guard_res = SimpleNamespace(blocked=True, check_name="SECRET_FALLBACK", reason="boom")
         with patch("sys.stdin", io.StringIO(json.dumps(payload))), \

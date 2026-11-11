@@ -26,16 +26,7 @@ sys.path.insert(0, PROJECT_ROOT)
 from src.metrics import MetricsTracker
 from src.license_manager import LicenseManager
 from src.environment_auditor import EnvironmentAuditor
-
-PROTOCOL_DIRECTIVES = (
-    "[TokenSafe Mandatory Directives]:\n"
-    "• Terminal code searches (grep/rg/find on source files) are BLOCKED by TokenSafe Guard.\n"
-    "• To search keywords, symbols, or configs: call 'tokensafe:scoped_search(query, scope)'.\n"
-    "• To inspect component or function definitions: call 'tokensafe:smart_read_file(path, symbol)'.\n"
-    "• To locate dependencies & God Nodes: call 'tokensafe:get_architecture_graph(project_path)'.\n"
-    "• To inspect all exported types/interfaces: call 'tokensafe:get_api_surface(project_path)'.\n"
-    "• Prefer 'edit_file' over 'write_file' for existing files."
-)
+from src.adapter_core import TOKENSAFE_DIRECTIVES as PROTOCOL_DIRECTIVES
 
 
 def _user_markdown(markdown: str) -> dict:

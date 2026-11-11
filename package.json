@@ -20,6 +20,7 @@
     "skills/",
     "hooks/",
     "hooks.json",
+    "mcp_config.json",
     "proto/",
     "extensions/",
     "plugin.json",

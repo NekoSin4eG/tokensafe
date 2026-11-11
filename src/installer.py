@@ -144,7 +144,8 @@ class AgentInstaller:
     @classmethod
     def install_hooks_config(cls, agent_key: str) -> Tuple[bool, str]:
         """Registers TokenSafe lifecycle-hook adapters with agents that support them.
-        Claude Code: UserPromptSubmit (TOCP injection) + PreToolUse (shell guard).
+        Claude Code: SessionStart (one-shot directives) + UserPromptSubmit (TOCP
+        injection) + PreToolUse (shell guard).
         Cursor: beforeShellExecution / beforeReadFile guards.
         Codex has no lifecycle hooks (MCP + AGENTS.md remain the integration)."""
         if agent_key == "codex":
@@ -173,11 +174,14 @@ class AgentInstaller:
                 return True, "TokenSafe Claude Code hooks already registered"
             prompt_entry = {"hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
             bash_entry = {"matcher": "Bash", "hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
+            # SessionStart: no matcher = all sources (startup/resume/clear/compact).
+            session_entry = {"hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
+            hooks.setdefault("SessionStart", []).append(session_entry)
             hooks.setdefault("UserPromptSubmit", []).append(prompt_entry)
             hooks.setdefault("PreToolUse", []).append(bash_entry)
             data["hooks"] = hooks
             cls._write_file_safely(config_file, json.dumps(data, indent=2))
-            return True, "hooks registered (UserPromptSubmit + PreToolUse guard)"
+            return True, "hooks registered (SessionStart + UserPromptSubmit + PreToolUse guard)"
 
         # cursor
         config_file = os.path.join(HOME, ".cursor", "hooks.json")
@@ -223,7 +227,17 @@ class AgentInstaller:
                         os.unlink(legacy)
                 except Exception:
                     pass
-            return True, f"Symlinked plugin into {target}"
+            # Once the plugin declares its own mcp_config.json (loaded by
+            # Antigravity together with the plugin), a leftover user-level
+            # tokensafe entry would register the MCP server twice. Migrate it
+            # away — Unix only, the plugin-root sh shim is not cmd-compatible.
+            migrated = False
+            if os.name != "nt" and os.path.isfile(os.path.join(PROJECT_ROOT, "mcp_config.json")):
+                migrated = cls._remove_user_level_tokensafe_mcp()
+            msg = f"Symlinked plugin into {target}"
+            if migrated:
+                msg += "; migrated user-level MCP entry to the plugin-declared server"
+            return True, msg
 
         elif info["type"] == "cursor_env":
             config_file = info["config_path"]
@@ -437,6 +451,33 @@ class AgentInstaller:
 
         return False, "Unsupported type"
 
+    @staticmethod
+    def _remove_user_level_tokensafe_mcp() -> bool:
+        """Removes the tokensafe MCP entry from Antigravity's user-level
+        mcp_config.json files (backup first). Returns True if any entry was
+        removed. Entries under disabledMcpServers are left alone: the user
+        explicitly disabled the server there."""
+        removed = False
+        for config_path in (
+            os.path.join(HOME, ".gemini", "config", "mcp_config.json"),
+            os.path.join(HOME, ".gemini", "antigravity", "mcp_config.json"),
+        ):
+            if not os.path.isfile(config_path):
+                continue
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                servers = data.get("mcpServers")
+                if isinstance(servers, dict) and "tokensafe" in servers:
+                    shutil.copy2(config_path, f"{config_path}.backup")
+                    servers.pop("tokensafe")
+                    with open(config_path, "w", encoding="utf-8") as f:
+                        json.dump(data, f, indent=2)
+                    removed = True
+            except Exception:
+                continue
+        return removed
+
     @classmethod
     def _symlink_dir(cls, source_path: str, target_path: str):
         """Safely creates or replaces a symlink to a directory."""
@@ -492,8 +533,17 @@ class AgentInstaller:
         cls._symlink_dir(skill_src, target_path)
 
     @classmethod
-    def install_project(cls, project_dir: Optional[str] = None) -> Dict[str, Any]:
-        """Injects TokenSafe rules and MCP configs directly into a target project workspace."""
+    def install_project(
+        cls,
+        project_dir: Optional[str] = None,
+        agents_plugin_path: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Injects TokenSafe rules and MCP configs directly into a target project workspace.
+
+        agents_plugin_path (opt-in): declares the tokensafe plugin directory in
+        the project's .agents/plugins.json (json_configs.md) so teammates on
+        Antigravity load the plugin from the shared repo without running the
+        installer themselves."""
         if not project_dir:
             project_dir = os.getcwd()
         project_dir = os.path.abspath(project_dir)
@@ -550,11 +600,43 @@ class AgentInstaller:
         except Exception:
             pass
 
+        if agents_plugin_path:
+            cls._write_agents_plugins_config(project_dir, agents_plugin_path)
+            created.append(".agents/plugins.json")
+
         return {
             "success": True,
             "project_dir": project_dir,
             "created_rules": created
         }
+
+    @classmethod
+    def _write_agents_plugins_config(cls, project_dir: str, plugin_path: str) -> None:
+        """Writes/merges .agents/plugins.json declaring the tokensafe plugin
+        directory. Stored relative to the project root when the plugin lives
+        inside it (team-shareable), otherwise as an absolute path."""
+        config_path = os.path.join(project_dir, ".agents", "plugins.json")
+        config: Dict[str, Any] = {}
+        if os.path.isfile(config_path):
+            try:
+                with open(config_path, "r", encoding="utf-8") as f:
+                    config = json.load(f)
+            except Exception:
+                config = {}
+
+        abs_path = os.path.abspath(plugin_path if os.path.isabs(plugin_path) else os.path.join(os.getcwd(), plugin_path))
+        if abs_path == project_dir or abs_path.startswith(project_dir + os.sep):
+            stored = os.path.relpath(abs_path, project_dir).replace(os.sep, "/")
+        else:
+            stored = abs_path
+
+        entries = config.get("entries")
+        if not isinstance(entries, list):
+            entries = []
+        if not any(isinstance(e, dict) and e.get("path") == stored for e in entries):
+            entries.append({"path": stored})
+        config["entries"] = entries
+        cls._write_file_safely(config_path, json.dumps(config, indent=2))
 
     @classmethod
     def install_all(cls, force: bool = False) -> Dict[str, Any]:
@@ -666,17 +748,15 @@ class AgentInstaller:
         so auto-reconnecting IDEs (Antigravity, Cursor, Claude Code) spawn the updated version.
         """
         try:
-            # Touch the marker in every candidate data dir: an MCP server launched
-            # inside the Antigravity plugin context resolves PLUGIN_DATA, while a
-            # bare CLI installer run does not — cover both so reloads are always
-            # seen. The legacy candidate follows THIS module's PROJECT_ROOT (the
-            # patchable checkout root), not paths.py's import-time constant.
+            # Data-dir resolution is context-independent (canonical
+            # ~/.tokensafe/data unless TOKENSAFE_DATA_DIR overrides), so one
+            # marker location covers every launch context.
             from src.paths import resolve_data_dir
-            for data_dir in {resolve_data_dir(), os.path.join(PROJECT_ROOT, "data")}:
-                os.makedirs(data_dir, exist_ok=True)
-                reload_marker = os.path.join(data_dir, ".mcp_reload")
-                with open(reload_marker, "w", encoding="utf-8") as f:
-                    f.write(str(time.time()))
+            data_dir = resolve_data_dir()
+            os.makedirs(data_dir, exist_ok=True)
+            reload_marker = os.path.join(data_dir, ".mcp_reload")
+            with open(reload_marker, "w", encoding="utf-8") as f:
+                f.write(str(time.time()))
         except Exception:
             pass
 
@@ -844,11 +924,10 @@ class AgentInstaller:
 
         # 5. Refresh local version cache
         try:
-            from src.paths import resolve_data_dir, legacy_data_dir
-            for data_dir in {resolve_data_dir(), legacy_data_dir()}:
-                cache_file = os.path.join(data_dir, "version_cache.json")
-                if os.path.exists(cache_file):
-                    os.remove(cache_file)
+            from src.paths import resolve_data_dir
+            cache_file = os.path.join(resolve_data_dir(), "version_cache.json")
+            if os.path.exists(cache_file):
+                os.remove(cache_file)
         except Exception:
             pass
 

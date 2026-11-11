@@ -124,8 +124,9 @@ def main():
         print(dashboard.render_terminal())
 
     elif command in ("html", "web"):
+        from src.paths import resolve_data_dir
         html_content = dashboard.render_html()
-        out_path = os.path.join(PROJECT_ROOT, "data", "dashboard.html")
+        out_path = os.path.join(resolve_data_dir(), "dashboard.html")
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
         with open(out_path, "w", encoding="utf-8") as f:
             f.write(html_content)
@@ -138,10 +139,11 @@ def main():
 
     elif command in ("benchmark", "bench"):
         from src.benchmark import BenchmarkSuite
+        from src.paths import resolve_data_dir
         print("\n⚡ Running Zero-Loss SWE-bench Benchmark Suite across real-world scenarios...")
         data = BenchmarkSuite.run_all()
         print(BenchmarkSuite.render_report(data))
-        out_md = os.path.join(PROJECT_ROOT, "data", "BENCHMARK_REPORT.md")
+        out_md = os.path.join(resolve_data_dir(), "BENCHMARK_REPORT.md")
         BenchmarkSuite.export_markdown_report(data, out_md)
         print(f"📊 Publication-ready markdown report saved to: {out_md}\n")
 
@@ -156,7 +158,12 @@ def main():
                 print(f"  {status} \033[1m{r['name']:<28}\033[0m: {r['message']}")
             print(f"\n\033[32m✔ Universal project rules injected into: {', '.join(res['project_rules'])}\033[0m\n")
         elif "--project" in args:
-            res = AgentInstaller.install_project(os.getcwd())
+            agents_plugin = None
+            if "--agents-plugin" in args:
+                idx = args.index("--agents-plugin")
+                if idx + 1 < len(args):
+                    agents_plugin = args[idx + 1]
+            res = AgentInstaller.install_project(os.getcwd(), agents_plugin_path=agents_plugin)
             print(f"\n\033[32m✔ TokenSafe rules injected into project: {', '.join(res['created_rules'])}\033[0m\n")
         else:
             AgentInstaller.run_interactive()
@@ -538,7 +545,8 @@ def main():
 
         print(WeeklyDigestGenerator.render_email_text(stats))
 
-        out_html = os.path.join(PROJECT_ROOT, "data", "weekly_digest_preview.html")
+        from src.paths import resolve_data_dir
+        out_html = os.path.join(resolve_data_dir(), "weekly_digest_preview.html")
         os.makedirs(os.path.dirname(out_html), exist_ok=True)
         with open(out_html, "w", encoding="utf-8") as f:
             f.write(WeeklyDigestGenerator.render_email_html(stats))

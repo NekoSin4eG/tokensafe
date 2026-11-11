@@ -48,7 +48,7 @@ pip install tokensafe && tokensafe
 curl -fsSL https://tokensafe.dev/install.sh | bash
 ```
 
-On **Google Antigravity**, the installer additionally symlinks the plugin into `~/.gemini/config/plugins/agy-token-optimizer` — Antigravity loads it automatically on startup.
+On **Google Antigravity**, the installer additionally symlinks the plugin into `~/.gemini/config/plugins/tokensafe` — Antigravity loads it automatically on startup (stale `agy-token-optimizer` symlinks from older versions are removed, since Antigravity keys plugin enable-state by folder name and would run every hook twice). Once the plugin ships its own `mcp_config.json`, any leftover user-level `tokensafe` MCP entry in Antigravity's configs is migrated away (backed up first) so the server is not registered twice.
 
 ### Optional Dependency: `cryptography` (Recommended)
 
@@ -75,6 +75,7 @@ Beyond MCP, TokenSafe installs native lifecycle-hook adapters inside your agent 
 
 | Agent | Hook | What it does |
 |---|---|---|
+| **Claude Code** | `SessionStart` | Injects the TokenSafe protocol directives once per session as `additionalContext` (mirrors the Antigravity SessionStart hook) |
 | **Claude Code** | `UserPromptSubmit` | Compacts the prompt into a TOCP S-expression and injects it as `additionalContext` (labeled *estimated* per [METRICS.md](METRICS.md)) |
 | **Claude Code** | `PreToolUse` (Bash) | Blocks secret-bearing and destructive commands; prompts for confirmation on TLS-verification bypasses |
 | **Cursor** | `beforeShellExecution` | Same shell guard: blocks secret leaks and destructive actions, asks on `-k` or `--insecure` |
@@ -82,6 +83,8 @@ Beyond MCP, TokenSafe installs native lifecycle-hook adapters inside your agent 
 | **Codex CLI** | None yet | Uses MCP and `AGENTS.md` directly |
 
 All adapters **fail open**: an internal error never stalls the host agent. Cursor's strict valid-JSON response contract is preserved on every error path.
+
+For **team workspaces on Antigravity**, `tokensafe install --project --agents-plugin <path-to-tokensafe>` additionally declares the plugin in the project's `.agents/plugins.json`, so teammates load hooks, skills, and the MCP server straight from the shared repo without running the installer.
 
 ## Context Budget HUD & Governor
 
@@ -303,7 +306,7 @@ To keep distillation overhead lower than the tokens it saves:
 2. **Output Token Ceiling (`distill_max_tokens: 60`)**: Caps compiled output at 60 tokens to prevent compiler arbitrage loss.
 3. **Three-Tier Cache**:
    - **L1 (In-Memory LRU)**: Sub-millisecond hits inside active sessions.
-   - **L2 (Persistent SQLite)**: Stores normalized SHA-256 prompt hashes in `data/metrics.db` across restarts so repeated workflows (`git commit`, `run tests`, `fix lint`) cost 0 tokens.
+   - **L2 (Persistent SQLite)**: Stores normalized SHA-256 prompt hashes in `~/.tokensafe/data/metrics.db` across restarts so repeated workflows (`git commit`, `run tests`, `fix lint`) cost 0 tokens. The directory is shared by all agents on the machine (override with `TOKENSAFE_DATA_DIR`; Docker uses `/app/data`).
    - **L3 (Shared Team Cache)**: *Team Tier.* Syncs distilled intents and AST skeletons across teammates and CI runners (`/api/team/cache`) for warm 0ms team cache hits.
 
 ### 3. Provider & Cache Inspection

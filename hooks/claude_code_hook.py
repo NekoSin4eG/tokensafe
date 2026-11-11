@@ -22,13 +22,25 @@ PROJECT_ROOT = os.path.dirname(HOOK_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.adapter_core import compact_for_injection, guard_command
+from src.adapter_core import TOKENSAFE_DIRECTIVES, compact_for_injection, guard_command
 
 AGENT = "claude_code"
 
 
 def handle(event: str, payload: dict) -> dict:
     session_id = str(payload.get("session_id") or "") or f"hook_{AGENT}"
+
+    if event == "SessionStart":
+        # One-shot session injection (mirrors the Antigravity SessionStart
+        # hook): persistent directives instead of per-turn re-injection.
+        # No matcher on `source` — inject for startup/resume/clear/compact.
+        # Well under the 10k-char additionalContext cap.
+        return {
+            "hookSpecificOutput": {
+                "hookEventName": "SessionStart",
+                "additionalContext": TOKENSAFE_DIRECTIVES,
+            }
+        }
 
     if event == "UserPromptSubmit":
         prompt = str(payload.get("prompt") or "")

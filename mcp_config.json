@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "tokensafe": {
+      "command": "sh",
+      "args": [
+        "-c",
+        "exec \"${TOKENSAFE_PYTHON:-python3}\" \"$PLUGIN_ROOT/src/mcp_server.py\""
+      ]
+    }
+  }
+}
