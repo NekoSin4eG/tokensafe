@@ -1,40 +1,41 @@
 <p align="center">
-  <img src="assets/logo.svg" alt="TokenSafe Logo" width="100" height="100" />
+  <img src="assets/logo.svg" alt="TokenSafe Logo" width="88" height="88" />
 </p>
 
-<h1 align="center">⚡ TokenSafe</h1>
+<h1 align="center">TokenSafe</h1>
 <!-- mcp-name: dev.tokensafe/tokensafe -->
 
 <p align="center">
-  <b>Local-First AI Coding Guardrails, Context Precision &amp; Team ROI for Engineering Orgs</b><br>
-  Stop paying for AI hallucinations and secret leaks — cut context bloat by <b>up to [90%*](METRICS.md)</b> locally.<br>
-  Built for teams on <b>Cursor, Claude Code, Google Antigravity, Windsurf &amp; Codex</b>.
+  <b>Local-First AI Guardrails, Focused Context &amp; Auditable Team ROI</b><br>
+  Stop paying for AI hallucinations and secret leaks. Keep your team's coding agents focused on the right code, block exposed secrets before commit, and cut context bloat locally (up to <a href="METRICS.md">90%*</a>).<br>
+  Built for teams using <b>Cursor, Claude Code, Codex, Windsurf, and Google Antigravity</b>.
 </p>
 
 <p align="center">
-  <a href="https://github.com/tokensafe-dev/tokensafe/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/tokensafe-dev/tokensafe/test.yml?branch=main&label=tests&style=flat-square" alt="Tests"></a>
-  <a href="https://www.npmjs.com/package/tokensafe"><img src="https://img.shields.io/npm/v/tokensafe.svg?color=CB3837&style=flat-square" alt="npm"></a>
+  <a href="https://github.com/tokensafe-dev/tokensafe/actions/workflows/test.yml"><img src="https://img.shields.io/github/actions/workflow/status/tokensafe-dev/tokensafe/test.yml?branch=main&label=tests&style=flat-square&color=10B981" alt="Tests"></a>
+  <a href="https://www.npmjs.com/package/tokensafe"><img src="https://img.shields.io/npm/v/tokensafe.svg?color=38BDF8&style=flat-square" alt="npm"></a>
   <a href="https://www.npmjs.com/package/tokensafe"><img src="https://img.shields.io/npm/dw/tokensafe.svg?color=10B981&label=npm%20downloads&style=flat-square" alt="npm downloads"></a>
-  <a href="https://pypi.org/project/tokensafe/"><img src="https://img.shields.io/pypi/v/tokensafe.svg?color=3775A9&style=flat-square" alt="PyPI"></a>
-  <a href="https://github.com/tokensafe-dev/tokensafe/stargazers"><img src="https://img.shields.io/github/stars/tokensafe-dev/tokensafe?style=flat-square&color=yellow" alt="Stars"></a>
-  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-emerald.svg?style=flat-square" alt="License"></a>
-  <a href="https://tokensafe.dev#pricing"><img src="https://img.shields.io/badge/Trial-7_Days_Free-10B981.svg?style=flat-square" alt="Trial"></a>
+  <a href="https://pypi.org/project/tokensafe/"><img src="https://img.shields.io/pypi/v/tokensafe.svg?color=38BDF8&style=flat-square" alt="PyPI"></a>
+  <a href="https://github.com/tokensafe-dev/tokensafe/stargazers"><img src="https://img.shields.io/github/stars/tokensafe-dev/tokensafe?style=flat-square&color=334155" alt="Stars"></a>
+  <a href="https://opensource.org/licenses/MIT"><img src="https://img.shields.io/badge/License-MIT-0F766E?style=flat-square" alt="License"></a>
+  <a href="https://tokensafe.dev#pricing"><img src="https://img.shields.io/badge/Team_Trial-7_Days_Free-10B981?style=flat-square" alt="Trial"></a>
 </p>
 
 <p align="center">
-  <a href="#-1-click-universal-install">Install</a> •
-  <a href="#-universal-mcp-server-configuration">MCP Setup</a> •
-  <a href="#-how-your-team-ships-cleaner-code-with-6090-less-bloat">How It Works</a> •
-  <a href="#-tokensafe-guard-proactive-agent-security--hygiene-shield">TokenSafe Guard</a> •
-  <a href="#-pricing--plans">Pricing</a> •
-  <a href="https://tokensafe.dev">Official Website & Docs</a>
+  <a href="#1-click-universal-install">Install</a> &bull;
+  <a href="#three-outcomes-for-engineering-teams">Outcomes</a> &bull;
+  <a href="#tokensafe-guard-local-security-and-hygiene-shield">Guardrails</a> &bull;
+  <a href="#universal-mcp-server-configuration">MCP Setup</a> &bull;
+  <a href="#metrics-honesty">Metrics Honesty</a> &bull;
+  <a href="#pricing-and-7-day-team-trial">Pricing</a> &bull;
+  <a href="https://tokensafe.dev">Website &amp; Docs</a>
 </p>
 
 ---
 
-## ⚡ 1-Click Universal Install
+## 1-Click Universal Install
 
-Connect TokenSafe to all detected AI coding agents on your machine in seconds:
+Connect TokenSafe to the AI coding agents on your workstation in one command:
 
 ```bash
 # Option 1: Zero-Install via npx (Recommended for Cursor & Claude Desktop)
@@ -47,11 +48,9 @@ pip install tokensafe && tokensafe
 curl -fsSL https://tokensafe.dev/install.sh | bash
 ```
 
-### Optional dependency: `cryptography` (recommended)
+### Optional Dependency: `cryptography` (Recommended)
 
-The TokenSafe engine itself is **standard-library only** and works out of the box.
-A single optional dependency — [`cryptography`](https://pypi.org/project/cryptography/) —
-is installed automatically by `install.sh` / `requirements.txt` when available:
+The local TokenSafe engine uses Python's standard library only and runs out of the box. One optional package, [`cryptography`](https://pypi.org/project/cryptography/), is installed automatically by `install.sh` and `requirements.txt` when available:
 
 ```bash
 pip install cryptography   # or: brew install cryptography
@@ -59,33 +58,32 @@ pip install cryptography   # or: brew install cryptography
 
 | Component | With `cryptography` | Without (pure-stdlib fallback) |
 |---|---|---|
-| Client: license verification | Instant Ed25519 fast-path | Pure-Python Ed25519 (~0.3s once, then cached — see below) |
+| Client: license verification | Instant Ed25519 fast-path | Pure-Python Ed25519 (~0.3s once, then cached) |
 | Client: everything else | Identical | Identical |
-| Cloud backend: Clerk session tokens | RS256 signature verified | **Rejected** (fail-closed — unsigned tokens are never accepted) |
+| Cloud backend: Clerk session tokens | RS256 signature verified | **Rejected** (fail-closed: unsigned tokens are never accepted) |
 | Cloud backend: everything else | Identical | Identical |
 
-The client caches a successful license verification for up to 1 hour, so even the
-pure-Python path adds no measurable latency after the first hook invocation.
+The client caches a verified license for up to 1 hour, so even the pure-Python path adds no measurable latency after the first hook invocation.
 
 ---
 
-## 🪝 Universal Agent Hooks (Claude Code & Cursor)
+## Universal Agent Hooks (Claude Code & Cursor)
 
-Beyond MCP, TokenSafe ships **lifecycle-hook adapters** that run natively inside your agent's loop — installed automatically by `tokensafe setup`:
+Beyond MCP, TokenSafe installs native lifecycle-hook adapters inside your agent loop via `tokensafe setup`:
 
 | Agent | Hook | What it does |
 |---|---|---|
 | **Claude Code** | `UserPromptSubmit` | Compacts the prompt into a TOCP S-expression and injects it as `additionalContext` (labeled *estimated* per [METRICS.md](METRICS.md)) |
-| **Claude Code** | `PreToolUse` (Bash) | Denies secret-bearing and destructive commands; asks on TLS-verification bypasses |
-| **Cursor** | `beforeShellExecution` | Same shell guard — deny secrets/destruction, ask on `-k`/`--insecure` |
-| **Cursor** | `beforeReadFile` | Blocks lockfile/bundle/`dist/` dumps that would burn ~50k context tokens |
-| **Codex CLI** | — | No lifecycle hooks yet; MCP + AGENTS.md remain the integration |
+| **Claude Code** | `PreToolUse` (Bash) | Blocks secret-bearing and destructive commands; prompts for confirmation on TLS-verification bypasses |
+| **Cursor** | `beforeShellExecution` | Same shell guard: blocks secret leaks and destructive actions, asks on `-k` or `--insecure` |
+| **Cursor** | `beforeReadFile` | Blocks raw lockfile, bundle, and `dist/` reads that would burn ~50k context tokens |
+| **Codex CLI** | None yet | Uses MCP and `AGENTS.md` directly |
 
-All adapters **fail open**: a crash never blocks the host agent (Cursor's block-on-invalid-JSON contract is explicitly honored — every error path prints valid allow-JSON).
+All adapters **fail open**: an internal error never stalls the host agent. Cursor's strict valid-JSON response contract is preserved on every error path.
 
-## 🧠 Context Budget HUD
+## Context Budget HUD & Governor
 
-Agents (and humans) usually discover context exhaustion by quality degradation — too late. TokenSafe exposes the remaining budget as a first-class MCP tool:
+Teams usually notice context exhaustion only when code quality drops mid-task. TokenSafe exposes live window usage as a native MCP tool:
 
 ```json
 { "tool": "tokensafe:context_budget", "args": { "model": "claude-x" } }
@@ -102,25 +100,19 @@ Agents (and humans) usually discover context exhaustion by quality degradation �
 }
 ```
 
-- Window resolution: explicit arg → `TOKENSAFE_CONTEXT_WINDOW` env → model-family default (Gemini 1M, Claude 200k, GPT 128k).
-- **80% warning injected into the agent automatically** by the Antigravity/ZCode `pre_invocation` hook — once per session (marker-event guarded).
-- Honesty: counts only TokenSafe-instrumented flows (tool slices, skeletons, compacted prompts) — labeled `estimated`, a floor, never a fabricated total (see [METRICS.md](METRICS.md)).
+- **Window resolution**: explicit argument, then `TOKENSAFE_CONTEXT_WINDOW`, then model-family default (Gemini 1M, Claude 200k, GPT 128k).
+- **80% session warning**: injected once per session by the `pre_invocation` hook when context usage approaches the threshold.
+- **Cascading governor & prefix normalizer**: aligns prompt prefixes to 64-token boundaries (for Anthropic `cache_control` and DeepSeek caching) and progressively folds inactive bodies before overflowing.
+- **Honest accounting**: counts only TokenSafe-instrumented flows and labels them `estimated` (a floor, never a fabricated total; see [METRICS.md](METRICS.md)).
 
-## 💰 Per-Seat ROI (Team)
+## Per-Seat ROI & Persistent Diff-Aware Read-Cache
 
-Team owners pay per seat — now they see the return per seat. The dashboard's Team Seats table carries an **ROI column** per developer: saved tokens, USD equivalent, and the `metered/estimated` honesty split, computed in a single grouped query. Seats without activity render `—`, never a fabricated number.
+- **Per-Seat ROI (Team)**: the Team Seats dashboard table tracks saved tokens, derived USD impact, and the `measured` vs. `estimated` split per developer in one grouped query. Inactive seats show `—`, never guessed figures.
+- **Diff-Aware Read-Cache (`SUBAGENT_DEDUP`)**: prevents subagent swarms from reading identical files repeatedly. Entries are keyed by **SHA-256 of raw file bytes**, so they survive MCP server restarts and `git checkout` while invalidating immediately on any real edit (bounded at 256k chars per artifact and 500 recent entries).
 
-## 💾 Persistent Diff-Aware Read-Cache
+## Universal MCP Server Configuration
 
-The subagent dedup cache (per-session) now has a persistent layer keyed by **sha256 of the file's raw bytes**:
-
-- Survives MCP-server restarts **and** `git checkout` (which resets mtime but not content — content is the only truth).
-- Any real edit changes the hash and invalidates the entry instantly.
-- Bounded: artifacts >256k chars are never cached; the layer prunes itself to the latest 500 entries (hourly amortized).
-
-## 🔌 Universal MCP Server Configuration
-
-Connect TokenSafe directly to **Claude Desktop** (`claude_desktop_config.json`) or **Cursor** MCP Settings:
+Connect TokenSafe to **Claude Desktop** (`claude_desktop_config.json`) or **Cursor** MCP settings:
 
 ```json
 {
@@ -135,63 +127,42 @@ Connect TokenSafe directly to **Claude Desktop** (`claude_desktop_config.json`) 
 
 ---
 
-## ⚡ How Your Team Ships Cleaner Code with 60%–90% Less Bloat
+## Three Outcomes for Engineering Teams
 
-Giving coding agents raw access to entire repos creates three daily bottlenecks:
-1. **Hallucinations in Large Files:** Reading 2,000-line modules just to tweak a 10-line helper causes models to lose track of imports and break adjacent code.
-2. **Secret & Security Leaks:** Static text rules fade over multi-turn chats—agents hardcode secret fallbacks, skip TLS verification, or run `git add .` with `.env` files.
-3. **Mid-Sprint Quota Walls & Blind Spend:** Verbose prompts, lockfile diffs, and unused MCP tool schemas exhaust 5-hour limits while leadership lacks per-seat ROI visibility.
+Giving coding agents raw access to entire repositories creates three daily problems:
+1. **Broken edits in large files**: reading 2,000-line modules for a 10-line fix causes models to forget imports, invent methods, and regress adjacent code.
+2. **Secret leaks and unsafe shortcuts**: static prompt rules in `.cursorrules` wear off mid-session. Agents hardcode fallback credentials, disable TLS checks, or stage `.env` files with `git add .`.
+3. **Mid-sprint quota stops and blind spend**: bloated diffs, lockfiles, and verbose MCP schemas burn 5-hour limits while engineering leads lack per-seat ROI visibility.
 
-### TokenSafe Fixes All Three Locally:
-- **Graph-Guided AST Skeletonization:** Folds inactive function bodies into signatures, keeping target functions and 1-hop dependencies full while collapsing unrelated code (`-85% to -92%`).
-- **Prompt Cache Prefix Normalizer:** Strips volatile timestamps and aligns system prompts to 64-token boundaries. Injects Anthropic ephemeral breakpoints (`cache_control: {"type": "ephemeral"}`) and DeepSeek chunking for 100% provider cache hits and 90% cost discounts.
-- **Context Window Governor & Token Ceiling:** Enforces deterministic token budgets via 3-stage cascading autothrottling (AST skeletonization ➔ TOCP user message history compaction ➔ sliding state ledger) to prevent catastrophic context overflows.
-- **Subagent Deduplication Firewall:** Detects repeated file reads across subagents and agent swarms, serving cached AST slices directly from SQLite session memory (`SUBAGENT_DEDUP`) with zero redundant overhead.
-- **AST Diff Slicer & Lockfile Stripper:** Compresses code review diffs by stripping noisy lockfiles (`package-lock.json`, `pnpm-lock.yaml`, `yarn.lock`, `Cargo.lock`) and minified assets, condensing diffs to 2 lines of context (`git diff -U2`) for up to 96% token savings.
-- **God Nodes & Architectural Hub Detection:** Calculates Degree Centrality to identify structural project hubs and injects topology awareness into agent sessions without expensive file crawling.
-- **TOCP Prompt Distillation:** Intercepts prompts and distills intent into lean S-Expressions (`-40% to -70%`). Solo & Team tiers include **Managed Cloud Distillation** out of the box via TokenSafe Cloud (`gemini-flash-lite-latest`) with **zero API keys required**. Free tier includes a zero-overhead 9-language Local Regex Compactor. Enterprise on-premise Docker deployments support custom private BYOK keys.
-- **Token Arbitrage Guard & Output Ceiling:** Eliminates LLM compiler arbitrage loss with a dual defense: inputs $< 100$ tokens route to instant zero-cost local regex heuristics ($0$ LLM tokens), while inputs $\ge 100$ tokens are clamped to a strict $60$-token max output ceiling.
-- **Three-Tier Distillation Cache:** Three-tier L1 In-Memory LRU + L2 Persistent SQLite cache (`metrics.db`) + L3 Shared Team Cloud Cache with normalized SHA-256 hashing guarantees sub-millisecond zero-cost replays for recurring developer commands.
-- **Shared Team Cache (L3 Cloud Monorepo Cache):** Synchronizes compiled prompt intents and AST skeletons across all developers and CI agents on an engineering team. Teammates querying the same files or command patterns get instant 0ms warm cache hits with zero LLM API calls.
-- **API Surface Map Generator:** Generates high-density `tokensafe-out/API_SURFACE.md` (~1.5k tokens) for instant agent codebase onboarding.
-- **Predictive Dependency Prefetcher:** Attaches imported symbol signatures to eliminate downstream exploratory `read_file` roundtrips.
-- **Live SSE Streaming Dashboard:** Real-time reactive Web UI streaming token reductions, live event logs, and USD savings via Server-Sent Events (`/api/events`).
-- **Friday Team ROI Digest:** Automatically aggregates 7-day token economics every Friday and emails team leads an executive HTML report with engineer savings leaderboards.
-- **Environment Overhead Auditor (`tokensafe doctor`):** Inspects active MCP servers and Antigravity skills, measuring system prompt token tax and pruning redundant tool schemas.
-- **MCP Tool Schema Bloat Guard:** Stops heavy MCP servers (50–200+ tools) from injecting 5,000–15,000 hidden schema tokens into every API turn. 1-click toggle (`tokensafe mcp disable <name>`) and real-time in-chat bloat alerts.
-- **Data Retention & Compact Rollups (`tokensafe prune` / `vacuum`):** Automated sliding-window log cleanup with lifetime metric rollups, cutting telemetry database disk footprint by up to 40%.
-- **TokenSafe Guard:** Proactive agent security & hygiene shield. Blocks hardcoded secret fallbacks in `os.environ` / `process.env`, SSL/TLS bypass (`verify=False`), raw SQL injection f-strings, insecure CORS credentials, blanket `git add .` on `.env` files, and destructive shell commands (`rm -rf /`).
-- **Local Secret Redactor:** Sanitizes Stripe, AWS, JWT, and database credentials before network transmission.
-- **Output Guard & Loop Guard:** Blocks destructive full-file rewrites on files $\ge 40$ lines and halts command loops.
+| Outcome | What changes for your team | Local enforcement |
+|---|---|---|
+| **Clean code on the first pass** | Agents read only target functions, design tokens, and 1-hop dependencies instead of 2,000 lines of noise. | Sub-30ms AST skeletonizer, `API_SURFACE.md` generator, predictive signature prefetcher, `git diff -U2` lockfile stripper, God Node detection, and Loop Guard. |
+| **Zero leaked secrets in git** | Hardcoded password fallbacks, TLS bypasses, raw SQL interpolation, and `.env` commits are stopped before reaching disk or staging. | Deterministic `TokenSafe Guard`, Output Guard (`write_file >= 40 lines`), and local PII/key redaction. |
+| **Predictable sprint velocity & ROI** | Shared L3 monorepo cache gives teammates warm 0ms hits, while CTOs receive a Friday ROI digest separating `measured` and `estimated` savings. | Three-tier cache (`L1` LRU, `L2` SQLite, `L3` Team pool), Token Arbitrage Guard (`< 100 tok` regex, `>= 100 tok` clamped to `60 tok`), and live SSE dashboard (`/api/events`). |
 
 ---
 
-## 🤯 The Accidental Side Effect: Your AI Stops Hallucinating
+## Why Stripping Context Bloat Fixes AI Code Quality
 
-We originally built TokenSafe for a purely selfish reason: **to stop getting $400 monthly LLM API bills** from running autonomous coding agents.
+TokenSafe started because of a **$400 monthly API bill** from running autonomous coding agents across active repositories.
 
-Then something unexpected happened during real-world dogfooding.
+Once engineering teams tested it, lower bills turned out to be the secondary benefit. **Agents wrote cleaner patches, stopped inventing non-existent methods, and stopped looping on the same broken fix.**
 
-Our agents didn't just get cheaper — **they wrote noticeably better code, stopped inventing imaginary methods, and eliminated cyclic regression bugs.**
+> Models rarely write bad code because they lack capability. They write bad code when 15,000 lines of irrelevant context drown out the few contracts that matter.
 
-Turns out, there's a simple reason for this:
-> **Transformer models don't write bad code because they're stupid. They write bad code because we drown them in 15,000 lines of garbage.**
-
-### How stripping 90% of token noise fixes AI code quality:
-
-| What Usually Breaks the AI | How TokenSafe Fixes It | The Result |
+| What breaks coding agents | How TokenSafe fixes it | The outcome |
 | :--- | :--- | :--- |
-| **"Lost in the Middle" Attention Fade**<br>Agent reads a 2,000-line file just to tweak a 10-line helper. The model loses track of imports and invents fictional methods. | **AST Skeletonizer** (`src/slicer.py`) collapses dead code into typed interfaces, keeping only target functions and 1-hop callees full. | **High-Density Signal.** The model sees 100% of the type contracts without drowning in unrelated loops. |
-| **Terminal Log Poisoning**<br>`npm test` or `pytest` fails and dumps 4,000 lines of stack traces and lockfile diffs. The model panics and rewrites unrelated code. | **Command Sanitizer** (`src/command_sanitizer.py`) snips the matrix down to the exact failing assertion line and call frame. | **Laser Focus.** The agent fixes the actual bug instead of hallucinating workarounds for log noise. |
-| **The 5-Attempt Doom Loop**<br>Agent tries a broken fix, fails, tries the exact same broken fix again, and oscillates until your session context limit catches fire. | **Anti-Stuck Loop Guard** (`src/loop_detector.py`) intercepts repeated tool calls and cyclic edits in flight. | **No Cascading Regressions.** The loop is halted before the agent can butcher working modules. |
-| **Vague Human Prompts**<br>*"Hey, fix the auth bug but don't break the cache or whatever."* The model takes creative liberties and breaks three other files. | **TOCP Intent Compactor** (`src/compactor.py`) distills messy instructions into explicit S-Expressions with hard constraint boundaries. | **Zero Ambiguity.** The model executes `(DEBUG auth.ts [jwt] "fix 401 token expiry")` with strict parameter bounds. |
-| **Unsafe Agent Actions & Secret Leaks**<br>Agent hardcodes fallback API keys, disables SSL validation (`verify=False`), uses SQL f-strings, or runs `git add .` staging `.env` files. | **TokenSafe Guard** (`src/guard.py`) audits and blocks hazardous code edits and terminal commands before execution. | **Zero-Leak Workspace.** Hardcoded credentials, SQLi, and catastrophic deletions (`rm -rf /`) are intercepted in real time. |
+| **"Lost in the Middle" context fade**<br>An agent reads a 2,000-line file to change one 10-line helper, forgets imports, and invents methods. | **AST Skeletonizer** (`src/slicer.py`) folds inert bodies into typed signatures while keeping the target symbol and 1-hop callees intact. | **Focused signal.** The model keeps full type contracts without drowning in unrelated logic. |
+| **Terminal log flooding**<br>`npm test` or `pytest` fails and dumps 4,000 lines of stack traces and lockfile diffs into context. | **Command Sanitizer** (`src/command_sanitizer.py`) strips lockfile noise and trims output to the failing assertion and stack frame. | **Root-cause fixes.** The agent repairs the actual bug instead of rewriting unrelated files. |
+| **5-attempt retry loops**<br>An agent repeats the same broken edit five times in a row until the context budget runs dry. | **Loop Guard** (`src/loop_detector.py`) detects repeated identical tool calls and halts the cycle. | **Fewer regressions.** Stuck loops stop before damaging working modules. |
+| **Verbose prompts & token arbitrage**<br>Loose phrasing like *"fix auth without breaking cache"* leads to wide, risky rewrites. | **TOCP Intent Compactor** (`src/compactor.py`) distills instructions into compact S-expressions (`-40% to -70%`) with strict scope bounds. | **Clear scope.** Example: `(DEBUG auth.ts [jwt] "fix 401 token expiry")`. |
+| **Unsafe edits & secret leaks**<br>An agent hardcodes fallback keys, sets `verify=False`, builds SQL with f-strings, or runs `git add .` with `.env` present. | **TokenSafe Guard** (`src/guard.py`) audits writes and shell commands locally before execution. | **Protected repositories.** Credentials, SQLi patterns, and destructive commands are blocked locally. |
 
 ---
 
-## 🌐 Polyglot Zero-Loss AST Engine (10+ Languages)
+## Polyglot AST Engine (10+ Languages)
 
-TokenSafe is built from the ground up to support modern polyglot monorepos. Its zero-LLM deterministic AST state machine folds non-target function bodies in **< 30ms** with zero external dependencies, while preserving active symbols and 1-hop dependencies with full executable bodies.
+TokenSafe supports modern polyglot monorepos out of the box. Its deterministic local AST state machine folds non-target function bodies in **< 30ms** with zero external runtime dependencies, while preserving target symbols and 1-hop dependencies with full executable bodies.
 
 ### Supported Language Matrix
 
@@ -204,148 +175,142 @@ TokenSafe is built from the ground up to support modern polyglot monorepos. Its 
 | **Java & C#** | `.java`, `.cs` | Classes, records, methods with access modifiers (`public`, `protected`, `static`, `async`, `override`), generic return types (`Task<T>`, `List<E>`), `throws` | Method bodies folded; classes and interfaces remain structural |
 | **C & C++** | `.c`, `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp` | Classes, structs, namespaces, scoped methods `ClassName::method`, `const`, `noexcept`, `override`, destructors | Functions folded; namespace and class hierarchies preserved |
 | **PHP, Kotlin, Swift** | `.php`, `.kt`, `.kts`, `.swift` | Classes, `function`, `fun`, `func` declarations with visibility modifiers | Function bodies folded into `{ /* ... */ }` |
-| **CSS, SCSS, LESS, Tailwind** | `.css`, `.scss`, `.sass`, `.less` | **Design tokens (`:root`, `@theme`, CSS variables, `$var`, `@var`) 100% preserved**, container queries (`@media`, `@supports`, `@container`, `@layer`) kept open | Component selectors, `@keyframes`, and mixins folded into `{ /* ... */ }` unless matching `target_symbol` |
+| **CSS, SCSS, LESS, Tailwind** | `.css`, `.scss`, `.sass`, `.less` | **Design tokens (`:root`, `@theme`, CSS variables, `$var`, `@var`) preserved in full**, container queries (`@media`, `@supports`, `@container`, `@layer`) kept open | Component selectors, `@keyframes`, and mixins folded into `{ /* ... */ }` unless matching `target_symbol` |
 
-### Key Engine Guarantees:
-- **Design Token & Palette Preservation**: When skeletonizing stylesheets, TokenSafe **always preserves all design tokens** (`:root { ... }`, Tailwind v4 `@theme { ... }`, CSS variables `--*`, SCSS `$vars`) so agents never hallucinate colors, radii, or fonts, while pruning 90%+ of bloated component styles.
-- **Strict Arrow Function Parser**: Arrow functions strictly require `=>` before any `{` can be considered a function body; destructuring parameters (`({ a, b }: Props) =>`) and parenthesized ternary expressions (`const x = (flag) ? { a: 1 } : { b: 2 }`) are never corrupted.
-- **Directory Tree Optimization (`tokensafe:list_dir`)**: Replaces verbose and noisy terminal `ls -la` commands with a compact, depth-bounded markdown tree without permissions, timestamps, or lockfiles.
-- **Graph-Guided Neighborhood Slicing**: When your AI agent inspects a function or component (via `tokensafe:smart_read_file(path, symbol="Target")`), TokenSafe automatically keeps the full implementation of the target **and its 1-hop callees/callers**, while collapsing all unrelated code.
-- **Comment & String Bracket Immunity**: Multi-line block comments (`/* ... */`, JSX `{/* ... */}`), template strings (`` `${...}` ``), and escaped quotes are tracked in a dedicated token lexer (`BraceLexer`), guaranteeing zero bracket desynchronization.
-- **Control-Flow Statement Immunity**: Statements like `if (...)`, `catch (err) {`, `for (...)`, and `while (...)` are strictly protected and never corrupted into placeholders.
+### Key Engine Guarantees
+- **Design Token & Palette Preservation**: When skeletonizing stylesheets, TokenSafe keeps design tokens (`:root { ... }`, Tailwind v4 `@theme { ... }`, CSS variables `--*`, SCSS `$vars`) intact so agents never invent colors, radii, or font rules.
+- **Strict Arrow Function Parser**: Arrow functions require `=>` before any `{` counts as a function body. Destructuring parameters (`({ a, b }: Props) =>`) and parenthesized ternary expressions (`const x = (flag) ? { a: 1 } : { b: 2 }`) are left intact.
+- **Directory Tree Optimization (`tokensafe:list_dir`)**: Replaces verbose `ls -la` output with a compact, depth-bounded tree without permissions, timestamps, or lockfiles.
+- **Graph-Guided Neighborhood Slicing**: Calling `tokensafe:smart_read_file(path, symbol="Target")` preserves the target body **and its 1-hop callees/callers** while folding unrelated code.
+- **Comment & String Bracket Immunity**: Multi-line block comments (`/* ... */`, JSX `{/* ... */}`), template strings (`` `${...}` ``), and escaped quotes are tracked by `BraceLexer` so brackets never desynchronize.
+- **Control-Flow Immunity**: Statements like `if (...)`, `catch (err) {`, `for (...)`, and `while (...)` are protected from folding.
 
 ---
 
-## 🛡️ The Hidden Context Killer: MCP Tool Schema Bloat
+## The Hidden Context Tax: MCP Tool Schema Bloat
 
-Why do AI coding agent quotas (like Antigravity's **5-Hour Limit** or Claude/OpenAI monthly token budgets) evaporate after just a few prompts?
+Coding agent quotas (such as 5-hour session windows or monthly token budgets) often drain after a few prompts before real work starts.
 
 ### The Hidden System Prompt Tax
-Whenever an MCP server is configured in your editor (Cursor, Claude Desktop, Antigravity, Windsurf), **the complete JSON schema for every single tool is injected into the LLM's system prompt on EVERY API TURN** — even if you never use that tool!
+Whenever an MCP server is enabled in an editor (Cursor, Claude Desktop, Antigravity, Windsurf), **the full JSON schema for every tool is injected into the system prompt on every turn**, even when unused:
 
-```
+```text
 ┌────────────────────────────────────────────────────────────────────────┐
 │  SYSTEM PROMPT ANATOMY (EVERY SINGLE TURN)                            │
 ├────────────────────────────────────────────────────────────────────────┤
 │  Base System Instructions                                ~1,500 tokens │
 │  Active Workspace Skills & Prompts                       ~8,000 tokens │
 │  Regular MCP Tools (context7, prisma, etc.)                ~800 tokens │
-│  🚨 Heavy MCP Tools (200+ schemas from cloud/re tools)   ~6,000 tokens │
+│  [!] Heavy MCP Tools (200+ schemas from large servers)   ~6,000 tokens │
 ├────────────────────────────────────────────────────────────────────────┤
-│  TOTAL HIDDEN BASE TAX BEFORE YOU TYPE A SINGLE CHARACTER:             │
-│  🔥 ~16,300 tokens PER TURN × 15 turns = 244,500 tokens burned!       │
+│  TOTAL HIDDEN BASE TAX BEFORE YOUR FIRST LINE OF CODE:                 │
+│  ~16,300 tokens PER TURN x 15 turns = 244,500 tokens burned            │
 └────────────────────────────────────────────────────────────────────────┘
 ```
 
-- **1 Server with 50 tools** = **~1,500 – 2,500 tokens** of static tax on every turn.
-- **1 Server with 200+ tools** = **~5,000 – 10,000 tokens** per turn!
-- In a 15-turn coding task, **75,000 to 150,000 tokens** are burned on tool schemas alone.
+- **1 server with 50 tools** = **~1,500 to 2,500 tokens** of static tax per turn.
+- **1 server with 200+ tools** = **~5,000 to 10,000 tokens** per turn.
+- Across a 15-turn coding session, **75,000 to 150,000 tokens** go solely to tool schemas.
 
-### How TokenSafe Eliminates MCP Bloat:
-1. **`tokensafe doctor` (Context Tax Auditor)**: Scans all configured MCP servers and active skills, measures the exact token overhead per turn, and flags servers with $\ge 40$ tools as `CRITICAL BLOAT`.
-2. **1-Click MCP Management**: Instantly toggle heavy servers without editing JSON files manually:
+### How TokenSafe Cuts MCP Overhead
+1. **`tokensafe doctor` (Environment Auditor)**: Scans configured MCP servers and skills, measures token overhead per turn, and flags servers with $\ge 40$ tools as `CRITICAL BLOAT`.
+2. **1-Click MCP Toggle**: Enable or disable heavy servers without manual JSON edits:
    ```bash
-   tokensafe mcp disable rea     # Prunes 208 schemas from system prompt
-   tokensafe mcp enable rea      # Re-enables when actively needed
+   tokensafe mcp disable rea     # Prunes heavy schemas from the system prompt
+   tokensafe mcp enable rea      # Re-enables when needed
    ```
-3. **PreInvocation Bloat Alerts**: Live in-chat warning badges in the IDE when critical MCP bloat is detected on session start.
-4. **Data Retention & Compact Rollups**: Automatic rolling-window event cleanup (`tokensafe prune` and `tokensafe vacuum`) prevents SQLite telemetry from ballooning on disk.
+3. **Session Start Bloat Alerts**: Surfaces warning badges in chat when heavy MCP bloat is active.
+4. **Telemetry Retention (`tokensafe prune` / `vacuum`)**: Compacts SQLite metrics with rolling-window rollups, reducing local database footprint by up to 40%.
 
 ---
 
-## ⚡ TokenSafe vs. Graphify: Dynamic In-Flight Defense vs. Static Reports
+## TokenSafe vs. Graphify: In-Flight Defense vs. Static Reports
 
-How TokenSafe complements or supersedes static graph tools like **Graphify** (`graphify-labs/graphify`):
+How TokenSafe complements or replaces static graph tools like **Graphify** (`graphify-labs/graphify`):
 
 | Capability | Graphify | TokenSafe |
 |---|---|---|
-| **Primary Focus** | Static knowledge graph reports & MCP queries | **In-flight real-time token compression & defense** |
-| **Indexing Cost** | Expensive LLM tokens / heavy graph extraction | **0 tokens, 100% deterministic local AST (< 30ms)** |
-| **Execution Latency** | Offline / CLI-initiated build | **Sub-millisecond inline proxy & lifecycle hooks** |
-| **Active Slicing** | Static file output (`GRAPH_REPORT.md`) | **Dynamic call-graph skeletonization (85–92% saved)** |
-| **Multi-Project Workspace** | Requires manual directory targeting | **Auto-detects project roots per file on the fly** |
-| **Agent Prompt Optimization** | None | **TOCP S-Expression prompt distillation (-40% to -70%)** |
-| **Safety & Runaway Prevention** | None | **Output rewrite guard, loop detector, secret scrubbing** |
+| **Primary Focus** | Static knowledge graph reports & MCP queries | **In-flight real-time context slicing & security guardrails** |
+| **Indexing Cost** | Requires LLM tokens / offline graph build | **0 tokens, deterministic local AST (< 30ms)** |
+| **Execution Latency** | Offline CLI build step | **Sub-millisecond inline proxy & lifecycle hooks** |
+| **Active Slicing** | Static report (`GRAPH_REPORT.md`) | **Dynamic call-graph skeletonization (85% to 92% fewer file tokens)** |
+| **Multi-Project Workspace** | Manual directory targeting | **Detects project roots per file on the fly** |
+| **Prompt Distillation** | None | **TOCP S-expression compaction (-40% to -70%)** |
+| **Safety & Runaway Prevention** | None | **Guardrails, Output Guard, Loop Guard, secret redaction** |
 
-> **Complements & Replaces**: If you already use Graphify for repository mapping, TokenSafe works alongside it by compressing real-time agent tool reads on the wire. Or use TokenSafe standalone for a zero-configuration, zero-cost, sub-30ms architecture engine out of the box.
+> **Complements & Replaces**: If you already maintain Graphify reports for architecture docs, TokenSafe still slices live file reads on the wire. Standalone, TokenSafe needs no pre-indexing step.
 
 ---
 
-## 🛡️ TokenSafe Guard: Proactive Agent Security & Hygiene Shield
+## TokenSafe Guard: Local Security and Hygiene Shield
 
-Autonomous AI coding agents operate with powerful tool access—executing arbitrary shell commands, modifying critical source files, and interacting with remote systems. Without proactive guardrails, models frequently introduce subtle security vulnerabilities, bypass TLS safeguards, or leak sensitive credentials directly into git repositories.
+Coding agents hold shell execution and file write access across your repositories. Passive prompt rules fade over multi-turn sessions, leaving code vulnerable to leaked keys, TLS bypasses, or unsafe staging.
 
-**TokenSafe Guard** (`src/guard.py`) intercepts and audits agent tool calls in real time before execution, enforcing strict code hygiene and repository safety with zero token overhead:
+**TokenSafe Guard** (`src/guard.py`) audits tool calls locally before disk or git execution with zero token overhead:
 
 ### 1. Secret & Private Key Leak Prevention (Zero Hardcoded Fallbacks)
-- **Live Provider Secrets**: Blocks hardcoded Stripe live keys, AWS access keys, OpenAI project keys, Anthropic tokens, and GitHub personal access tokens anywhere in code.
-- **Default Fallback Hardcoding**: AI models frequently write `os.environ.get("DB_PASSWORD", "prod_secret_123")` or `process.env.JWT_SECRET || "production_secret"`. TokenSafe Guard strictly blocks non-placeholder fallbacks for sensitive environment variable names.
-- **Raw Hexadecimal Private Keys**: Blocks 64-character raw hex private keys and raw PEM private key blocks assigned directly in source code.
+- **Live Provider Secrets**: Blocks hardcoded Stripe live keys, AWS access keys, OpenAI project keys, Anthropic tokens, and GitHub personal access tokens.
+- **Default Fallback Hardcoding**: Rejects non-placeholder defaults such as `os.environ.get("DB_PASSWORD", "prod_secret_123")` or `process.env.JWT_SECRET || "production_secret"`.
+- **Raw Private Keys**: Blocks 64-character raw hex keys and raw PEM private key blocks in source files.
 
 ### 2. Insecure SSL/TLS Verification Bypass Shield
-- AI models frequently add `verify=False` in Python (`requests`, `httpx`, `aiohttp`, `urllib3`) or `rejectUnauthorized: false` / `NODE_TLS_REJECT_UNAUTHORIZED='0'` in Node.js when troubleshooting local or self-signed API connections.
-- TokenSafe Guard blocks SSL/TLS verification bypasses in production and non-test code, preventing Man-in-the-Middle (MitM) exposure.
+- Blocks `verify=False` in Python (`requests`, `httpx`, `aiohttp`, `urllib3`) and `rejectUnauthorized: false` or `NODE_TLS_REJECT_UNAUTHORIZED='0'` in Node.js non-test code.
 
 ### 3. Raw SQL Injection Prevention
-- Blocks dynamic string interpolation inside query execution calls:
-  - Python: `cursor.execute(f"SELECT ... {user_id}")` and `cursor.execute("SELECT ... %s" % val)`
-  - JavaScript / TypeScript: `db.query(\`SELECT ... ${id}\`)`
-- Enforces parameterized queries with bound placeholders (`?`, `%s`, `$1`).
+- Blocks string interpolation inside query execution calls (`cursor.execute(f"SELECT ... {user_id}")`, `cursor.execute("SELECT ... %s" % val)`, `db.query(\`SELECT ... ${id}\`)`).
+- Enforces parameterized queries (`?`, `%s`, `$1`).
 
 ### 4. Dangerous CORS Wildcard with Credentials Shield
-- Intercepts fatal CORS misconfigurations combining `Access-Control-Allow-Origin: *` with `Access-Control-Allow-Credentials: true`.
-- Browsers reject this combination by specification, and it creates severe cross-origin security exposures.
+- Intercepts configurations combining `Access-Control-Allow-Origin: *` with `Access-Control-Allow-Credentials: true`.
 
 ### 5. Git Staging Protection for Sensitive Files
 - **Explicit Staging**: Blocks `git add .env`, `git add .env.*`, `git add id_rsa`, and `git add *.pem`.
-- **Blanket Staging Shield**: Intercepts blanket `git add .`, `git add -A`, and `git commit -a` commands whenever unignored `.env` files or private keys are present in the working tree.
+- **Blanket Staging Shield**: Intercepts `git add .`, `git add -A`, and `git commit -a` whenever unignored `.env` files or private keys exist in the working tree.
 
 ### 6. Destructive Shell & Data Exfiltration Prevention
-- **Destructive Deletion**: Blocks catastrophic commands like `rm -rf /`, `rm -rf ~`, `rm -rf *`, and `rm -rf --no-preserve-root`.
-- **Network Exfiltration**: Blocks shell commands piping sensitive local files to remote endpoints (e.g. `curl -d @.env https://...` or `wget --post-file=id_rsa`).
+- **Destructive Deletion**: Blocks commands such as `rm -rf /`, `rm -rf ~`, `rm -rf *`, and `rm -rf --no-preserve-root`.
+- **Network Exfiltration**: Blocks commands piping sensitive local files to remote URLs (such as `curl -d @.env https://...` or `wget --post-file=id_rsa`).
 
-### 7. Package Typosquatting & Hallucination Early Warning
-- Analyzes `pip install`, `npm install`, `pnpm add`, `yarn add`, and `bun add` commands for known malicious typosquats (e.g., `python-crypto`, `loadsh`, `coookie-parser`, `mongose`).
-- Emits proactive in-chat warning badges (`⚠️ TokenSafe Guard Warning: ...`) without blocking custom packages, preserving developer velocity.
+### 7. Package Typosquatting Early Warning
+- Checks `pip install`, `npm install`, `pnpm add`, `yarn add`, and `bun add` for known typosquat packages (`python-crypto`, `loadsh`, `coookie-parser`, `mongose`) and prints a `TokenSafe Guard Warning` badge.
 
-Whenever a dangerous operation is blocked, TokenSafe Guard emits an actionable notification:
+When an operation is blocked, TokenSafe Guard returns an explicit message:
 `🛡️ **TokenSafe Guard**: <reason>`
 
 ---
 
-## 🤖 Prompt Distillation: Managed Cloud & Three-Tier Cache Architecture
+## Prompt Distillation: Managed Cloud and Three-Tier Cache
 
-TokenSafe features an intelligent prompt compiler that distills verbose developer prompts into lean TOCP S-Expressions (`-40% to -70% tokens`).
+TokenSafe distills verbose prompts into compact TOCP S-expressions (`-40% to -70%` tokens).
 
 ### 1. Zero-Config Managed Cloud vs. Self-Hosted Docker BYOK
 
-| Deployment Mode | Supported Tier | Distillation Engine | Required API Keys | Cost & Setup |
+| Deployment Mode | Supported Tier | Distillation Engine | Required API Keys | Setup |
 |---|---|---|---|---|
-| **TokenSafe Cloud (SaaS)** ⚡ | **Solo Developer & Team** | **Google Gemini Flash-Lite** (`gemini-flash-lite-latest`) | **None (Zero Keys Required)** | **Included in subscription** (0ms config, unlimited neural distillation) |
-| **Local Regex Compactor** | **Community (Free)** | **Deterministic Multilingual Regex** (9 languages) | **None** | **100% Free** (0ms latency, 0 external tokens, 500k tokens/mo) |
-| **Self-Hosted Docker** 🐳 | **Enterprise / Team** | **BYOK Multi-Provider** (Gemini, DeepSeek, OpenAI, Claude) | `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, etc. | Private VPC on-premise container deployment |
+| **TokenSafe Cloud (SaaS)** | **Engineering Team & Solo** | **Google Gemini Flash-Lite** (`gemini-flash-lite-latest`) | **None (Zero keys needed)** | Included in subscription, ready immediately |
+| **Local Regex Compactor** | **Developer Sandbox (Free)** | **Deterministic Multilingual Regex** (9 languages) | **None** | Local execution only (`500,000` tokens/mo) |
+| **Self-Hosted Docker** | **Enterprise / Team** | **BYOK Multi-Provider** (Gemini, DeepSeek, OpenAI, Claude) | `GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, etc. | Private VPC container deployment |
 
-> **Zero Configuration for Solo & Team**: You do not need to register for Google AI Studio, OpenAI, or DeepSeek API accounts. TokenSafe Cloud handles high-throughput neural distillation automatically with enterprise-grade sub-second turnaround.
+> **Zero External Keys for Team & Solo**: Developers never have to create or manage personal Google, OpenAI, or DeepSeek billing accounts to use cloud prompt distillation.
 
-### 2. Token Arbitrage Guard & Three-Tier Cache Architecture
+### 2. Token Arbitrage Guard & Three-Tier Cache
 
-To prevent compiler cost overhead from exceeding token savings, TokenSafe applies a 3-stage defense:
+To keep distillation overhead lower than the tokens it saves:
+1. **Smart Gating (`llm_distill_min_tokens: 100`)**: Prompts under 100 tokens stay strictly local via regex heuristics ($0$ LLM tokens, $< 1\text{ms}$).
+2. **Output Token Ceiling (`distill_max_tokens: 60`)**: Caps compiled output at 60 tokens to prevent compiler arbitrage loss.
+3. **Three-Tier Cache**:
+   - **L1 (In-Memory LRU)**: Sub-millisecond hits inside active sessions.
+   - **L2 (Persistent SQLite)**: Stores normalized SHA-256 prompt hashes in `data/metrics.db` across restarts so repeated workflows (`git commit`, `run tests`, `fix lint`) cost 0 tokens.
+   - **L3 (Shared Team Cache)**: *Team Tier.* Syncs distilled intents and AST skeletons across teammates and CI runners (`/api/team/cache`) for warm 0ms team cache hits.
 
-1. **Smart Gating Threshold (`llm_distill_min_tokens: 100`)**: Prompts under 100 tokens bypass cloud calls entirely and use instant zero-cost local regex heuristics ($0$ tokens, $< 1\text{ms}$).
-2. **Output Token Ceiling (`distill_max_tokens: 60`)**: Caps distillation output at 60 tokens, eliminating verbose chain-of-thought inflation and token arbitrage loss.
-3. **Three-Tier Distillation Cache Hierarchy**:
-   - **L1 (In-Memory LRU)**: Sub-millisecond instant hit for active developer session loops.
-   - **L2 (Persistent SQLite)**: Stores SHA-256 normalized prompt hashes in `data/metrics.db` across agent restarts. Recurring commands (`git commit`, `run tests`, `fix lint`) cost 0 tokens.
-   - **L3 (Shared Team Cache)**: *Team Tier.* Synchronizes compiled prompt intents and AST skeletons to TokenSafe Cloud (`/api/team/cache`). When one engineer or CI runner executes a prompt or reads a file, all teammates immediately hit warm 0ms cache.
+### 3. Provider & Cache Inspection
 
-### 3. Configuration & Provider Inspection
-
-Check your license status, active distillation mode, and cache stats anytime:
+Inspect your active license tier, distillation mode, and cache stats anytime:
 ```bash
 tokensafe providers
 ```
 
-For custom self-hosted environments (`TOKENSAFE_SELF_HOSTED=1`), configure your preferred provider in `data/config.json`:
+For self-hosted Docker environments (`TOKENSAFE_SELF_HOSTED=1`), configure providers in `data/config.json`:
 ```json
 {
   "preferred_provider": "gemini",
@@ -356,18 +321,13 @@ For custom self-hosted environments (`TOKENSAFE_SELF_HOSTED=1`), configure your 
 }
 ```
 
-Check active providers and cache stats anytime:
-```bash
-tokensafe providers
-```
-
 ---
 
-## 📊 Zero-Loss SWE-bench Benchmark Results
+## Calibrated SWE-bench Benchmark Results
 
-Reference run across 8 real-world production software engineering scenarios (131,552 baseline tokens down to 7,263 tokens, **-94.5% net token reduction**, **+28.1% turn latency speedup** with **100% Zero-Loss accuracy retention**):
+Reference run across 8 production engineering scenarios (`131,552` baseline tokens down to `7,263` tokens, `-94.5%` net token reduction, `+28.1%` turn latency speedup with `100%` accuracy retention):
 
-> Token counts vary by ±1% between runs because prompt compaction is **measured live** on every execution; baseline sizes are modeled constants. The harness now ships a SIMULATION DISCLOSURE with a measured-vs-modeled evidence breakdown — see [METRICS.md](METRICS.md).
+> Token counts vary by ±1% between runs because prompt compaction is **measured live** on every run while baseline sizes are modeled constants. See [METRICS.md](METRICS.md) for the full simulation disclosure and measured-vs-modeled breakdown.
 
 | Benchmark Scenario | Task Complexity | Baseline Tokens | TokenSafe Tokens | Reduction | Turn Speedup | Accuracy |
 |---|---|---|---|---|---|---|
@@ -380,36 +340,38 @@ Reference run across 8 real-world production software engineering scenarios (131
 | **OAuth JWT Expiration Triage** | Controller bug investigation | 3,757 | **401** | **-89.3%** | **3 ➔ 2 turns (+33%)** | 100% Pass |
 | **CI Test Failure Extraction** | Full test log & stack trace | 5,009 | **1,127** | **-77.5%** | 3 turns | 100% Pass |
 
-> **How to read these numbers:** the benchmark is a **simulated** harness — the compression ratios are real, deterministic tool-output deltas on real files, while the "turn speedup" column models agent behavior. We never present simulated numbers as metered ones. Every production event TokenSafe records is labeled `measured` (literally metered I/O reduction) or `estimated` (counterfactual baseline) — see **[METRICS.md](METRICS.md)** for the full methodology, and the dashboard exposes the `measured` / `estimated` split alongside every total.
+> **How to read these numbers:** This benchmark is a **simulated** harness. Compression ratios are real, deterministic tool-output deltas on real files, while the "turn speedup" column models agent behavior. Production events in TokenSafe are explicitly labeled `measured` or `estimated` (see [METRICS.md](METRICS.md)).
 
 ---
 
-## 📐 Metrics Honesty
+## Metrics Honesty
 
 TokenSafe labels every savings event as one of:
 
-- **`measured`** — the model literally received fewer bytes than the tool produced (sliced file reads, filtered command output, skeletons). The delta is a fact.
-- **`estimated`** — the model received a compact artifact and "saved" is counted against a reasonable alternative (architecture graph vs. a full crawl; folded history digest, which is *injected* while the raw history remains in context).
+- **`measured`**: the model literally received fewer bytes than the tool produced (sliced file reads, filtered command output, AST skeletons).
+- **`estimated`**: the model received a compact artifact and saved tokens are counted against a reasonable baseline (architecture graph vs. a full repo crawl; folded history digest injected while raw history stays in context).
 
-Sums on the dashboard and landing page always show the split (`X metered · Y est.`). When a live number is unavailable we render `—`, never a fabricated constant. USD figures are derived estimates (`tokens × $1.5 / 1M`), not invoices. Details: **[METRICS.md](METRICS.md)**.
+Totals on the dashboard and landing page always display the split (`X metered · Y est.`). When a live metric is missing, the UI shows `—` rather than a placeholder number. USD figures are derived approximations (`tokens × $1.5 / 1M`), not provider invoices. Full contract: **[METRICS.md](METRICS.md)**.
 
 ---
 
-## 💎 Pricing & 7-Day Team Trial
+## Pricing and 7-Day Team Trial
 
-| Tier | Price | Monthly Token Savings | Highlights |
+TokenSafe follows an open-core model: verify local context savings and guardrails on your own repo first, then roll out team caching, org policies, and per-seat ROI.
+
+| Plan | Price | Monthly Allowance | Included Capabilities |
 |---|---|---|---|
-| **Developer Sandbox (Community)** | **$0** (Free Forever) | **500,000 tokens / mo** | 9-Language Local Regex Compactor, Local AST Slicer CLI, Local Secret Guard, SQLite & Terminal Dashboard |
-| **Engineering Team** *(Recommended)* | **$29 / seat / mo** *(~$24 / seat / mo billed $290/yr)* | **Unlimited** | **7-Day Free Trial**, **Shared Team Cache (L3 Monorepo Pool)**, Org Guard & Git Leak Shield, Friday Per-Seat ROI Digest, Centralized Ed25519 Seat Control, Managed Cloud Distillation (Zero Keys), Self-Hosted Docker Proxy |
-| **Enterprise / VPC** | **Custom** | **Unlimited** | On-Premise Nuitka C-compiled Docker Proxy (Private BYOK), Zero-Telemetry / Air-Gapped Mode, SAML SSO, Custom Compliance & SLA |
+| **Developer Sandbox** | **$0** forever | **500,000 tokens / mo** | 9-Language Local Regex Compactor, Local AST Slicer CLI, Local Secret & `.env` Guard, SQLite & Terminal Dashboard |
+| **Engineering Team** *(Recommended)* | **$29 / seat / mo** *(~$24 / seat / mo billed $290/yr)* | **Unlimited** | **7-Day Free Trial**, **Shared Team Cache (L3 Monorepo Hits)**, Org-Wide Guard & Git Leak Shield, Friday Per-Seat ROI Digest, Centralized Ed25519 Seat Provisioning & Revoke, Managed Cloud Distillation (zero keys needed) |
+| **Enterprise & VPC** | **Custom** | **Unlimited** | Self-Hosted Docker VPC Proxy (Private BYOK), Zero-Telemetry / Air-Gapped Mode, SAML SSO, Custom Guard Policies & SLA |
 
-*Working solo? [Individual Solo plans](https://tokensafe.dev#pricing) are available from **$9 / mo** ($89 / yr).*
+*Working solo? [Individual Solo plans](https://tokensafe.dev#pricing) start at **$9 / mo** ($89 / yr).*
 
-👉 **[Start your 7-Day Free Trial on our website](https://tokensafe.dev#pricing)**
+**[Start a 7-Day Team Trial](https://tokensafe.dev#pricing)**
 
 ---
 
-## 🛠️ CLI Quickstart
+## CLI Quickstart
 
 ```bash
 # View live savings dashboard in your terminal
@@ -442,8 +404,11 @@ Run `tokensafe html` to view interactive browser dashboard.
 ```
 
 ```bash
-# Open interactive local Apple dark-mode browser dashboard
+# Open interactive local dark-mode browser dashboard
 tokensafe html
+
+# Export a markdown savings report
+tokensafe markdown
 
 # Test prompt compression on custom input in real time
 tokensafe test "please fix the validate_token method in src/auth.py so that it checks jwt expiration and returns boolean"
@@ -472,29 +437,29 @@ tokensafe prune
 # Generate or preview Friday team ROI digest email
 tokensafe digest
 
-# Run the SWE-bench zero-loss verification suite
+# Run the SWE-bench verification suite
 tokensafe benchmark
 
 # Run the local transparent AI proxy (0.0.0.0:8765/v1)
 tokensafe proxy
 
-# Activate your Pro License key (TS2 Asymmetric Ed25519 Key)
+# Activate your Team or Solo license key (TS2 Asymmetric Ed25519 Key)
 tokensafe activate TS2.eyJlbWFpbCI6...
 ```
 
 ---
 
-## 🐳 Docker Deployment (Multi-Provider Support)
+## Docker Deployment (Multi-Provider Support)
 
-TokenSafe is fully containerized with a hardened multi-stage production Docker image, non-root security (`uid: 1000`), and native multi-provider LLM routing.
+TokenSafe ships with a hardened multi-stage production Docker image, non-root execution (`uid: 1000`), and multi-provider LLM routing.
 
 ### 1. Multi-Provider Environment Keys
 
-You can configure any or all of your preferred LLM provider keys:
+Configure any preferred LLM provider keys for self-hosted deployments:
 
 | Environment Variable | Provider Supported | Default Model |
 |---|---|---|
-| `GEMINI_API_KEY` | Google Gemini (Fastest / Lowest Cost) | `gemini-flash-lite-latest` |
+| `GEMINI_API_KEY` | Google Gemini (Lowest cost & latency) | `gemini-flash-lite-latest` |
 | `PREFERRED_PROVIDER` | Explicit provider priority (`gemini`, `deepseek`, etc.) | `gemini` |
 | `DEEPSEEK_API_KEY` | DeepSeek API | `deepseek-chat` |
 | `OPENAI_API_KEY` | OpenAI API | `gpt-4o-mini` |
@@ -503,7 +468,7 @@ You can configure any or all of your preferred LLM provider keys:
 
 ### 2. Docker Compose Quickstart
 
-Run TokenSafe as a centralized microservice or team gateway:
+Run TokenSafe as a centralized team gateway:
 
 ```yaml
 version: '3.8'
@@ -545,19 +510,19 @@ docker compose up -d
 
 - **Health check**: `curl http://localhost:8765/api/health`
 - **Live SSE Event Stream**: `curl -N http://localhost:8765/api/events`
-- **Point your AI Agents**: Configure your IDE or Agent to use `http://localhost:8765/v1` as the upstream base URL.
+- **Point your AI Agents**: Configure your IDE or agent to use `http://localhost:8765/v1` as the upstream base URL.
 
 ---
 
-## 🔒 Security Architecture & Cloud API Endpoints
+## Security Architecture & Cloud API Endpoints
 
-TokenSafe Cloud Backend enforces enterprise zero-trust security across all communications:
+TokenSafe Cloud Backend enforces strict zero-trust boundaries across client and server requests:
 
 ### 1. Cryptographic Authentication & Licensing
-- **Asymmetric RFC 8032 Ed25519 Signatures (`TS2.*`)**: Client instances verify digital signatures offline using an embedded 32-byte public key. The private signing key never leaves the secure cloud enclave.
-- **JWT Session Tokens**: Cloud endpoints authenticate sessions via standard HS256 JWT bearer tokens or Clerk session tokens.
-- **Dual Bearer Support**: Client endpoints accept either a signed license key (`TS2.*` / `TS1.*`) or a JWT in the `Authorization: Bearer <token>` header.
-- **Zero Hardcoded Secrets**: All SMTP, Stripe, Admin, and signing keys are strictly injected via environment variables.
+- **Asymmetric RFC 8032 Ed25519 Signatures (`TS2.*`)**: Client instances verify digital signatures offline using an embedded 32-byte public key. The private signing key never leaves the cloud environment.
+- **JWT Session Tokens**: Cloud endpoints verify sessions via HS256 JWT bearer tokens or Clerk session tokens.
+- **Dual Bearer Support**: Client endpoints accept either a signed license key (`TS2.*` / `TS1.*`) or a JWT in `Authorization: Bearer <token>`.
+- **Zero Hardcoded Secrets**: SMTP, Stripe, admin, and signing secrets load strictly from runtime environment variables.
 
 ### 2. Cloud API Endpoint Reference
 
@@ -572,7 +537,7 @@ TokenSafe Cloud Backend enforces enterprise zero-trust security across all commu
 | `POST` | `/api/telemetry/sync` | **License Auth** | JSON `{ license_key, email, events: [...] }` | Syncs batch telemetry events (enforces max 50 events/batch). |
 | `POST` | `/webhook/stripe` | **HMAC Sig** | `Stripe-Signature: t=...,v1=...` | Verifies Stripe webhook payload against `STRIPE_WEBHOOK_SECRET`. |
 
-> **Note:** administrative endpoints are intentionally **not documented in the public API surface** — not even their paths. They are restricted by a dedicated admin secret / admin JWT and live in the private operations manual only. Public clients never need them — seat and license management is available through the [dashboard](https://dashboard.tokensafe.dev).
+> **Note:** administrative endpoints are intentionally omitted from the public API surface (including their paths). They require a dedicated admin secret or admin JWT and reside strictly in internal operational documentation. Seat and license management is available through the [dashboard](https://dashboard.tokensafe.dev).
 
 ### 3. Server Configuration & Environment Variables
 
@@ -583,49 +548,27 @@ TokenSafe Cloud Backend enforces enterprise zero-trust security across all commu
 | `ADMIN_EMAILS` | Optional | Comma-separated admin emails (e.g. `admin@yourcompany.com`). |
 | `STRIPE_WEBHOOK_SECRET` | Production | Webhook secret (`whsec_...`) used to verify Stripe webhooks. |
 | `SMTP_PASS` | Production | Password/token for transactional mail delivery via ImprovMX SMTP. |
-| `JWT_SECRET` | Optional | Shared HMAC secret for verifying custom JWT tokens. Set a persistent value in production — otherwise sessions invalidate on every restart. |
-| `CLERK_JWT_KEY` | Production (web) | Clerk public key (PEM) or HMAC key for verifying Clerk session tokens. Without it — or without the `cryptography` package — Clerk tokens are rejected (fail-closed). |
-| `TOKENSAFE_TELEMETRY_DISABLED` | Optional | Set to `1` to fully disable cloud telemetry sync (privacy / offline / CI). |
-
+| `JWT_SECRET` | Optional | Shared HMAC secret for verifying custom JWT tokens. Set a persistent value in production so sessions do not reset on restart. |
+| `CLERK_JWT_KEY` | Production (web) | Clerk public key (PEM) or HMAC key for verifying Clerk session tokens. Without it (or without `cryptography`), Clerk tokens are rejected (fail-closed). |
+| `TOKENSAFE_TELEMETRY_DISABLED` | Optional | Set to `1` to disable cloud telemetry sync (privacy / offline / CI). |
 
 ---
 
-## 🧪 Unit Testing
+## Unit Testing
 
 ```bash
 python3 -m unittest discover tests
 ```
-*Zero mandatory runtime dependencies — runs on standard Python 3.10+. The optional `cryptography` package (`requirements.txt`) accelerates Ed25519 license verification and enables fail-closed RS256 Clerk verification on the cloud backend.*
+*Zero mandatory runtime dependencies: runs on standard Python 3.10+. The optional `cryptography` package (`requirements.txt`) accelerates Ed25519 license verification and enables fail-closed RS256 Clerk verification on the cloud backend.*
 
 ---
 
-## 💎 Pricing & Plans
-
-TokenSafe is built on an **Open-Core** model designed to give every developer immediate zero-friction value while offering unlimited throughput and centralized governance for professionals and teams:
-
-| Plan | Price | Monthly Token Savings | Capabilities |
-| :--- | :---: | :---: | :--- |
-| **Developer Sandbox (Free)** | **$0** forever | **500,000 tokens / mo** | Multilingual Local Regex Compactor (9 languages), AST Slicer, Output Guard, Loop Guard, Local SQLite & HTML Dashboard |
-| **Engineering Team** *(Recommended)* | **$29 / seat / mo** *(~$24 / seat / mo billed $290/yr)* | **Unlimited** | **Shared Team Cache (L3 Monorepo Pool)**, Org Guard & Git Leak Shield, Friday Per-Seat ROI Digest, Seat Quota & Revoke Console, Managed Cloud Distillation, Self-Hosted Docker Proxy |
-| **Enterprise / VPC** | **Custom** | **Unlimited** | On-Premise Docker Proxy (Private BYOK), Zero-Telemetry / Air-Gapped Mode, SAML SSO, Custom SLA |
-| **Solo Developer** | **$9 / mo** *($89/yr)* | **Unlimited** | Individual Unlimited Compression, Managed Cloud Distillation, Subagent Firewall, Cascading Governor |
-
-> [!TIP]
-> **500,000 free tokens / month** are included out of the box with zero registration. When your monthly community limit is reached, basic regex compaction continues safely, and you can unlock unlimited Solo optimization anytime at [tokensafe.dev](https://tokensafe.dev/#pricing) or activate via `tokensafe activate <key>`.
+## License
+MIT License. Commercial licenses are available for self-hosted B2B and enterprise VPC deployments.
 
 ---
 
-## 📄 License
-MIT License. Commercial enterprise licenses available for on-premise B2B deployments.
-
-### Export Markdown Report
-```bash
-tokensafe markdown
-```
-
----
-
-## 📂 Project Structure
+## Project Structure
 
 ```text
 agy-token-optimizer/
@@ -652,7 +595,7 @@ agy-token-optimizer/
 │   ├── proxy.py                # Multi-provider transparent AI proxy & SSE broadcaster
 │   ├── graph_engine.py         # Sub-30ms AST parser, call graphs & God Node centrality
 │   ├── tokenizer.py            # Zero-dependency calibrated BPE token counter
-│   ├── compactor.py            # Enhanced semantic compactor (Local Regex + Distillation -> TOCP S-Expr)
+│   ├── compactor.py            # Semantic compactor (Local Regex + Distillation -> TOCP S-Expr)
 │   ├── distiller.py            # Multi-provider LLM distillation engine (Gemini, DeepSeek, OpenAI)
 │   ├── distiller_cache.py      # Two-tier LRU + SQLite prompt distillation cache
 │   ├── deepseek_distiller.py   # DeepSeek-Flash semantic compiler with token arbitrage guard
@@ -668,31 +611,21 @@ agy-token-optimizer/
 │   ├── pre_invocation.py       # PreInvocation hook entry point
 │   ├── pre_tool_use.py         # PreToolUse hook entry point
 │   └── post_tool_use.py        # PostToolUse hook entry point
-├── frontend/                   # Modern React / Vite / Tailwind Web App & Dashboard
+├── frontend/                   # React / Vite / Tailwind Web App & Dashboard
 ├── bin/
 │   ├── tokensafe.js            # Node.js npm launcher (npx tokensafe)
 │   └── tokensafe               # Python CLI launcher (pip / standalone)
-├── tests/                      # Unit test suite (100% passing)
+├── tests/                      # Unit test suite
 ├── install.sh                  # One-click installer for Antigravity
 └── README.md
 ```
 
 ---
 
-## 🛠️ Installation & Antigravity Setup
+## Antigravity Plugin Setup
 
-Run the installer:
+Run the local plugin installer:
 ```bash
 ./install.sh
 ```
-This symlinks the plugin directly into `~/.gemini/config/plugins/agy-token-optimizer`.  
-Antigravity automatically loads it on startup.
-
----
-
-## 🧪 Running Unit Tests
-
-```bash
-python3 -m unittest discover tests
-```
-No external packages required — runs on standard Python 3.10+.
+This symlinks the plugin into `~/.gemini/config/plugins/agy-token-optimizer` so Antigravity loads it on startup.
