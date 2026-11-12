@@ -1,7 +1,7 @@
 {
   "name": "tokensafe",
   "displayName": "TokenSafe",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "Local-first AI guardrails: reduce AI bills by up to 99% via AST slicing & KV-cache locking, focused context, zero leaked secrets.",
   "logo": "assets/logo.svg",
   "author": {
