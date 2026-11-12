@@ -71,7 +71,7 @@ Whenever an MCP server is enabled in an editor, **the full JSON schema for every
 3. **Session start bloat alerts**: surfaces warning badges in chat when heavy MCP bloat is active.
 4. **Telemetry retention** (`tokensafe prune` / `vacuum`): compacts SQLite metrics with rolling-window rollups, reducing the local database footprint by up to 40%.
 
-## 4. Context Budget HUD & Governor
+## 4. Context Budget HUD, Governor & Epoch Architecture
 
 Teams usually notice context exhaustion only when code quality drops mid-task. TokenSafe exposes live window usage as a native MCP tool:
 
@@ -92,7 +92,7 @@ Teams usually notice context exhaustion only when code quality drops mid-task. T
 
 - **Window resolution**: explicit argument, then `TOKENSAFE_CONTEXT_WINDOW`, then model-family default (Gemini 1M, Claude 200k, GPT 128k).
 - **80% session warning**: injected once per session by the `pre_invocation` hook when context usage approaches the threshold.
-- **Cascading governor & prefix normalizer**: aligns prompt prefixes to 64-token boundaries (for Anthropic `cache_control` and DeepSeek caching) and progressively folds inactive bodies before overflowing.
+- **Append-Only Epoch Governor & multi-breakpoint prefix normalizer**: in proxy mode, `ContextGovernor` never mutates historical turns (`messages[0..N-2]`) inside an epoch, preserving LLM provider KV-cache hits until context reaches **80% of the model's window**, when an atomic `EPOCH_ROLLOVER` consolidates middle turns into an Epoch Ledger. `PromptCacheNormalizer` runs *after* governance, sorts `tools` deterministically, strips volatile IDs/hit counters, and injects multi-breakpoint Anthropic `cache_control` (tools, static system, penultimate turn) or OpenAI `prompt_cache_key`.
 - **Honest accounting**: counts only TokenSafe-instrumented flows and labels them `estimated` (a floor, never a fabricated total; see [METRICS.md](../METRICS.md)).
 
 ## 5. Diff-Aware Read-Cache (`SUBAGENT_DEDUP`)

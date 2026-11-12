@@ -28,7 +28,8 @@ Both labels appear in every surface that aggregates savings:
 | `GRAPH_SKELETON` / `AST_SKELETON` | measured | Full source vs. the folded skeleton the model received |
 | `SCOPED_SEARCH` | measured | What a raw recursive search would have returned vs. the ranked matches |
 | `DIR_LIST` | measured | Verbose `ls -la`-style listing vs. the pruned tree |
-| `CONTEXT_GOVERNOR` | measured | Unmanaged context mass vs. governor-trimmed mass actually submitted |
+| `CONTEXT_GOVERNOR` | measured | Unmanaged context mass vs. governor-trimmed mass actually submitted (tail-only in epoch mode; cascading in explicit-ceiling mode) |
+| `EPOCH_ROLLOVER` | measured | Context mass before vs. after atomic epoch consolidation at 80% of model window |
 | `OUTPUT_GUARD` | measured | Write content the model produced and would have committed wholesale; the blocked bytes are real, generated output |
 | `GUARD_*`, `SECRET_GUARD` | estimated | Blocked commands/reads never run, so their "would-have-entered-context" mass is a heuristic (constant floor or `len/4`), not metered I/O |
 | `LOOP_GUARD` | estimated | Identical repeat call is paused; its duplicate output mass is a fixed 5,000-token estimate |

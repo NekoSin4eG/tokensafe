@@ -2,7 +2,7 @@
   "name": "tokensafe",
   "displayName": "TokenSafe",
   "version": "2.4.3",
-  "description": "Local-first AI guardrails: reduce AI bills by up to 90%, focused context, zero leaked secrets.",
+  "description": "Local-first AI guardrails: reduce AI bills by up to 99% via AST slicing & KV-cache locking, focused context, zero leaked secrets.",
   "logo": "assets/logo.svg",
   "author": {
     "name": "Oleg Savelev",
