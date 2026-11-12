@@ -97,7 +97,7 @@ def _ed_decodepoint(s: bytes) -> Optional[list]:
         return None
     return pt
 
-def _ed25519_sign_bytes(msg: bytes, priv_bytes: bytes, pub_bytes: bytes) -> bytes:
+def _ed25519_sign_bytes(msg: bytes, priv_bytes: bytes, pub_bytes: bytes = b"") -> bytes:
     try:
         from cryptography.hazmat.primitives.asymmetric import ed25519
         priv_obj = ed25519.Ed25519PrivateKey.from_private_bytes(priv_bytes)
@@ -105,10 +105,12 @@ def _ed25519_sign_bytes(msg: bytes, priv_bytes: bytes, pub_bytes: bytes) -> byte
     except Exception:
         h = hashlib.sha512(priv_bytes).digest()
         a = 2**254 + sum(2**i * _ed_bit(h, i) for i in range(3, 254))
+        # Always derive the RFC 8032 public point from priv_bytes so env/global overrides cannot desync H(R||A||M).
+        derived_pub = _ed_encodepoint(_ed_scalarmult(_ED_B, a))
         r = int.from_bytes(hashlib.sha512(h[32:] + msg).digest(), "little")
         r_pt = _ed_scalarmult(_ED_B, r)
         r_bytes = _ed_encodepoint(r_pt)
-        k = int.from_bytes(hashlib.sha512(r_bytes + pub_bytes + msg).digest(), "little")
+        k = int.from_bytes(hashlib.sha512(r_bytes + derived_pub + msg).digest(), "little")
         s = (r + k * a) % _ED25519_L
         return r_bytes + int.to_bytes(s, 32, "little")
 
