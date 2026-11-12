@@ -42,7 +42,7 @@ def handle(event: str, payload: dict) -> dict:
 
     if event == "beforeShellExecution":
         command = str(payload.get("command") or "")
-        verdict = guard_command(command, AGENT, session_id)
+        verdict = guard_command(command, AGENT, session_id, cwd=str(payload.get("cwd") or ""))
         if verdict["decision"] == "deny":
             return {"permission": "deny", "user_message": verdict["reason"]}
         if verdict["decision"] == "ask":

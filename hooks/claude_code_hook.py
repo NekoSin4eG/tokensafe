@@ -153,7 +153,7 @@ def handle(event: str, payload: dict) -> dict:
             tool_input = {}
         if tool in ("Bash", "Shell", "bash"):
             command = str(tool_input.get("command") or "")
-            verdict = guard_command(command, AGENT, session_id)
+            verdict = guard_command(command, AGENT, session_id, cwd=str(payload.get("cwd") or ""))
             if verdict["decision"] == "deny":
                 return {
                     "hookSpecificOutput": {

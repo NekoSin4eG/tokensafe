@@ -127,7 +127,7 @@ def compact_for_injection(prompt: str, agent: str, session_id: str) -> Tuple[str
         return "", meta
 
 
-def guard_command(command: str, agent: str, session_id: str = "") -> Dict[str, Any]:
+def guard_command(command: str, agent: str, session_id: str = "", cwd: str = "") -> Dict[str, Any]:
     """Pre-execution shell guard. Returns:
     {decision: allow|deny|ask, reason, saved_tokens} where saved_tokens is the
     MEASURED mass of blocked output (0 for allowed commands)."""
@@ -161,19 +161,19 @@ def guard_command(command: str, agent: str, session_id: str = "") -> Dict[str, A
         if re.search(pat, text):
             blocked("DESTRUCTIVE", "Blocked: irreversible/destructive operation")
             return result
-    # RAW_CODE_SEARCH (deny): recursive grep/rg/find crawls over source trees
-    # are the exact workflow the tokensafe MCP tools replace. TokenSafeGuard
-    # already enforces this on the Antigravity path (inspect_command) — share
-    # its check here so Claude Code / Cursor adapters honor the same policy
-    # with the same "use tokensafe:scoped_search" guidance. Fail-open on
-    # import problems, like every adapter guard path.
+    # Full TokenSafeGuard delegation: the Antigravity path (pre_tool_use.py) runs
+    # TokenSafeGuard.inspect_command, and the Claude Code / Cursor adapters must
+    # honor the SAME policy suite (GIT_SECRET_STAGING, SQL_INJECTION,
+    # INSECURE_CORS, DATA_EXFILTRATION, DESTRUCTIVE_RM flag/target variants, and
+    # raw code search with the MCP-tools guidance) instead of a regex subset.
+    # Fail-open on import problems, like every adapter guard path.
     try:
         from src.guard import TokenSafeGuard
-        search_err = TokenSafeGuard._check_raw_code_search(cmd)
+        guard_res = TokenSafeGuard.inspect_command(cmd, cwd=cwd or None)
     except Exception:
-        search_err = None
-    if search_err:
-        blocked("RAW_CODE_SEARCH", search_err)
+        guard_res = None
+    if guard_res is not None and getattr(guard_res, "blocked", False):
+        blocked(guard_res.check_name or "GUARD", guard_res.reason)
         return result
     for pat in _TLS_BYPASS_PATTERNS:
         if re.search(pat, text):
