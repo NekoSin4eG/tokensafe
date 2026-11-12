@@ -322,13 +322,23 @@ class CodeGraph:
             "one_hop": one_hop
         }
 
-    def graph_guided_skeletonize(self, full_path: str, target_symbol: Optional[str] = None, include_deps: bool = True) -> str:
+    def graph_guided_skeletonize(
+        self,
+        full_path: str,
+        target_symbol: Optional[str] = None,
+        include_deps: bool = True,
+        dep_mode: str = "full",
+        collapse_imports: bool = False,
+    ) -> str:
         """
         Surgically folds code based on graph connectivity:
         - target_symbol: Retains FULL function body.
-        - 1-hop dependencies: Retained if include_deps=True.
+        - 1-hop dependencies:
+            * include_deps=True, dep_mode='full': retains full 1-hop bodies in file.
+            * include_deps=True, dep_mode='signature': folds 1-hop bodies into signatures
+              and prepends compact 1-line external dependency signatures.
+            * include_deps=False: 0-hop surgical single-symbol isolation.
         - 2-hop / Unrelated functions in the same file: Stripped to AST signatures (ellipsis).
-        Yields up to 90% token reduction without breaking context.
         """
         try:
             with open(full_path, "r", encoding="utf-8", errors="replace") as f:
@@ -341,15 +351,42 @@ class CodeGraph:
         ext = ext.lower()
 
         if not target_symbol:
-            return Skeletonizer.skeletonize_code(code, ext)
+            return Skeletonizer.skeletonize_code(code, ext, collapse_imports=collapse_imports)
 
         keep_full_names = {target_symbol}
+        external_dep_lines: List[str] = []
+        mode = (dep_mode or "full").strip().lower()
+
         if include_deps:
             neighborhood = self.get_neighborhood(target_symbol)
-            for k in neighborhood.get("one_hop", set()):
-                keep_full_names.add(k.split("::")[-1])
+            one_hop = sorted(neighborhood.get("one_hop", set()))
+            if mode == "signature":
+                try:
+                    target_rel = os.path.relpath(os.path.abspath(full_path), self.root_dir).replace("\\", "/")
+                except ValueError:
+                    target_rel = ""
+                comment_prefix = "#" if ext == ".py" else "//"
+                for k in one_hop:
+                    sym = self.symbols.get(k)
+                    if sym and sym.file_path != target_rel and len(external_dep_lines) < 10:
+                        external_dep_lines.append(
+                            f"{comment_prefix}   - {sym.file_path} (L{sym.line_start}): {sym.signature}"
+                        )
+            else:
+                for k in one_hop:
+                    keep_full_names.add(k.split("::")[-1])
 
-        return Skeletonizer.skeletonize_code(code, ext, keep_symbols=keep_full_names)
+        skel = Skeletonizer.skeletonize_code(
+            code,
+            ext,
+            keep_symbols=keep_full_names,
+            collapse_imports=collapse_imports,
+        )
+        if external_dep_lines:
+            comment_prefix = "#" if ext == ".py" else "//"
+            dep_header = f"{comment_prefix} 1-hop external dependencies (signatures):\n" + "\n".join(external_dep_lines)
+            return dep_header + "\n\n" + skel
+        return skel
 
     # -------------------------------------------------------------
     # 3. API Surface Generator (tokensafe-out/API_SURFACE.md)

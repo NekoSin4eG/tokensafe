@@ -172,17 +172,84 @@ class Skeletonizer:
     CACHE_DIR = os.path.join(resolve_data_dir(), "skeletons")
 
     @classmethod
-    def skeletonize_code(cls, code: str, file_ext: str, keep_symbols: Optional[Set[str]] = None) -> str:
+    def _collapse_import_lines(cls, skeleton: str, ext: str) -> str:
+        """Collapses runs of >5 top-level import lines into a 1-line summary for surgical reads."""
+        lines = skeleton.splitlines()
+        out = []
+        import_mods = []
+        import_lines_buf = []
+        in_import_block = False
+
+        def flush_imports():
+            non_blank_count = sum(1 for l in import_lines_buf if l.strip())
+            if non_blank_count > 5:
+                preview = ", ".join(import_mods[:8])
+                if len(import_mods) > 8:
+                    preview += f", +{len(import_mods) - 8}"
+                comment_prefix = "#" if ext == ".py" else "//"
+                out.append(f"{comment_prefix} [Collapsed {non_blank_count} imports: {preview}]")
+            else:
+                out.extend(import_lines_buf)
+            import_mods.clear()
+            import_lines_buf.clear()
+
+        for line in lines:
+            stripped = line.strip()
+            is_imp = False
+            mod = ""
+            if ext == ".py":
+                m1 = re.match(r"^import\s+([A-Za-z0-9_.,\s]+)", stripped)
+                m2 = re.match(r"^from\s+([A-Za-z0-9_.]+)\s+import\b", stripped)
+                if m1:
+                    is_imp = True
+                    mod = m1.group(1).split(",")[0].split(" as ")[0].strip()
+                elif m2:
+                    is_imp = True
+                    mod = m2.group(1).strip()
+            else:
+                m3 = re.match(r"""^import\s+.*?\s+from\s+['"]([^'"]+)['"]""", stripped)
+                if m3:
+                    is_imp = True
+                    mod = m3.group(1).strip()
+
+            if is_imp:
+                in_import_block = True
+                import_lines_buf.append(line)
+                if mod and mod not in import_mods:
+                    import_mods.append(mod)
+            else:
+                if in_import_block:
+                    if not stripped:
+                        import_lines_buf.append(line)
+                        continue
+                    flush_imports()
+                    in_import_block = False
+                out.append(line)
+
+        if import_lines_buf:
+            flush_imports()
+        return "\n".join(out)
+
+    @classmethod
+    def skeletonize_code(
+        cls,
+        code: str,
+        file_ext: str,
+        keep_symbols: Optional[Set[str]] = None,
+        collapse_imports: bool = False,
+    ) -> str:
         """Skeletons source code based on file extension, optionally preserving keep_symbols."""
         ext = file_ext.lower().lstrip(".")
         ext = f".{ext}" if ext else ""
         if ext == ".py":
-            return cls._skeletonize_python(code, keep_symbols=keep_symbols)
+            res = cls._skeletonize_python(code, keep_symbols=keep_symbols)
+            return cls._collapse_import_lines(res, ext) if (collapse_imports and keep_symbols) else res
         elif ext in (
             ".ts", ".js", ".tsx", ".jsx", ".mjs", ".cjs",
             ".go", ".java", ".rs", ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".cs", ".php", ".kt", ".swift"
         ):
-            return cls._skeletonize_braces(code, ext, keep_symbols=keep_symbols)
+            res = cls._skeletonize_braces(code, ext, keep_symbols=keep_symbols)
+            return cls._collapse_import_lines(res, ext) if (collapse_imports and keep_symbols) else res
         elif ext in (".css", ".scss", ".sass", ".less"):
             return cls._skeletonize_css(code, ext, keep_symbols=keep_symbols)
         return code

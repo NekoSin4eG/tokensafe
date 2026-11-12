@@ -90,7 +90,8 @@ class AgentFirewall:
         session_id: str,
         file_path: str,
         symbol: str = "",
-        tracker: Optional[MetricsTracker] = None
+        tracker: Optional[MetricsTracker] = None,
+        allow_pointer: bool = False,
     ) -> Tuple[bool, Optional[str], int]:
         """
         Two-stage lookup:
@@ -98,6 +99,9 @@ class AgentFirewall:
         2. Cross-session entry whose content_hash matches the file's CURRENT
            bytes — survives restarts and git-checkout mtime resets; any real
            edit changes the hash and invalidates the entry.
+        When allow_pointer=True and hit_scope == 'session' (caller already
+        holds this exact content in its active context), returns a compact
+        self-healing pointer instead of re-emitting the skeleton body.
         Returns: (is_hit, cached_content_or_none, tokens_saved)
         """
         if not file_path or not os.path.exists(file_path):
@@ -117,27 +121,37 @@ class AgentFirewall:
 
         hit_data = None
         hit_scope = "session"
-        with tracker._get_connection() as conn:
-            # Stage 1: in-session, mtime-validated
-            row = conn.execute("""
-                SELECT id, content, tokens, mtime, hit_count
-                FROM subagent_file_cache
-                WHERE session_id = ? AND file_path = ? AND symbol = ?;
-            """, (session_id, abs_path, symbol_key)).fetchone()
 
-            if row and row["mtime"] >= current_mtime:
-                hit_data = (row["id"], row["content"], row["tokens"], row["hit_count"] + 1)
-            elif current_hash:
-                # Stage 2: cross-session, content-hash-validated
-                row2 = conn.execute("""
-                    SELECT id, content, tokens, hit_count
+        def _query():
+            nonlocal hit_data, hit_scope
+            with tracker._get_connection() as conn:
+                # Stage 1: in-session, mtime-validated
+                row = conn.execute("""
+                    SELECT id, content, tokens, mtime, hit_count
                     FROM subagent_file_cache
-                    WHERE file_path = ? AND symbol = ? AND content_hash = ?
-                    ORDER BY created_at DESC LIMIT 1;
-                """, (abs_path, symbol_key, current_hash)).fetchone()
-                if row2:
-                    hit_data = (row2["id"], row2["content"], row2["tokens"], row2["hit_count"] + 1)
-                    hit_scope = "persistent"
+                    WHERE session_id = ? AND file_path = ? AND symbol = ?;
+                """, (session_id, abs_path, symbol_key)).fetchone()
+
+                if row and row["mtime"] >= current_mtime:
+                    hit_data = (row["id"], row["content"], row["tokens"], row["hit_count"] + 1)
+                elif current_hash:
+                    # Stage 2: cross-session, content-hash-validated
+                    row2 = conn.execute("""
+                        SELECT id, content, tokens, hit_count
+                        FROM subagent_file_cache
+                        WHERE file_path = ? AND symbol = ? AND content_hash = ?
+                        ORDER BY created_at DESC LIMIT 1;
+                    """, (abs_path, symbol_key, current_hash)).fetchone()
+                    if row2:
+                        hit_data = (row2["id"], row2["content"], row2["tokens"], row2["hit_count"] + 1)
+                        hit_scope = "persistent"
+
+        try:
+            _query()
+        except sqlite3.OperationalError:
+            cls._INITIALIZED_DBS.discard(tracker.db_path)
+            cls._ensure_table(tracker)
+            _query()
 
         if hit_data:
             cache_id, content, tokens, hit_count = hit_data
@@ -146,28 +160,48 @@ class AgentFirewall:
                     conn.execute("UPDATE subagent_file_cache SET hit_count = ? WHERE id = ?;", (hit_count, cache_id))
             except Exception:
                 pass
+
+            short_hash = current_hash[:8] if current_hash else "cached"
+            use_pointer = bool(allow_pointer and hit_scope == "session" and tokens > 60)
+
+            if use_pointer:
+                sym_label = f"::{symbol_key}" if symbol_key else ""
+                payload = (
+                    f"// [TokenSafe Subagent Firewall: Pointer Hit for '{os.path.basename(abs_path)}{sym_label}' "
+                    f"(unchanged, sha256:{short_hash}) — reuse the content returned earlier in this session; "
+                    f"if you are a fresh subagent or your context was compacted, re-call smart_read_file with force_full=true]\n"
+                )
+                opt_tokens = count_tokens(payload)
+            else:
+                scope_label = "Persistent cache" if hit_scope == "persistent" else "Reused session read"
+                sym_label = f"::{symbol_key}" if symbol_key else ""
+                # Static deterministic header (no changing hit counters that bust LLM prefix KV-cache)
+                header = (
+                    f"// [TokenSafe Subagent Firewall: {scope_label} for "
+                    f"'{os.path.basename(abs_path)}{sym_label}' (sha256:{short_hash})]\n"
+                )
+                payload = header + content
+                opt_tokens = 40
+
+            saved = max(0, tokens - opt_tokens)
             try:
                 tracker.record_event(
                     session_id=session_id,
                     event_type="SUBAGENT_DEDUP",
                     original_tokens=tokens,
-                    optimized_tokens=40, # minimal cache reference tokens
+                    optimized_tokens=opt_tokens,
                     details={
                         "target_file": os.path.basename(abs_path),
                         "symbol": symbol_key,
                         "hit_number": hit_count,
-                        "scope": hit_scope
+                        "scope": hit_scope,
+                        "pointer": use_pointer,
                     }
                 )
             except Exception:
                 pass
 
-            scope_label = "Persistent cache" if hit_scope == "persistent" else "Reused session read"
-            header = (
-                f"// [TokenSafe Subagent Firewall: {scope_label} for '{os.path.basename(abs_path)}' "
-                f"(Dedup Hit #{hit_count}, Saved ~{tokens - 40} tokens)]\n"
-            )
-            return True, header + content, max(0, tokens - 40)
+            return True, payload, saved
 
         return False, None, 0
 
@@ -201,15 +235,23 @@ class AgentFirewall:
         now = int(time.time())
         content_hash = cls._file_content_hash(abs_path)
 
-        with tracker._get_connection() as conn:
-            conn.execute("""
-                INSERT INTO subagent_file_cache (session_id, file_path, mtime, symbol, content, tokens, created_at, hit_count, content_hash)
-                VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
-                ON CONFLICT(session_id, file_path, symbol) DO UPDATE SET
-                    mtime = excluded.mtime,
-                    content = excluded.content,
-                    tokens = excluded.tokens,
-                    created_at = excluded.created_at,
-                    content_hash = excluded.content_hash;
-            """, (session_id, abs_path, mtime, symbol_key, content, tokens, now, content_hash))
+        def _insert():
+            with tracker._get_connection() as conn:
+                conn.execute("""
+                    INSERT INTO subagent_file_cache (session_id, file_path, mtime, symbol, content, tokens, created_at, hit_count, content_hash)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)
+                    ON CONFLICT(session_id, file_path, symbol) DO UPDATE SET
+                        mtime = excluded.mtime,
+                        content = excluded.content,
+                        tokens = excluded.tokens,
+                        created_at = excluded.created_at,
+                        content_hash = excluded.content_hash;
+                """, (session_id, abs_path, mtime, symbol_key, content, tokens, now, content_hash))
+
+        try:
+            _insert()
+        except sqlite3.OperationalError:
+            cls._INITIALIZED_DBS.discard(tracker.db_path)
+            cls._ensure_table(tracker)
+            _insert()
         cls._maybe_prune(tracker)

@@ -40,16 +40,51 @@ def handle(event: str, payload: dict) -> dict:
             VersionChecker.notify_os_update_background()
         except Exception:
             pass
+        extra = TOKENSAFE_DIRECTIVES
+        try:
+            from src.metrics import MetricsTracker
+            from src.license_manager import LicenseManager
+            quota = LicenseManager.check_quota(MetricsTracker())
+            if quota.get("warning"):
+                extra = f"{extra}\n\n{quota['warning']}"
+        except Exception:
+            pass
         return {
             "hookSpecificOutput": {
                 "hookEventName": "SessionStart",
-                "additionalContext": TOKENSAFE_DIRECTIVES,
+                "additionalContext": extra,
             }
         }
 
     if event == "UserPromptSubmit":
         prompt = str(payload.get("prompt") or "")
         parts = []
+        quota = {"is_quota_exceeded": False, "warning": None}
+        tracker = None
+        try:
+            from src.metrics import MetricsTracker
+            from src.license_manager import LicenseManager
+            tracker = MetricsTracker()
+            quota = LicenseManager.check_quota(tracker)
+        except Exception:
+            pass
+
+        if quota.get("is_quota_exceeded"):
+            try:
+                from src.license_manager import LicenseManager
+                if LicenseManager.should_emit_quota_banner(tracker, session_id, every_n_turns=5) and quota.get("warning"):
+                    parts.append(quota["warning"])
+            except Exception:
+                pass
+            if parts:
+                return {
+                    "hookSpecificOutput": {
+                        "hookEventName": "UserPromptSubmit",
+                        "additionalContext": "\n\n".join(parts),
+                    }
+                }
+            return {}
+
         context, meta = compact_for_injection(prompt, AGENT, session_id)
         if context and meta.get("compacted"):
             parts.append(
@@ -92,12 +127,12 @@ def handle(event: str, payload: dict) -> dict:
                                 optimized_tokens=folded_tok,
                                 details={"turns": turn, "total_accum_orig": orig_hist, "agent": AGENT},
                             )
-                        parts.append(
-                            f"{folded}\n"
-                            f"(TokenSafe History Compactor: stabilized {orig_hist:,} tokens "
-                            f"of previous turns — saved {stats['saved_tokens']:,}. "
-                            f"Estimated per METRICS.md.)"
-                        )
+                            parts.append(
+                                f"{folded}\n"
+                                f"(TokenSafe History Compactor: stabilized {orig_hist:,} tokens "
+                                f"of previous turns — saved {stats['saved_tokens']:,}. "
+                                f"Estimated per METRICS.md.)"
+                            )
             except Exception:
                 pass
 

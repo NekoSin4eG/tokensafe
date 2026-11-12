@@ -118,5 +118,113 @@ class TestMCPServer(unittest.TestCase):
         self.assertEqual(resp["id"], 1)
         self.assertFalse(resp["result"].get("isError", False))
 
+    def test_smart_read_file_dep_mode_signature_smaller_than_full(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = os.environ.get("TOKENSAFE_DB_PATH")
+            os.environ["TOKENSAFE_DB_PATH"] = os.path.join(tmpdir, "metrics.db")
+            try:
+                mod_path = os.path.join(tmpdir, "service.py")
+                with open(mod_path, "w", encoding="utf-8") as f:
+                    f.write(
+                        "import os\nimport sys\nimport json\nimport time\nimport re\nimport math\n\n"
+                        "def helper_dep(x):\n" + "    x = x + 1\n" * 20 + "    return x\n\n"
+                        "def target_fn(v):\n    return helper_dep(v)\n"
+                    )
+                res_sig = handle_tool_call("smart_read_file", {
+                    "path": mod_path, "symbol": "target_fn", "dep_mode": "signature"
+                })
+                res_full = handle_tool_call("smart_read_file", {
+                    "path": mod_path, "symbol": "target_fn", "dep_mode": "full"
+                })
+                txt_sig = res_sig["content"][0]["text"]
+                txt_full = res_full["content"][0]["text"]
+                self.assertIn("def target_fn", txt_sig)
+                self.assertIn("def helper_dep", txt_sig)
+                self.assertIn("Collapsed 6 imports", txt_sig)
+                self.assertLess(len(txt_sig), len(txt_full))
+            finally:
+                if old_db is None:
+                    os.environ.pop("TOKENSAFE_DB_PATH", None)
+                else:
+                    os.environ["TOKENSAFE_DB_PATH"] = old_db
+
+    def test_zero_config_pointer_and_force_full_over_mcp(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = os.environ.get("TOKENSAFE_DB_PATH")
+            os.environ["TOKENSAFE_DB_PATH"] = os.path.join(tmpdir, "metrics.db")
+            try:
+                target = os.path.join(tmpdir, "big.py")
+                with open(target, "w", encoding="utf-8") as f:
+                    f.write("def target():\n    return 1\n\n" + "\n".join(f"def extra_{i}(): return {i}" for i in range(40)))
+                transcript = os.path.join(tmpdir, "transcript.jsonl")
+                with open(transcript, "w", encoding="utf-8") as tf:
+                    for _ in range(5):
+                        tf.write(json.dumps({"content": "long context message " * 100}) + "\n")
+                stdin_data = "\n".join([
+                    json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"clientInfo": {"name": "claude-code"}}}),
+                    json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/list"}),
+                    json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "smart_read_file", "arguments": {"path": target}}}),
+                    json.dumps({"jsonrpc": "2.0", "id": 4, "method": "tools/call", "params": {"name": "smart_read_file", "arguments": {"path": target}}}),
+                    json.dumps({"jsonrpc": "2.0", "id": 5, "method": "tools/call", "params": {"name": "smart_read_file", "arguments": {"path": target, "force_full": True}}}),
+                    json.dumps({"jsonrpc": "2.0", "id": 6, "method": "tools/call", "params": {"name": "compact_conversation", "arguments": {"transcript_path": transcript, "invocation_num": 5}}}),
+                    json.dumps({"jsonrpc": "2.0", "id": 7, "method": "tools/call", "params": {"name": "smart_read_file", "arguments": {"path": target}}}),
+                ]) + "\n"
+                fake_in = io.StringIO(stdin_data)
+                fake_out = io.StringIO()
+                with patch("sys.stdin", fake_in), patch("sys.stdout", fake_out):
+                    run_mcp_server()
+                resps = [json.loads(ln) for ln in fake_out.getvalue().strip().splitlines() if ln.strip()]
+                by_id = {r["id"]: r["result"] for r in resps}
+                t3 = by_id[3]["content"][0]["text"]
+                t4 = by_id[4]["content"][0]["text"]
+                t5 = by_id[5]["content"][0]["text"]
+                t7 = by_id[7]["content"][0]["text"]
+                self.assertIn("def target", t3)
+                self.assertIn("Pointer Hit", t4)
+                self.assertIn("force_full=true", t4)
+                self.assertIn("def target", t5)
+                self.assertNotIn("Pointer Hit", t5)
+                # After compact_conversation increments _EPOCH_GEN, pointer resets automatically
+                self.assertIn("def target", t7)
+                self.assertNotIn("Pointer Hit", t7)
+            finally:
+                if old_db is None:
+                    os.environ.pop("TOKENSAFE_DB_PATH", None)
+                else:
+                    os.environ["TOKENSAFE_DB_PATH"] = old_db
+
+    def test_unknown_client_without_tools_list_skips_pointer_safely(self):
+        import os
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmpdir:
+            old_db = os.environ.get("TOKENSAFE_DB_PATH")
+            os.environ["TOKENSAFE_DB_PATH"] = os.path.join(tmpdir, "metrics.db")
+            try:
+                target = os.path.join(tmpdir, "plain.py")
+                with open(target, "w", encoding="utf-8") as f:
+                    f.write("def target():\n    return 1\n\n" + "\n".join(f"def extra_{i}(): return {i}" for i in range(40)))
+                stdin_data = "\n".join([
+                    json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {"clientInfo": {"name": "custom-minimal-bot"}}}),
+                    json.dumps({"jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": {"name": "smart_read_file", "arguments": {"path": target}}}),
+                    json.dumps({"jsonrpc": "2.0", "id": 3, "method": "tools/call", "params": {"name": "smart_read_file", "arguments": {"path": target}}}),
+                ]) + "\n"
+                fake_in = io.StringIO(stdin_data)
+                fake_out = io.StringIO()
+                with patch("sys.stdin", fake_in), patch("sys.stdout", fake_out):
+                    run_mcp_server()
+                resps = {r["id"]: r["result"] for r in (json.loads(ln) for ln in fake_out.getvalue().strip().splitlines() if ln.strip())}
+                t3 = resps[3]["content"][0]["text"]
+                self.assertIn("def target", t3)
+                self.assertNotIn("Pointer Hit", t3)
+            finally:
+                if old_db is None:
+                    os.environ.pop("TOKENSAFE_DB_PATH", None)
+                else:
+                    os.environ["TOKENSAFE_DB_PATH"] = old_db
+
 if __name__ == "__main__":
     unittest.main()

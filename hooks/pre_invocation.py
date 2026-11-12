@@ -85,11 +85,21 @@ def main():
     #    once per session by session_start.py, not on every turn here.
     quota = LicenseManager.check_quota(tracker)
 
-    # 2. Prompt Compaction (Tier 2 LLM Distillation paused if community quota exceeded).
+    # 2. Prompt Compaction (Paused completely once 500k Community measured quota is reached).
     #    Skipped while the proxy is in the loop: it already replaced the prompt.
-    if last_user_input and len(last_user_input.strip()) >= 5 and not _proxy_is_active():
-        enable_distill = not quota.get("is_quota_exceeded", False)
-        compaction = PromptCompactor.compact(last_user_input, enable_deepseek=enable_distill)
+    is_quota_exceeded = bool(quota.get("is_quota_exceeded", False))
+    if is_quota_exceeded:
+        if LicenseManager.should_emit_quota_banner(tracker, conversation_id, every_n_turns=5) and quota.get("warning"):
+            inject_steps.append({
+                "systemMessage": {
+                    "systemMessage": "",
+                    "metadata": {
+                        "user_markdown": quota["warning"]
+                    }
+                }
+            })
+    elif last_user_input and len(last_user_input.strip()) >= 5 and not _proxy_is_active():
+        compaction = PromptCompactor.compact(last_user_input, enable_deepseek=True)
         saved_tokens = compaction["saved_tokens"]
         reduction_pct = compaction["reduction_pct"]
 
@@ -110,16 +120,10 @@ def main():
                 }
             )
 
-            if quota.get("is_quota_exceeded"):
-                badge_markdown = (
-                    f"⚡ **TokenSafe:** Saved **{saved_tokens} tokens** via local regex "
-                    f"(Community 500k quota reached — [Upgrade to Solo](https://tokensafe.dev/#pricing) for unlimited deep distillation & history folding)."
-                )
-            else:
-                badge_markdown = (
-                    f"⚡ **Token Optimizer:** Compaction active ({tier}) — saved **{saved_tokens} tokens** "
-                    f"(-{reduction_pct}%) on this prompt."
-                )
+            badge_markdown = (
+                f"⚡ **Token Optimizer:** Compaction active ({tier}) — saved **{saved_tokens} tokens** "
+                f"(-{reduction_pct}%) on this prompt."
+            )
 
             inject_steps.append({
                 "systemMessage": {
@@ -131,7 +135,11 @@ def main():
             })
 
     # 3. Multi-turn History Compaction (Paused when community quota is exceeded)
+    #    Only inject into context on first fold or >= 1500 token delta so
+    #    intermediate turns do not churn prefix tokens unnecessarily.
     folded_text = None
+    fresh_fold = False
+    orig_hist_tokens = 0
     if not quota.get("is_quota_exceeded", False) and invocation_num >= 3 and transcript_path:
         folded_text, orig_hist_tokens, folded_tokens, stats = HistoryCompactor.fold_transcript(
             transcript_path, invocation_num
@@ -144,10 +152,9 @@ def main():
                 prev_orig = prev_event["details"].get("total_accum_orig", 0) or prev_event.get("original_tokens", 0)
 
             delta_orig = max(0, orig_hist_tokens - prev_orig)
-            # Record first fold or incremental accumulation when delta >= 1500 tokens
             if prev_event is None or delta_orig >= 1500:
+                fresh_fold = True
                 inc_orig = orig_hist_tokens if prev_event is None else delta_orig
-                inc_saved = max(0, inc_orig - folded_tokens)
                 tracker.record_event(
                     session_id=conversation_id,
                     event_type="HISTORY_FOLD",
@@ -162,23 +169,21 @@ def main():
                     }
                 )
 
-            hist_badge = (
-                f"⚡ **History Compactor:** Stabilized {orig_hist_tokens:,} tokens of previous turns — "
-                f"saved **{stats['saved_tokens']:,} tokens**."
-            )
+                hist_badge = (
+                    f"⚡ **History Compactor:** Stabilized {orig_hist_tokens:,} tokens of previous turns — "
+                    f"saved **{stats['saved_tokens']:,} tokens**."
+                )
 
-            inject_steps.append({
-                "systemMessage": {
-                    "systemMessage": folded_text,
-                    "metadata": {
-                        "user_markdown": hist_badge
+                inject_steps.append({
+                    "systemMessage": {
+                        "systemMessage": folded_text,
+                        "metadata": {
+                            "user_markdown": hist_badge
+                        }
                     }
-                }
-            })
+                })
 
-    # 3b. Real history mass for the Context Budget HUD: the fold already
-    #     measured it when active; on early turns probe the transcript lightly
-    #     so the estimate reflects the history that genuinely sits in context.
+    # 3b. Real history mass for the Context Budget HUD
     history_mass = 0
     if folded_text is not None:
         history_mass = orig_hist_tokens
@@ -188,22 +193,35 @@ def main():
         except Exception:
             history_mass = 0
 
-    # 4. Adaptive Protocol Enforcement Reminder (Guard-triggered only).
-    #    Full directives are injected once per session by session_start.py as a
-    #    persistent systemMessage; here they are re-shown only when the guard
-    #    just fired or fresh history was folded.
+    # 4. Adaptive Protocol Enforcement Reminder (Guard-triggered or fresh fold only)
     recent_guard = tracker.get_last_event(conversation_id, "GUARD_RAW_CODE_SEARCH")
-    if folded_text is not None or recent_guard is not None:
-        # systemMessage nested form (hooks.md contract): ephemeralMessage is
-        # deprecated and is converted to a hidden system message anyway. This
-        # reminder only fires on guard violations / fresh history folds, so
-        # persistence here is intentional reinforcement, not per-turn bloat.
+    guard_unreminded = False
+    if isinstance(recent_guard, dict):
+        last_remind = tracker.get_last_event(conversation_id, "PROTOCOL_REMINDER")
+        is_valid_remind = isinstance(last_remind, dict) and last_remind.get("event_type") == "PROTOCOL_REMINDER"
+        if not is_valid_remind:
+            guard_unreminded = True
+        else:
+            reminded_id = int((last_remind.get("details") or {}).get("guard_id", 0))
+            guard_unreminded = int(recent_guard.get("id", 0)) > reminded_id
+    if fresh_fold or guard_unreminded:
         inject_steps.append({
             "systemMessage": {
                 "systemMessage": PROTOCOL_DIRECTIVES,
                 "metadata": {}
             }
         })
+        if guard_unreminded and recent_guard.get("id") is not None:
+            try:
+                tracker.record_event(
+                    session_id=conversation_id,
+                    event_type="PROTOCOL_REMINDER",
+                    original_tokens=0,
+                    optimized_tokens=0,
+                    details={"guard_id": int(recent_guard["id"])},
+                )
+            except Exception:
+                pass
 
     # 5. Context Budget HUD warning: inject once per session when the
     #    context crosses 80% of the estimated window. history_mass upgrades

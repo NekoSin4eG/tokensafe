@@ -4,7 +4,7 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
 
 | MCP Tool | Description | Efficiency Impact |
 |---|---|---|
-| `tokensafe:smart_read_file` | Graph-guided AST reader with target `symbol` body retention and 1-hop dependency inlining. | **-85% to -92%** token reduction |
+| `tokensafe:smart_read_file` | Graph-guided AST reader with `symbol` body retention, `dep_mode` (`signature` default / `full`), and session pointer dedup (`force_full`). | **-90% to -98%** token reduction |
 | `tokensafe:scoped_search` | Safe, token-bounded keyword, symbol, or config search across the codebase (supports `path`, 4s safety timeout, system root protection). | **-90% to -95%** vs raw grep/find |
 | `tokensafe:list_dir` | Token-efficient directory tree without lockfiles, timestamps, or ignored folders (node_modules, .git, dist, .env). Replaces `ls -la`. | **-90%** vs verbose `ls` |
 | `tokensafe:get_architecture_graph` | Computes dependency topology, hub centrality, and identifies top God Nodes for `project_path`. | **~200 tokens** (replaces 50k crawl) |
@@ -68,11 +68,11 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
   "Arguments": {
     "path": "/Users/.../projects/my-app/src/views/StatsView.tsx",
     "symbol": "LuckyWheelTab",
-    "include_deps": false
+    "dep_mode": "signature"
   }
 }
 ```
-*Extracts only the targeted `LuckyWheelTab` implementation with inert code and docstrings folded. Omit `include_deps` or set `true` to also inline 1-hop internal dependencies.*
+*Extracts the targeted `LuckyWheelTab` implementation plus compact 1-line signatures for 1-hop dependencies with inert code and imports folded. Pass `"dep_mode": "full"` for full dependency bodies, `"include_deps": false` for 0-hop isolation, or `"force_full": true` to bypass a session pointer hit.*
 
 ### 3. Public API Map Workflow
 ```json

@@ -149,6 +149,8 @@ def main():
 
         if is_quota_exceeded:
             # Free tier quota reached: pass through raw read_file without AST skeletonization
+            if LicenseManager.should_emit_quota_banner(tracker, conversation_id, every_n_turns=5) and quota.get("warning"):
+                response["reason"] = quota["warning"]
             print(json.dumps(response))
             return
 
@@ -259,10 +261,9 @@ def main():
             response["reason"] = f"⚠️ TokenSafe Guard Warning: {guard_res.reason}"
 
         if is_quota_exceeded:
-            # Free tier quota reached: pass through without AST diff slicing or savings tracking
-            new_cmd, est_saved, reason = CommandSanitizer.sanitize(cmd, cwd=hook_cwd)
-            if new_cmd and est_saved > 0:
-                response["overwrite"] = {"CommandLine": new_cmd}
+            # Free tier quota reached: skip Pro diff/command optimization while Security Guards remain active
+            if LicenseManager.should_emit_quota_banner(tracker, conversation_id, every_n_turns=5) and quota.get("warning"):
+                response["reason"] = response.get("reason") or quota["warning"]
             print(json.dumps(response))
             return
 

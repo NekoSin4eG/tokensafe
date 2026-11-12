@@ -76,5 +76,44 @@ class TestAgentFirewall(unittest.TestCase):
         hit, _, _ = AgentFirewall.check_cache(session, self.tmp.name, tracker=self.tracker)
         self.assertFalse(hit)
 
+    def test_static_header_deterministic_across_hits(self):
+        session = "swarm_static_hdr"
+        file_path = self.tmp.name
+        AgentFirewall.record_cache(session, file_path, "def worker():\n    return 42\n", tracker=self.tracker)
+        _, content1, _ = AgentFirewall.check_cache(session, file_path, tracker=self.tracker)
+        _, content2, _ = AgentFirewall.check_cache(session, file_path, tracker=self.tracker)
+        self.assertEqual(content1, content2)
+        self.assertNotIn("Dedup Hit #", content1)
+
+    def test_pointer_mode_returns_compact_pointer_when_allowed(self):
+        session = "mcp_pointer_sess"
+        file_path = self.tmp.name
+        big_content = "\n".join(f"def fn_{i}(): return {i}" for i in range(40))
+        AgentFirewall.record_cache(session, file_path, big_content, symbol="fn_0", tracker=self.tracker)
+        hit, ptr, saved = AgentFirewall.check_cache(
+            session, file_path, symbol="fn_0", tracker=self.tracker, allow_pointer=True
+        )
+        self.assertTrue(hit)
+        self.assertIn("Subagent Firewall: Pointer Hit", ptr)
+        self.assertIn("force_full=true", ptr)
+        self.assertGreater(saved, 100)
+
+    def test_symbol_isolation_and_dropped_table_self_healing(self):
+        session = "swarm_heal"
+        file_path = self.tmp.name
+        AgentFirewall.record_cache(session, file_path, "def fn_a(): return 1", symbol="fn_a", tracker=self.tracker)
+        hit_other_sym, _, _ = AgentFirewall.check_cache(session, file_path, symbol="fn_b", tracker=self.tracker)
+        self.assertFalse(hit_other_sym)
+
+        # Simulate table loss while _INITIALIZED_DBS still holds db_path
+        with self.tracker._get_connection() as conn:
+            conn.execute("DROP TABLE subagent_file_cache")
+        hit_after_drop, _, _ = AgentFirewall.check_cache(session, file_path, symbol="fn_a", tracker=self.tracker)
+        self.assertFalse(hit_after_drop)
+        AgentFirewall.record_cache(session, file_path, "def fn_a(): return 1", symbol="fn_a", tracker=self.tracker)
+        hit_recreated, out, _ = AgentFirewall.check_cache(session, file_path, symbol="fn_a", tracker=self.tracker)
+        self.assertTrue(hit_recreated)
+        self.assertIn("return 1", out)
+
 if __name__ == "__main__":
     unittest.main()

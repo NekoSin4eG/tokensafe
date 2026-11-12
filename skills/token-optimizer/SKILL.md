@@ -24,8 +24,9 @@ folds multi-turn conversation history, slices verbose tool outputs, and guards a
 
 2. **SYMBOL & COMPONENT EXTRACTION (`smart_read_file`)**:
    - When locating or reading any function, component, class, or handler (e.g. `<LuckyWheelTab>`, `areSectorEqual`, `useWallet`), ALWAYS call `tokensafe:smart_read_file` with `path` and `symbol`.
-   - **1-Hop vs Surgical**: By default, `smart_read_file` includes direct 1-hop dependencies so you understand called helper functions without extra tool calls. When you only need the target method for a surgical edit, pass `"include_deps": false` to get pure single-method isolation (-95% tokens).
-   - **Result**: Preserves the exact target definition while folding surrounding inert code into clean 1-line signatures without docstrings (-85% to -95% tokens).
+   - **1-Hop Dependency Modes (`dep_mode` & `include_deps`)**: By default (`dep_mode="signature"`), `smart_read_file` returns the full target implementation plus compact 1-line 1-hop dependency signatures and collapsed imports (-95%+ tokens). Pass `"dep_mode": "full"` when full 1-hop dependency bodies are required, or `"include_deps": false` for 0-hop surgical isolation.
+   - **Cache Pointer Recovery (`force_full`)**: When repeating an unchanged read in the same MCP session, `smart_read_file` may return a compact pointer referencing the prior output. Reuse that earlier output; only pass `"force_full": true` if your context was compacted or you are a fresh subagent lacking prior turns.
+   - **Result**: Preserves the exact target definition while folding surrounding inert code into clean 1-line signatures without docstrings (-85% to -98% tokens).
 
 3. **ARCHITECTURE SURVEY BEFORE BROWSING (`get_architecture_graph`)**:
    - Before multi-file exploration or asking where things are located, ALWAYS call `tokensafe:get_architecture_graph(project_path)`.
@@ -72,11 +73,22 @@ For long-running autonomous sessions, TokenSafe actively manages context bloat:
    - Preserves active file paths, modified symbols, and pending tasks while discarding transient tool output noise.
    - **Manual trigger**: call `tokensafe:compact_conversation` with the session's `transcript_path` any time you need to shed context between subtasks — it returns the ledger JSON plus exact original/folded token counts.
 2. **Subagent Deduplication Firewall**:
-   - Caches file reads across subagents. If subagent B attempts to read a file already inspected by subagent A, returns the cached skeleton instantly.
+   - Caches file reads across subagents and sessions using SHA-256 content hashes. Interactive MCP clients receive self-healing pointer hits on unchanged repeat reads inside the same session; fresh subagents or post-compaction callers recover automatically with `force_full=true`.
 3. **Loop Guard**:
    - Detects repeated identical tool calls and triggers `force_ask` to prevent runaway infinite agent loops.
 4. **Output Token Guard**:
    - Intercepts wholesale `write_file` calls on existing files with >= 40 lines to prevent expensive output token burn.
+
+---
+
+## LLM Prompt Cache Optimization
+
+TokenSafe actively maximizes provider KV-cache hit rates alongside token compression:
+
+1. **Append-Only Epoch Architecture**: In proxy mode, past messages (`messages[0..N-2]`) are never retroactively mutated within an epoch, preserving prefix cache hits. When cumulative context reaches **80% of the model's window**, an atomic Epoch Rollover consolidates deep history into a State Ledger.
+2. **Multi-Breakpoint Cache Control**: `PromptCacheNormalizer` sorts `tools` deterministically and places Anthropic `cache_control: {"type": "ephemeral"}` across tools, static system instructions, and the penultimate completed turn; OpenAI requests receive deterministic `prompt_cache_key`.
+3. **Deterministic Prefix Normalization**: Ephemeral timestamps, hit counters, and session IDs are stripped from static prefixes, and `AgentFirewall` headers remain byte-deterministic across hits.
+4. **Parametric Prompt Template Caching**: `DistillationCache` extracts file paths and symbols into positional slots (`<FILE_0>`, `<SYM_0>`) so structurally identical prompts hit L1/L2/L3 caches with 0 LLM roundtrips.
 
 ---
 

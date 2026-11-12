@@ -57,5 +57,40 @@ class TestDistillationCache(unittest.TestCase):
         cached = DistillationCache.get(prompt)
         self.assertEqual(cached, s_expr)
 
+    def test_parametric_template_slot_hit(self):
+        p1 = "Refactor get_balance in wallet.ts to add redis caching"
+        s1 = '(REFACTOR wallet.ts get_balance [redis] "add redis caching")'
+        DistillationCache.set(p1, s1, provider="deepseek", sync_remote=False)
+
+        # Structurally identical prompt with different symbol and file -> zero-LLM template hit
+        p2 = "refactor validateToken in auth.ts to add redis caching"
+        cached = DistillationCache.get(p2)
+        self.assertEqual(cached, '(REFACTOR auth.ts validateToken [redis] "add redis caching")')
+
+    def test_parametric_template_skips_unresolved_slots(self):
+        p1 = "Refactor get_balance in wallet.ts to add redis"
+        s1 = '(REFACTOR wallet.ts get_balance [redis] "add redis")'
+        DistillationCache.set(p1, s1, provider="deepseek", sync_remote=False)
+
+        # Missing <FILE_0> slot -> must not leak unresolved <FILE_0> placeholder
+        p2 = "Refactor check_auth to add redis"
+        self.assertIsNone(DistillationCache.get(p2))
+
+    def test_parametric_template_survives_memory_clear_and_repeated_slots(self):
+        p1 = "Sync handleWebhook in src/api/webhook.ts with handleWebhook tests"
+        s1 = '(SYNC src/api/webhook.ts handleWebhook "with tests")'
+        DistillationCache.set(p1, s1, provider="deepseek", sync_remote=False)
+
+        with DistillationCache._lock:
+            DistillationCache._memory_cache.clear()
+            DistillationCache._template_memory_cache.clear()
+
+        p2 = "sync verifySignature in src/auth/jwt.ts with verifySignature tests"
+        self.assertEqual(
+            DistillationCache.get(p2),
+            '(SYNC src/auth/jwt.ts verifySignature "with tests")',
+        )
+        self.assertIsNone(DistillationCache.get(""))
+
 if __name__ == "__main__":
     unittest.main()
