@@ -11,6 +11,16 @@ PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
+# If launched via system python3 without cryptography (PEP 668), re-exec in ~/.tokensafe/venv if present.
+_venv_py = os.path.expanduser(
+    "~/.tokensafe/venv/Scripts/python.exe" if sys.platform == "win32" else "~/.tokensafe/venv/bin/python3"
+)
+if os.path.exists(_venv_py) and os.path.realpath(sys.executable) != os.path.realpath(_venv_py):
+    try:
+        import cryptography  # noqa: F401
+    except ImportError:
+        os.execv(_venv_py, [_venv_py, __file__, *sys.argv[1:]])
+
 from src.cli import main
 
 if __name__ == "__main__":

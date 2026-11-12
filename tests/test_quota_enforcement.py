@@ -82,10 +82,12 @@ class TestQuotaCountingAndAntiBypass(unittest.TestCase):
         self.assertIn("TS1", msg_ts1)
 
         # 3. Runtime TOKENSAFE_PUBLIC_KEY env var must be ignored when validating against embedded prod pubkey
+        from cryptography.hazmat.primitives.asymmetric import ed25519
+        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
         priv_bytes = bytes.fromhex("22" * 32)
-        h = hashlib.sha512(priv_bytes).digest()
-        a = 2 ** 254 + sum(2 ** i * lm._ed_bit(h, i) for i in range(3, 254))
-        attacker_pub = lm._ed_encodepoint(lm._ed_scalarmult(lm._ED_B, a)).hex()
+        attacker_pub = ed25519.Ed25519PrivateKey.from_private_bytes(priv_bytes).public_key().public_bytes(
+            Encoding.Raw, PublicFormat.Raw
+        ).hex()
         forged_ts2 = LicenseManager.generate_license("team", "attacker@evil.com", signing_key=priv_bytes.hex())
 
         with patch.object(lm, "DEFAULT_ED25519_PUBLIC_KEY", lm.EMBEDDED_ED25519_PUBLIC_KEY), \

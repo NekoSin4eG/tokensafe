@@ -14,7 +14,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     python3-dev \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir nuitka
+COPY requirements.txt /build/requirements.txt
+RUN pip install --no-cache-dir -r /build/requirements.txt nuitka
 
 COPY src/ /build/src/
 COPY proto/ /build/proto/

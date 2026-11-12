@@ -1,11 +1,7 @@
 # TokenSafe runtime dependencies.
 #
-# The engine itself is standard-library only; `cryptography` is the single
-# optional-but-recommended dependency: it provides the fast Ed25519 path for
-# license verification (~0.65s -> <1ms per validation on the pure-Python
-# fallback) and, on the cloud backend, RS256 verification of Clerk session
-# tokens. Without it the system stays functional but degrades:
-#   - client: license verification falls back to pure-Python Ed25519 (slower)
-#   - server: Clerk RS256 tokens are REJECTED (fail-closed, never accepted
-#     without signature verification)
+# `cryptography>=42.0` is a required runtime dependency for:
+#   - Client: fast Ed25519 signature verification & signing (<1ms per validation)
+#   - Cloud backend: fail-closed RS256 verification of Clerk session tokens
+#   - Release tooling: MCP Registry DNS Ed25519 key loading
 cryptography>=42.0

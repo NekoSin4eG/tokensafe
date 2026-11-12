@@ -1,6 +1,6 @@
 """
-Cryptographically secure, zero-dependency License Engine for TokenSafe.
-Supports offline-verifiable HMAC-SHA256 signed licenses and 7-day trials.
+Cryptographically secure License Engine for TokenSafe.
+Supports offline-verifiable Ed25519 (TS2) licenses, 7-day trials, and quota checks.
 Compatible with Stripe webhook lifecycle and B2B on-premise proxy deployments.
 """
 
@@ -39,103 +39,32 @@ ROTATED_HMAC_SALT = os.environ.get("TOKENSAFE_HMAC_SALT", "")
 DEFAULT_SIGNING_SALT = ROTATED_HMAC_SALT
 
 # ---------------------------------------------------------------------------
-# Zero-dependency RFC 8032 Ed25519 Implementation with Cryptography Fast-Path
+# Required Cryptography-Backed RFC 8032 Ed25519 Verification & Signing
 # ---------------------------------------------------------------------------
-_ED25519_Q = 2**255 - 19
-_ED25519_L = 2**252 + 27742317777372353535851937790883648493
-
-def _ed_inv(x: int) -> int:
-    return pow(x, _ED25519_Q - 2, _ED25519_Q)
-
-_ED_D = -121665 * _ed_inv(121666)
-_ED_I = pow(2, (_ED25519_Q - 1) // 4, _ED25519_Q)
-
-def _ed_xrecover(y: int) -> int:
-    xx = (y * y - 1) * _ed_inv(_ED_D * y * y + 1)
-    x = pow(xx, (_ED25519_Q + 3) // 8, _ED25519_Q)
-    if (x * x - xx) % _ED25519_Q != 0:
-        x = (x * _ED_I) % _ED25519_Q
-    if x % 2 != 0:
-        x = _ED25519_Q - x
-    return x
-
-_ED_BY = 4 * _ed_inv(5)
-_ED_BX = _ed_xrecover(_ED_BY)
-_ED_B = [_ED_BX % _ED25519_Q, _ED_BY % _ED25519_Q]
-
-def _ed_add(p1: list, p2: list) -> list:
-    x1, y1 = p1[0], p1[1]
-    x2, y2 = p2[0], p2[1]
-    x3 = (x1 * y2 + x2 * y1) * _ed_inv(1 + _ED_D * x1 * x2 * y1 * y2)
-    y3 = (y1 * y2 + x1 * x2) * _ed_inv(1 - _ED_D * x1 * x2 * y1 * y2)
-    return [x3 % _ED25519_Q, y3 % _ED25519_Q]
-
-def _ed_scalarmult(pt: list, e: int) -> list:
-    if e == 0:
-        return [0, 1]
-    q = _ed_scalarmult(pt, e // 2)
-    q = _ed_add(q, q)
-    if e & 1:
-        q = _ed_add(q, pt)
-    return q
-
-def _ed_encodepoint(pt: list) -> bytes:
-    x, y = pt[0], pt[1]
-    bits = [(y >> i) & 1 for i in range(255)] + [x & 1]
-    return bytes([sum([bits[i * 8 + j] << j for j in range(8)]) for i in range(32)])
-
-def _ed_bit(h: bytes, i: int) -> int:
-    return (h[i // 8] >> (i % 8)) & 1
-
-def _ed_decodepoint(s: bytes) -> Optional[list]:
-    y = sum(2**i * _ed_bit(s, i) for i in range(0, 255))
-    x = _ed_xrecover(y)
-    if x & 1 != _ed_bit(s, 255):
-        x = _ED25519_Q - x
-    pt = [x, y]
-    if (-x * x + y * y - 1 - _ED_D * x * x * y * y) % _ED25519_Q != 0:
-        return None
-    return pt
-
-def _ed25519_sign_bytes(msg: bytes, priv_bytes: bytes, pub_bytes: bytes = b"") -> bytes:
+def _load_ed25519_module():
     try:
         from cryptography.hazmat.primitives.asymmetric import ed25519
-        priv_obj = ed25519.Ed25519PrivateKey.from_private_bytes(priv_bytes)
-        return priv_obj.sign(msg)
-    except Exception:
-        h = hashlib.sha512(priv_bytes).digest()
-        a = 2**254 + sum(2**i * _ed_bit(h, i) for i in range(3, 254))
-        # Always derive the RFC 8032 public point from priv_bytes so env/global overrides cannot desync H(R||A||M).
-        derived_pub = _ed_encodepoint(_ed_scalarmult(_ED_B, a))
-        r = int.from_bytes(hashlib.sha512(h[32:] + msg).digest(), "little")
-        r_pt = _ed_scalarmult(_ED_B, r)
-        r_bytes = _ed_encodepoint(r_pt)
-        k = int.from_bytes(hashlib.sha512(r_bytes + derived_pub + msg).digest(), "little")
-        s = (r + k * a) % _ED25519_L
-        return r_bytes + int.to_bytes(s, 32, "little")
+        return ed25519
+    except ImportError as exc:
+        raise RuntimeError(
+            "TokenSafe requires 'cryptography>=42.0'. Install it via: pip install 'cryptography>=42.0'"
+        ) from exc
+
+
+def _ed25519_sign_bytes(msg: bytes, priv_bytes: bytes, pub_bytes: bytes = b"") -> bytes:
+    ed25519 = _load_ed25519_module()
+    priv_obj = ed25519.Ed25519PrivateKey.from_private_bytes(priv_bytes)
+    return priv_obj.sign(msg)
+
 
 def _ed25519_verify_bytes(sig: bytes, msg: bytes, pub_bytes: bytes) -> bool:
     if len(sig) != 64 or len(pub_bytes) != 32:
         return False
+    ed25519 = _load_ed25519_module()
     try:
-        from cryptography.hazmat.primitives.asymmetric import ed25519
         pub_obj = ed25519.Ed25519PublicKey.from_public_bytes(pub_bytes)
         pub_obj.verify(sig, msg)
         return True
-    except Exception:
-        pass
-    try:
-        r_pt = _ed_decodepoint(sig[:32])
-        a_pt = _ed_decodepoint(pub_bytes)
-        if r_pt is None or a_pt is None:
-            return False
-        s = int.from_bytes(sig[32:], "little")
-        if s >= _ED25519_L:
-            return False
-        h = int.from_bytes(hashlib.sha512(sig[:32] + pub_bytes + msg).digest(), "little")
-        v1 = _ed_scalarmult(_ED_B, s)
-        v2 = _ed_add(r_pt, _ed_scalarmult(a_pt, h))
-        return v1 == v2
     except Exception:
         return False
 
@@ -271,18 +200,22 @@ class LicenseManager:
             except Exception:
                 return False, {}, "Invalid signature encoding"
 
-            if not _ed25519_verify_bytes(sig_bytes, payload_bytes, pub_bytes):
-                verified = False
-                if not public_key:
+            try:
+                verified = _ed25519_verify_bytes(sig_bytes, payload_bytes, pub_bytes)
+                if not verified and not public_key:
                     for leg_hex in LEGACY_ED25519_PUBLIC_KEYS:
                         try:
                             if _ed25519_verify_bytes(sig_bytes, payload_bytes, bytes.fromhex(leg_hex)):
                                 verified = True
                                 break
+                        except RuntimeError:
+                            raise
                         except Exception:
                             pass
-                if not verified:
-                    return False, {}, "Invalid digital signature: license key has been tampered with or is counterfeit"
+            except RuntimeError as crypto_err:
+                return False, {}, str(crypto_err)
+            if not verified:
+                return False, {}, "Invalid digital signature: license key has been tampered with or is counterfeit"
 
         # 2. Legacy TS1 Verification (disabled offline to eliminate public-salt forgery)
         else:

@@ -8,25 +8,78 @@
 const { spawn, spawnSync } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
 
 const ROOT_DIR = path.resolve(__dirname, '..');
 const args = process.argv.slice(2);
+const VENV_DIR = path.join(os.homedir(), '.tokensafe', 'venv');
 
-// Locate system Python 3 interpreter
+function checkPython(cmd, requireCrypto) {
+  const probe = requireCrypto
+    ? 'import sys, cryptography; assert sys.version_info >= (3, 10)'
+    : 'import sys; assert sys.version_info >= (3, 10)';
+  try {
+    const res = spawnSync(cmd, ['-c', probe], { encoding: 'utf-8', stdio: 'pipe' });
+    return res.status === 0;
+  } catch (_) {
+    return false;
+  }
+}
+
+function bootstrapCryptography(basePython) {
+  console.error('⚡ Installing required dependency: cryptography>=42.0 ...');
+  // 1. Try user-site pip first (respects normal user environments)
+  const userPip = spawnSync(
+    basePython,
+    ['-m', 'pip', 'install', '--user', '--quiet', '--disable-pip-version-check', 'cryptography>=42.0'],
+    { encoding: 'utf-8', stdio: 'pipe' }
+  );
+  if (userPip.status === 0 && checkPython(basePython, true)) {
+    return basePython;
+  }
+
+  // 2. Fallback to isolated ~/.tokensafe/venv (handles PEP 668 externally-managed Python on macOS/Ubuntu)
+  fs.mkdirSync(path.dirname(VENV_DIR), { recursive: true });
+  const venvPy = process.platform === 'win32'
+    ? path.join(VENV_DIR, 'Scripts', 'python.exe')
+    : path.join(VENV_DIR, 'bin', 'python3');
+
+  if (!fs.existsSync(venvPy)) {
+    const mk = spawnSync(basePython, ['-m', 'venv', VENV_DIR], { encoding: 'utf-8', stdio: 'pipe' });
+    if (mk.status !== 0) return null;
+  }
+  const venvPip = spawnSync(
+    venvPy,
+    ['-m', 'pip', 'install', '--quiet', '--disable-pip-version-check', 'cryptography>=42.0'],
+    { encoding: 'utf-8', stdio: 'pipe' }
+  );
+  if (venvPip.status === 0 && checkPython(venvPy, true)) {
+    return venvPy;
+  }
+  return null;
+}
+
+// Locate Python 3.10+ interpreter with required `cryptography` package
 function findPython() {
-  const candidates = ['python3', 'python'];
+  const venvPy = process.platform === 'win32'
+    ? path.join(VENV_DIR, 'Scripts', 'python.exe')
+    : path.join(VENV_DIR, 'bin', 'python3');
+  const candidates = [venvPy, 'python3', 'python'];
+
   for (const cmd of candidates) {
-    try {
-      const res = spawnSync(cmd, ['-c', 'import sys; assert sys.version_info >= (3, 10)'], {
-        encoding: 'utf-8',
-        stdio: 'pipe'
-      });
-      if (res.status === 0) return cmd;
-      if (res.error && res.error.code !== 'ENOENT') {
-        console.error(`TokenSafe: python probe for '${cmd}' failed: ${res.error.message}`);
-      }
-    } catch (err) {
-      console.error(`TokenSafe: python probe for '${cmd}' threw: ${err.message}`);
+    if (cmd === venvPy && !fs.existsSync(venvPy)) continue;
+    if (checkPython(cmd, true)) return cmd;
+  }
+
+  for (const cmd of candidates) {
+    if (cmd === venvPy && !fs.existsSync(venvPy)) continue;
+    if (checkPython(cmd, false)) {
+      const bootstrapped = bootstrapCryptography(cmd);
+      if (bootstrapped) return bootstrapped;
+      console.error("\n❌ TokenSafe requires the Python 'cryptography>=42.0' package.");
+      console.error("Install it manually cleanly via:");
+      console.error("  pip install 'cryptography>=42.0'\n");
+      process.exit(1);
     }
   }
   return null;

@@ -21,7 +21,7 @@ Run unit tests with:
 ```bash
 python3 -m unittest discover tests
 ```
-Before submitting changes, ensure no new external runtime dependencies are introduced (standard library only for maximum portability). The single sanctioned exception is the optional `cryptography` package (see `requirements.txt`): it accelerates Ed25519 license verification on clients and is required for fail-closed RS256 verification of Clerk session tokens on the cloud backend.
+Before submitting changes, keep new dependencies minimal: the AST, proxy, MCP, and telemetry engines run strictly on the Python standard library, with `cryptography>=42.0` (see `requirements.txt` / `pyproject.toml`) as the single required runtime dependency for Ed25519 offline license verification and fail-closed RS256 Clerk session verification.
 
 ## Agent Code Inspection Protocol (TokenSafe MCP)
 - **Architecture Navigation**: Always call `tokensafe:get_architecture_graph` before grep or multi-file reading.

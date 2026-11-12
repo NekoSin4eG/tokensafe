@@ -125,12 +125,14 @@ class TestLicenseValidationCache(unittest.TestCase):
     """H3: repeated validate_license calls must hit the cache and stay key-scoped."""
 
     def setUp(self):
+        from cryptography.hazmat.primitives.asymmetric import ed25519
+        from cryptography.hazmat.primitives.serialization import Encoding, PublicFormat
         from src import license_manager as lm
         self.lm = lm
         priv_bytes = bytes.fromhex("11" * 32)
-        h = hashlib.sha512(priv_bytes).digest()
-        a = 2 ** 254 + sum(2 ** i * self.lm._ed_bit(h, i) for i in range(3, 254))
-        pub_bytes = self.lm._ed_encodepoint(self.lm._ed_scalarmult(self.lm._ED_B, a))
+        pub_bytes = ed25519.Ed25519PrivateKey.from_private_bytes(priv_bytes).public_key().public_bytes(
+            Encoding.Raw, PublicFormat.Raw
+        )
         self.priv_hex = priv_bytes.hex()
         self.pub_hex = pub_bytes.hex()
         self._old_priv = os.environ.get("TOKENSAFE_PRIVATE_KEY")
@@ -173,6 +175,27 @@ class TestLicenseValidationCache(unittest.TestCase):
         ok2, _, msg2 = self.lm.LicenseManager.validate_license(key)
         self.assertFalse(ok2)
         self.assertNotIn("cached", msg2)
+
+    def test_validate_license_fails_closed_when_cryptography_missing(self):
+        key = self.lm.LicenseManager.generate_license("solo", "req@test.com", signing_key=self.priv_hex)
+        blocked = {
+            "cryptography": None,
+            "cryptography.hazmat.primitives.asymmetric": None,
+            "cryptography.hazmat.primitives.asymmetric.ed25519": None,
+        }
+        saved = {k: sys.modules.get(k) for k in blocked}
+        sys.modules.update(blocked)
+        try:
+            ok, payload, msg = self.lm.LicenseManager.validate_license(key)
+            self.assertFalse(ok)
+            self.assertEqual(payload, {})
+            self.assertIn("cryptography", msg.lower())
+        finally:
+            for k, v in saved.items():
+                if v is None:
+                    sys.modules.pop(k, None)
+                else:
+                    sys.modules[k] = v
 
 
 class TestLoopDetectorConcurrency(unittest.TestCase):

@@ -6,9 +6,9 @@ Thank you for your interest in contributing to TokenSafe! We welcome contributio
 
 ## 🎯 Core Philosophy & Guidelines
 
-1. **Zero External Runtime Dependencies**:
-   - The TokenSafe client (`src/` excluding cloud services) must strictly run on the Python standard library.
-   - Do not add runtime dependencies to `pyproject.toml` or `package.json`. Standard library portability across all operating systems is mandatory.
+1. **Minimal Runtime Dependencies (`cryptography>=42.0` + stdlib)**:
+   - Core AST, proxy, MCP, guard, and SQLite modules run strictly on the Python standard library; `cryptography>=42.0` (`pyproject.toml` / `requirements.txt`) is the single required runtime dependency for Ed25519/RS256 cryptographic verification.
+   - Do not add other third-party runtime dependencies without approval.
 2. **Deterministic Token Economy**:
    - Every modification to compactor, slicer, or AST skeletonizer must be benchmarked for token savings and verified for zero code semantics loss.
 3. **Comprehensive Unit Tests**:

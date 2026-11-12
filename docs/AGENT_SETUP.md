@@ -59,22 +59,18 @@ For team workspaces, `tokensafe install --project --agents-plugin <path-to-token
 - Stale `agy-token-optimizer` symlinks from older versions are removed automatically: Antigravity keys plugin enable-state by folder name, and a leftover copy would run every hook twice.
 - Once the plugin ships its own `mcp_config.json`, any leftover user-level `tokensafe` MCP entry in Antigravity's configs is migrated away (backed up first) so the server is not registered twice.
 
-## 6. Optional Dependency: `cryptography`
+## 6. Runtime Dependency: `cryptography`
 
-The local TokenSafe engine uses Python's standard library only and runs out of the box. One optional package, [`cryptography`](https://pypi.org/project/cryptography/), is installed automatically by `install.sh` and `requirements.txt` when available:
+TokenSafe's AST, MCP, proxy, and guard modules use Python's standard library only, with [`cryptography>=42.0`](https://pypi.org/project/cryptography/) as the single required runtime dependency:
 
-```bash
-pip install cryptography   # or: brew install cryptography
-```
+- `pip install tokensafe` installs `cryptography>=42.0` automatically via `pyproject.toml`.
+- `npx tokensafe` and `install.sh` check for `cryptography` on startup and auto-install it (`--user` or isolated `~/.tokensafe/venv` under PEP 668) if absent.
 
-| Component | With `cryptography` | Without (pure-stdlib fallback) |
-|---|---|---|
-| Client: license verification | Instant Ed25519 fast-path | Pure-Python Ed25519 (~0.3s once, then cached) |
-| Client: everything else | Identical | Identical |
-| Cloud backend: Clerk session tokens | RS256 signature verified | **Rejected** (fail-closed: unsigned tokens are never accepted) |
-| Cloud backend: everything else | Identical | Identical |
-
-The client caches a verified license for up to 1 hour, so even the pure-Python path adds no measurable latency after the first hook invocation.
+| Component | Behavior |
+|---|---|
+| Client: license verification | Fast C-backed RFC 8032 Ed25519 (`<1ms`, fail-closed if missing) |
+| Cloud backend: Clerk session tokens | Fail-closed RS256 signature verification |
+| AST engine, MCP, Proxy, Guard, SQLite | 100% Python standard library |
 
 ## 7. Cloud MCP Endpoint
 

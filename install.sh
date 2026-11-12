@@ -26,6 +26,26 @@ fi
 echo "  Creating symlink: ${TARGET_DIR} -> ${SCRIPT_DIR}"
 ln -s "${SCRIPT_DIR}" "${TARGET_DIR}"
 
+if ! command -v python3 &> /dev/null; then
+    echo "❌ Python 3.10+ is required but not found in PATH."
+    exit 1
+fi
+
+if ! python3 -c "import cryptography" 2>/dev/null; then
+    echo "  Installing required dependency: cryptography>=42.0..."
+    VENV_DIR="${HOME}/.tokensafe/venv"
+    if python3 -m pip install --user --quiet "cryptography>=42.0" 2>/dev/null \
+        || python3 -m pip install --quiet --break-system-packages "cryptography>=42.0" 2>/dev/null; then
+        :
+    elif python3 -m venv "${VENV_DIR}" 2>/dev/null \
+        && "${VENV_DIR}/bin/python3" -m pip install --quiet "cryptography>=42.0" 2>/dev/null; then
+        echo "  Installed 'cryptography>=42.0' into ${VENV_DIR}"
+    else
+        echo "❌ Failed to install 'cryptography>=42.0'. Run: pip install 'cryptography>=42.0'"
+        exit 1
+    fi
+fi
+
 echo "  Making CLI executable..."
 chmod +x "${SCRIPT_DIR}/bin/tokensafe"
 chmod +x "${SCRIPT_DIR}/bin/agy-tokens"

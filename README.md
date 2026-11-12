@@ -343,7 +343,7 @@ More documentation: [docs/AGENT_SETUP.md](docs/AGENT_SETUP.md) · [docs/ARCHITEC
 
 ## Development and License
 
-The client runs on standard Python 3.10+ with zero mandatory runtime dependencies. An optional `cryptography` package accelerates license verification ([details](docs/AGENT_SETUP.md#6-optional-dependency-cryptography)).
+The client runs on Python 3.10+ with `cryptography>=42.0` as its sole runtime dependency for Ed25519 license checks; all AST slicing, SQLite metrics, MCP tooling, and guardrails run on the standard library ([details](docs/AGENT_SETUP.md#6-runtime-dependency-cryptography)).
 
 ```bash
 # Run the unit test suite (compact failure report; full: --traceback / -v)
