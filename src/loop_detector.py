@@ -15,9 +15,21 @@ from src.paths import resolve_data_dir
 class LoopDetector:
     """Tracks tool invocation signatures to detect hallucination loops."""
 
-    STATE_FILE = os.path.join(resolve_data_dir(), "loop_state.json")
+    _DEFAULT_STATE_FILE = os.path.join(resolve_data_dir(), "loop_state.json")
+    STATE_FILE = _DEFAULT_STATE_FILE
     MAX_IDENTICAL_REPEATS = 3
     SESSION_TTL_SECONDS = 48 * 3600  # prune sessions idle for more than 2 days
+    MAX_SESSIONS = 2000
+
+    @classmethod
+    def _state_file(cls) -> str:
+        # Honor dynamic TOKENSAFE_DATA_DIR changes unless a test explicitly overrode STATE_FILE
+        if cls.STATE_FILE != cls._DEFAULT_STATE_FILE:
+            return cls.STATE_FILE
+        env_dir = os.environ.get("TOKENSAFE_DATA_DIR")
+        if env_dir:
+            return os.path.join(env_dir, "loop_state.json")
+        return cls.STATE_FILE
 
     @classmethod
     def _get_call_signature(cls, tool_name: str, args: Dict[str, Any]) -> str:
@@ -30,46 +42,62 @@ class LoopDetector:
     def _locked_state(cls):
         """
         Exclusive read-modify-write guard for the shared state file.
-        Hooks for parallel tool calls run as concurrent processes; without the lock
-        their increments overwrote each other and identical calls went undetected.
-        Uses fcntl on POSIX and degrades to lock-free (best effort) elsewhere.
+        Uses fcntl on POSIX and msvcrt on Windows.
         """
-        os.makedirs(os.path.dirname(cls.STATE_FILE), exist_ok=True)
-        lock_path = cls.STATE_FILE + ".lock"
-        handle = open(lock_path, "w")
-        locked = False
+        state_file = cls._state_file()
+        os.makedirs(os.path.dirname(state_file) or ".", exist_ok=True)
+        lock_path = state_file + ".lock"
+        handle = open(lock_path, "a+")
+        locked_posix = False
+        locked_win = False
         try:
             try:
                 import fcntl
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
-                locked = True
+                locked_posix = True
             except ImportError:
-                pass
+                try:
+                    import msvcrt
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
+                    locked_win = True
+                except Exception:
+                    pass
             yield
         finally:
             try:
-                if locked:
+                if locked_posix:
                     import fcntl
                     fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                elif locked_win:
+                    import msvcrt
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
             except Exception:
                 pass
             handle.close()
 
     @classmethod
     def _load_state(cls) -> Dict[str, Any]:
-        if os.path.exists(cls.STATE_FILE):
+        state_file = cls._state_file()
+        if os.path.exists(state_file):
             try:
-                with open(cls.STATE_FILE, "r", encoding="utf-8") as f:
-                    return json.load(f)
+                with open(state_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                return data if isinstance(data, dict) else {}
             except Exception:
                 return {}
         return {}
 
     @classmethod
     def _save_state(cls, state: Dict[str, Any]):
+        state_file = cls._state_file()
         try:
-            with open(cls.STATE_FILE, "w", encoding="utf-8") as f:
+            parent = os.path.dirname(state_file) or "."
+            os.makedirs(parent, exist_ok=True)
+            tmp_path = f"{state_file}.tmp.{os.getpid()}"
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(state, f)
+            os.replace(tmp_path, state_file)
         except Exception:
             pass
 
@@ -87,12 +115,26 @@ class LoopDetector:
         with cls._locked_state():
             state = cls._load_state()
 
-            # Prune stale sessions so the state file cannot grow unboundedly
+            # Prune stale or corrupted sessions so the state file cannot grow unboundedly
             now = time.time()
-            stale = [cid for cid, s in state.items()
-                     if not isinstance(s, dict) or (now - float(s.get("updated", 0))) > cls.SESSION_TTL_SECONDS]
+            stale = []
+            for cid, s in state.items():
+                if not isinstance(s, dict):
+                    stale.append(cid)
+                    continue
+                try:
+                    updated = float(s.get("updated", 0) or 0)
+                except (TypeError, ValueError):
+                    stale.append(cid)
+                    continue
+                if (now - updated) > cls.SESSION_TTL_SECONDS:
+                    stale.append(cid)
             for cid in stale:
                 state.pop(cid, None)
+
+            if len(state) > cls.MAX_SESSIONS:
+                ordered = sorted(state.items(), key=lambda kv: float((kv[1] or {}).get("updated", 0) or 0), reverse=True)
+                state = dict(ordered[: cls.MAX_SESSIONS])
 
             session_state = state.get(conversation_id, {
                 "last_sig": "",
@@ -123,14 +165,11 @@ class LoopDetector:
 
     @classmethod
     def reset_session(cls, conversation_id: str):
-        """Clears state for a conversation."""
-        if os.path.exists(cls.STATE_FILE):
-            try:
-                with open(cls.STATE_FILE, "r", encoding="utf-8") as f:
-                    state = json.load(f)
-                if conversation_id in state:
-                    del state[conversation_id]
-                    with open(cls.STATE_FILE, "w", encoding="utf-8") as f:
-                        json.dump(state, f)
-            except Exception:
-                pass
+        """Clears state for a conversation safely under lock."""
+        if not os.path.exists(cls._state_file()):
+            return
+        with cls._locked_state():
+            state = cls._load_state()
+            if conversation_id in state:
+                del state[conversation_id]
+                cls._save_state(state)

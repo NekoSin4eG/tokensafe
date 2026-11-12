@@ -12,7 +12,7 @@ import queue
 import threading
 import urllib.request
 import urllib.error
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 from typing import Dict, Any, List
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -90,24 +90,36 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
         if not self._validate_origin():
             return
 
-        tracker = MetricsTracker()
-        dashboard = Dashboard(tracker)
-
-        if self.path in ("/", "/dashboard", "/dashboard.html"):
-            html = dashboard.render_html()
-            self.send_response(200)
-            self.send_header("Content-Type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(html.encode("utf-8"))
-
-        elif self.path in ("/metrics", "/api/metrics"):
-            summary = tracker.get_summary()
+        if self.path == "/health":
+            payload_bytes = json.dumps({"status": "active", "proxy": "tokensafe"}).encode("utf-8")
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(payload_bytes)))
             self.end_headers()
-            self.wfile.write(json.dumps(summary, indent=2).encode("utf-8"))
+            self.wfile.write(payload_bytes)
+            return
+
+        if self.path in ("/", "/dashboard", "/dashboard.html"):
+            tracker = MetricsTracker()
+            html_bytes = Dashboard(tracker).render_html().encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(html_bytes)))
+            self.end_headers()
+            self.wfile.write(html_bytes)
+
+        elif self.path in ("/metrics", "/api/metrics"):
+            tracker = MetricsTracker()
+            summary = tracker.get_summary()
+            summary_bytes = json.dumps(summary, indent=2).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(summary_bytes)))
+            self.end_headers()
+            self.wfile.write(summary_bytes)
 
         elif self.path in ("/api/events", "/events"):
+            tracker = MetricsTracker()
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream")
             self.send_header("Cache-Control", "no-cache")
@@ -136,15 +148,13 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                 BROADCASTER.unsubscribe(q)
             return
 
-        elif self.path == "/health":
-            self.send_response(200)
-            self.send_header("Content-Type", "application/json")
-            self.end_headers()
-            self.wfile.write(json.dumps({"status": "active", "proxy": "tokensafe"}).encode("utf-8"))
-
         else:
+            err_bytes = b'{"error": "Not found"}'
             self.send_response(404)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(err_bytes)))
             self.end_headers()
+            self.wfile.write(err_bytes)
 
     def do_POST(self):
         if not self._validate_origin():
@@ -171,15 +181,44 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
         except Exception:
             pass
 
+    def _read_request_body(self) -> bytes:
+        te = str(self.headers.get("Transfer-Encoding", "")).lower()
+        if "chunked" in te:
+            chunks: List[bytes] = []
+            while True:
+                line = self.rfile.readline()
+                if not line:
+                    break
+                size_str = line.split(b";", 1)[0].strip()
+                chunk_size = int(size_str, 16)
+                if chunk_size == 0:
+                    while True:
+                        trailer = self.rfile.readline()
+                        if not trailer or trailer in (b"\r\n", b"\n"):
+                            break
+                    break
+                chunks.append(self.rfile.read(chunk_size))
+                self.rfile.readline()  # trailing CRLF
+            return b"".join(chunks)
+        content_len = max(0, int(self.headers.get("Content-Length", 0)))
+        return self.rfile.read(content_len)
+
+    def _send_json_error(self, status_code: int, message: str):
+        err_bytes = json.dumps({"error": message}).encode("utf-8")
+        self.send_response(status_code)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(err_bytes)))
+        self.end_headers()
+        self.wfile.write(err_bytes)
+
     def handle_chat_completions(self):
         try:
-            content_len = int(self.headers.get("Content-Length", 0))
-            body = self.rfile.read(content_len)
+            body = self._read_request_body()
             payload = json.loads(body.decode("utf-8"))
+            if not isinstance(payload, dict):
+                raise ValueError("JSON body must be an object")
         except Exception as e:
-            self.send_response(400)
-            self.end_headers()
-            self.wfile.write(json.dumps({"error": f"Invalid JSON payload: {e}"}).encode("utf-8"))
+            self._send_json_error(400, f"Invalid JSON payload: {e}")
             return
 
         proxy_tracker = MetricsTracker()
@@ -269,10 +308,6 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
 
         # 6. Prompt Cache Prefix & Tool Normalization (multi-breakpoint + deterministic ordering)
         if not is_quota_exceeded:
-            if "tools" in payload and isinstance(payload["tools"], list):
-                payload["tools"] = PromptCacheNormalizer.normalize_tools(
-                    payload["tools"], provider=provider, inject_cache_control=False
-                )
             if messages:
                 messages, cache_meta = PromptCacheNormalizer.normalize_messages(
                     messages,
@@ -284,16 +319,23 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                     payload["tools"] = cache_meta["normalized_tools"]
                 if provider == "openai" and cache_meta.get("prompt_cache_key"):
                     payload.setdefault("prompt_cache_key", cache_meta["prompt_cache_key"])
+            elif "tools" in payload and isinstance(payload["tools"], list):
+                payload["tools"] = PromptCacheNormalizer.normalize_tools(
+                    payload["tools"], provider=provider, inject_cache_control=False
+                )
 
         headers = {"Content-Type": "application/json"}
-        if auth_header:
+        if provider == "anthropic":
+            x_api_key = self.headers.get("x-api-key", "") if hasattr(self.headers, "get") else ""
+            bearer_key = auth_header[7:].strip() if auth_header.lower().startswith("bearer ") else auth_header.strip()
+            api_key_val = x_api_key or bearer_key or resolved_key
+            if api_key_val:
+                headers["x-api-key"] = api_key_val
+            headers["anthropic-version"] = "2023-06-01"
+        elif auth_header:
             headers["Authorization"] = auth_header
         elif resolved_key:
-            if "anthropic.com" in upstream_url:
-                headers["x-api-key"] = resolved_key
-                headers["anthropic-version"] = "2023-06-01"
-            else:
-                headers["Authorization"] = f"Bearer {resolved_key}"
+            headers["Authorization"] = f"Bearer {resolved_key}"
 
         req = urllib.request.Request(
             upstream_url,
@@ -301,48 +343,71 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             headers=headers
         )
 
+        is_stream = bool(payload.get("stream"))
+        req_timeout = 120.0 if is_stream else 30.0
         try:
-            with urllib.request.urlopen(req, timeout=30.0) as resp:
-                resp_data = resp.read()
+            with urllib.request.urlopen(req, timeout=req_timeout) as resp:
                 self.send_response(resp.status)
                 for k, v in resp.getheaders():
                     if k.lower() in ("content-type", "content-encoding"):
                         self.send_header(k, v)
                 if is_quota_exceeded:
                     self.send_header("X-TokenSafe-Quota", "exceeded")
-                    LicenseManager.should_emit_quota_banner(proxy_tracker, session_id="proxy_session", every_n_turns=5)
-                self.end_headers()
-                self.wfile.write(resp_data)
 
-                try:
-                    resp_json = json.loads(resp_data.decode("utf-8"))
-                    usage = resp_json.get("usage") or {}
-                    cached = (
-                        (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
-                        or usage.get("cache_read_input_tokens")
-                        or usage.get("prompt_cache_hit_tokens")
-                        or 0
-                    )
-                    if cached:
-                        BROADCASTER.publish("cache_stats", {"provider": provider, "cached_tokens": int(cached)})
-                except Exception:
-                    pass
+                if is_stream:
+                    self.send_header("Cache-Control", "no-cache")
+                    self.end_headers()
+                    reader = getattr(resp, "read1", None) or resp.read
+                    while True:
+                        try:
+                            chunk = reader(4096)
+                        except TypeError:
+                            chunk = resp.read()
+                            if chunk:
+                                self.wfile.write(chunk)
+                                self.wfile.flush()
+                            break
+                        if not chunk:
+                            break
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                else:
+                    resp_data = resp.read()
+                    self.send_header("Content-Length", str(len(resp_data)))
+                    self.end_headers()
+                    self.wfile.write(resp_data)
+
+                    try:
+                        resp_json = json.loads(resp_data.decode("utf-8"))
+                        usage = resp_json.get("usage") or {}
+                        cached = (
+                            (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+                            or usage.get("cache_read_input_tokens")
+                            or usage.get("prompt_cache_hit_tokens")
+                            or 0
+                        )
+                        if cached:
+                            BROADCASTER.publish("cache_stats", {"provider": provider, "cached_tokens": int(cached)})
+                    except Exception:
+                        pass
 
                 # Broadcast live telemetry update to SSE dashboard subscribers
                 try:
-                    tracker = MetricsTracker()
-                    summary = tracker.get_summary()
+                    summary = proxy_tracker.get_summary()
                     BROADCASTER.publish("stats_update", summary)
                 except Exception:
                     pass
         except urllib.error.HTTPError as e:
+            with e:
+                err_body = e.read()
+                ctype = e.headers.get("Content-Type", "application/json") if e.headers else "application/json"
             self.send_response(e.code)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(err_body)))
             self.end_headers()
-            self.wfile.write(e.read())
+            self.wfile.write(err_body)
         except Exception as e:
-            self.send_response(502)
-            self.end_headers()
-            self.wfile.write(json.dumps({"error": f"Upstream proxy error: {str(e)}"}).encode("utf-8"))
+            self._send_json_error(502, f"Upstream proxy error: {str(e)}")
 
     @staticmethod
     def _detect_provider(upstream_url: str) -> str:
@@ -396,7 +461,11 @@ def run_proxy(port: int = DEFAULT_PORT, host: str = DEFAULT_HOST):
         hubs_summary = f"initialized ({e})"
 
     server_address = (host, port)
-    httpd = HTTPServer(server_address, TokenSafeProxyHandler)
+    class _TokenSafeThreadingServer(ThreadingHTTPServer):
+        daemon_threads = True
+        allow_reuse_address = True
+
+    httpd = _TokenSafeThreadingServer(server_address, TokenSafeProxyHandler)
     display_host = "localhost" if host in ("0.0.0.0", "", "127.0.0.1") else host
     print(f"\n⚡ TokenSafe Local AI Proxy running on: http://{display_host}:{port} (bound to {host})")
     print(f"   Dashboard: http://{display_host}:{port}/dashboard")

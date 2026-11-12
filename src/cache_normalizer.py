@@ -50,7 +50,10 @@ def _inject_cache_control_on_msg(msg: Dict[str, Any]) -> bool:
         copied = [dict(b) if isinstance(b, dict) else b for b in content_val]
         for block in reversed(copied):
             if isinstance(block, dict):
-                if block.get("type") == "text" and not str(block.get("text", "")).strip():
+                btype = block.get("type")
+                if btype in ("thinking", "redacted_thinking"):
+                    continue
+                if btype == "text" and not str(block.get("text", "")).strip():
                     continue
                 block["cache_control"] = {"type": "ephemeral"}
                 msg["content"] = copied
@@ -58,16 +61,41 @@ def _inject_cache_control_on_msg(msg: Dict[str, Any]) -> bool:
     return False
 
 
+def _count_existing_cache_controls(tools: Optional[List[Any]], messages: List[Dict[str, Any]]) -> int:
+    count = 0
+    if isinstance(tools, list):
+        for t in tools:
+            if isinstance(t, dict) and "cache_control" in t:
+                count += 1
+    for m in messages:
+        c = m.get("content") if isinstance(m, dict) else None
+        if isinstance(c, list):
+            for b in c:
+                if isinstance(b, dict) and "cache_control" in b:
+                    count += 1
+    return count
+
+
 def _message_text(msg: Dict[str, Any]) -> str:
     content = msg.get("content", "")
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        return "\n".join(
-            str(b.get("text", ""))
-            for b in content
-            if isinstance(b, dict) and isinstance(b.get("text"), str)
-        )
+        parts: List[str] = []
+        for b in content:
+            if not isinstance(b, dict):
+                continue
+            if isinstance(b.get("text"), str):
+                parts.append(b["text"])
+            elif b.get("type") == "tool_use" and b.get("input") is not None:
+                parts.append(json.dumps(b["input"], ensure_ascii=False))
+            elif b.get("type") == "tool_result":
+                tc = b.get("content")
+                if isinstance(tc, str):
+                    parts.append(tc)
+                elif tc is not None:
+                    parts.append(json.dumps(tc, ensure_ascii=False))
+        return "\n".join(parts)
     return ""
 
 
@@ -76,7 +104,7 @@ class PromptCacheNormalizer:
 
     VOLATILE_PATTERNS = [
         re.compile(r"The current local time is:.*?(?=\n|$)", re.IGNORECASE),
-        re.compile(r"timestamp=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z?", re.IGNORECASE),
+        re.compile(r"timestamp=\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:[.,]\d+)?(?:Z|[+-]\d{2}:?\d{2})?", re.IGNORECASE),
         re.compile(r"request_id=['\"][a-zA-Z0-9_-]+['\"]", re.IGNORECASE),
         re.compile(r"uuid=['\"][a-f0-9-]{36}['\"]", re.IGNORECASE),
         re.compile(r"turn_count=\d+", re.IGNORECASE),
@@ -184,21 +212,22 @@ class PromptCacheNormalizer:
         cache_eligible = prefix_tokens >= 64
         breakpoints_injected = 0
         supports_cc = provider in ("generic", "anthropic")
+        existing_cc = _count_existing_cache_controls(norm_tools, normalized)
 
         if inject_cache_control and supports_cc:
             # Breakpoint #1: Tools schema tail (for Anthropic when tools are supplied)
             if provider == "anthropic" and norm_tools and len(norm_tools) > 0 and isinstance(norm_tools[-1], dict):
-                if prefix_tokens >= 1024:
+                if prefix_tokens >= 1024 and (existing_cc + breakpoints_injected) < 4 and "cache_control" not in norm_tools[-1]:
                     norm_tools[-1]["cache_control"] = {"type": "ephemeral"}
                     breakpoints_injected += 1
 
             # Breakpoint #2: Static system/developer prefix tail
-            if last_static_idx >= 0 and prefix_tokens >= 1024:
+            if last_static_idx >= 0 and prefix_tokens >= 1024 and (existing_cc + breakpoints_injected) < 4:
                 if _inject_cache_control_on_msg(normalized[last_static_idx]):
                     breakpoints_injected += 1
 
             # Breakpoint #3: Rolling history checkpoint (penultimate turn before new user input)
-            if provider == "anthropic" and len(normalized) >= 3 and breakpoints_injected < 4:
+            if provider == "anthropic" and len(normalized) >= 3 and (existing_cc + breakpoints_injected) < 4:
                 penultimate_idx = len(normalized) - 2
                 if penultimate_idx > last_static_idx:
                     upto_tokens = prefix_tokens + sum(

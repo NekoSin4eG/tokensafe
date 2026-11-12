@@ -284,10 +284,18 @@ def build_dir_tree(dir_path: str, max_depth: int = 2, max_entries: int = 80) -> 
     if not os.path.isdir(dir_path):
         return f"Error: Path is not a directory: {dir_path}"
 
+    dirs_ignore_dots = {
+        ".git", ".hg", ".svn", ".venv", ".cache", ".idea", ".vscode",
+        ".next", ".turbo", ".pytest_cache", ".mypy_cache", ".DS_Store",
+        ".system_generated", ".Trash",
+    }
+    safe_dot_prefixes = (".env.example", ".env.sample", ".env.template")
+
     base_name = os.path.basename(os.path.abspath(dir_path)) or dir_path
     lines = [f"📁 **{base_name}/** (max depth: {max_depth})"]
     entries_count = 0
     start_time = time.monotonic()
+    visited_real_dirs = {os.path.realpath(dir_path)}
 
     def _traverse(curr_dir: str, prefix: str, current_depth: int):
         nonlocal entries_count
@@ -305,14 +313,21 @@ def build_dir_tree(dir_path: str, max_depth: int = 2, max_entries: int = 80) -> 
         dirs = []
         files = []
         for it in items:
-            if it.startswith('.') and it not in SECRET_FILES and it != '.gitignore':
-                continue
             full_p = os.path.join(curr_dir, it)
             if os.path.isdir(full_p):
-                if it in IGNORE_DIRS:
+                if it in IGNORE_DIRS or it in dirs_ignore_dots:
+                    continue
+                if it.startswith('.') and it not in (".github", ".gitlab", ".claude", ".gemini", ".agents", ".cursor", ".vscode-test"):
                     continue
                 dirs.append(it)
             else:
+                if it in SECRET_FILES or it.startswith(".env.") and not it.endswith((".example", ".sample", ".template")):
+                    files.append(it)
+                    continue
+                if any(fnmatch.fnmatch(it, pat) for pat in IGNORE_FILES):
+                    continue
+                if it.startswith('.') and it not in ('.gitignore', '.gitattributes', '.dockerignore', '.editorconfig', '.npmrc', '.nvmrc', '.python-version', '.prettierrc', '.eslintrc', '.eslintrc.json', '.eslintrc.js') and not any(it.startswith(p) for p in safe_dot_prefixes):
+                    continue
                 files.append(it)
 
         all_items = [(d, True) for d in dirs] + [(f, False) for f in files]
@@ -330,14 +345,17 @@ def build_dir_tree(dir_path: str, max_depth: int = 2, max_entries: int = 80) -> 
 
             if is_dir:
                 entries_count += 1
+                real_sub = os.path.realpath(item_path)
+                if real_sub in visited_real_dirs:
+                    lines.append(f"{prefix}{pointer}📁 {name}/ [symlink cycle]")
+                    continue
                 lines.append(f"{prefix}{pointer}📁 {name}/")
+                visited_real_dirs.add(real_sub)
                 _traverse(item_path, prefix + extension_prefix, current_depth + 1)
             else:
-                if name in SECRET_FILES:
+                if name in SECRET_FILES or (name.startswith(".env.") and not name.endswith((".example", ".sample", ".template"))):
                     lines.append(f"{prefix}{pointer}🔒 {name} [PROTECTED SECRET]")
                     entries_count += 1
-                    continue
-                if any(fnmatch.fnmatch(name, pat) for pat in IGNORE_FILES):
                     continue
                 try:
                     sz = os.path.getsize(item_path)
@@ -363,8 +381,11 @@ def _resolve_project_root(args: dict) -> Tuple[Optional[str], Optional[str]]:
         target_abs = os.path.abspath(target)
         if os.path.isfile(target_abs):
             target_abs = os.path.dirname(target_abs)
-        if target_abs not in system_roots and os.path.isdir(target_abs):
-            return target_abs, None
+        if target_abs in system_roots:
+            return None, f"Error: Refusing to scan system root or home directory '{target}'. Please provide a specific project directory."
+        if not os.path.isdir(target_abs):
+            return None, f"Error: project_path not found or not a directory: '{target}'."
+        return target_abs, None
 
     # Check environment variables
     for env_var in ("AGY_PROJECT_PATH", "WORKSPACE_FOLDER", "PROJECT_DIR", "PWD"):
@@ -437,6 +458,30 @@ class _SafeTrackerProxy:
         except Exception:
             return 0
 
+    def get_monthly_saved_tokens(self, *args, **kwargs):
+        try:
+            return self._inner.get_monthly_saved_tokens(*args, **kwargs)
+        except Exception:
+            return 0
+
+    def get_last_event(self, *args, **kwargs):
+        try:
+            return self._inner.get_last_event(*args, **kwargs)
+        except Exception:
+            return None
+
+    def get_summary(self, *args, **kwargs):
+        try:
+            return self._inner.get_summary(*args, **kwargs)
+        except Exception:
+            return {}
+
+    def get_recent_events(self, *args, **kwargs):
+        try:
+            return self._inner.get_recent_events(*args, **kwargs)
+        except Exception:
+            return []
+
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
@@ -504,8 +549,58 @@ def _team_skeleton_prewarm(
         pass
 
 
+def _safe_int(value, default: int, lo: Optional[int] = None, hi: Optional[int] = None) -> int:
+    if value is None or isinstance(value, bool):
+        n = default
+    else:
+        try:
+            n = int(value)
+        except (TypeError, ValueError):
+            n = default
+    if lo is not None:
+        n = max(lo, n)
+    if hi is not None:
+        n = min(hi, n)
+    return n
+
+
+def _is_binary_file(path: str, probe_bytes: int = 4096) -> bool:
+    try:
+        with open(path, "rb") as f:
+            chunk = f.read(probe_bytes)
+        return b"\x00" in chunk
+    except OSError:
+        return False
+
+
+def _read_line_slice(path: str, start_line: Optional[int], end_line: Optional[int]) -> Tuple[Optional[str], Optional[str]]:
+    """Reads 1-based [start_line..end_line] using bounded iteration. Returns (content, err_msg)."""
+    if start_line is not None and start_line < 1:
+        start_line = 1
+    if end_line is not None and end_line < 1:
+        return None, "end_line must be >= 1"
+    if start_line is not None and end_line is not None and start_line > end_line:
+        return None, f"start_line ({start_line}) cannot be greater than end_line ({end_line})"
+
+    s = 1 if start_line is None else start_line
+    selected: List[str] = []
+    total_seen = 0
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        for idx, line in enumerate(f, 1):
+            total_seen = idx
+            if idx < s:
+                continue
+            if end_line is not None and idx > end_line:
+                break
+            selected.append(line)
+    if s > total_seen and total_seen > 0:
+        return None, f"start_line {s} is beyond end of file ({total_seen} lines)"
+    return "".join(selected), None
+
+
 def _resolve_dep_mode(args: dict) -> Tuple[bool, str]:
-    inc_deps = bool(args.get("include_deps", True))
+    raw_inc = args.get("include_deps")
+    inc_deps = True if raw_inc is None else bool(raw_inc)
     if not inc_deps:
         return False, "none"
     raw_mode = str(args.get("dep_mode") or "").strip().lower()
@@ -526,10 +621,12 @@ def handle_tool_call(name: str, args: dict) -> dict:
             symbol = (args.get("symbol") or "").strip()
             _, eff_dep_mode = _resolve_dep_mode(args)
             cache_sym = f"{symbol}@{eff_dep_mode}" if (symbol and eff_dep_mode != "signature") else symbol
-            if text_out and path:
+            is_ranged = args.get("start_line") is not None or args.get("end_line") is not None
+            is_quota_truncated = "[TokenSafe Community 500k limit reached:" in text_out or "// Quota exceeded" in text_out
+            if text_out and path and not is_ranged and not is_quota_truncated:
                 abs_path = os.path.abspath(path)
                 cur_hash = AgentFirewall._file_content_hash(abs_path)
-                if cur_hash and args.get("start_line") is None and args.get("end_line") is None:
+                if cur_hash:
                     _IN_PROCESS_DELIVERED[(abs_path, symbol, eff_dep_mode)] = (cur_hash, _EPOCH_GEN)
                 # Never overwrite cached skeleton with a firewall header or pointer hit
                 if not text_out.startswith("// [TokenSafe Subagent Firewall:"):
@@ -573,37 +670,56 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         # Clamp explicit line ranges to sane bounds so bad indices can never produce
         # empty output or negative-index slicing artifacts.
         try:
-            if start_line is not None:
-                start_line = max(1, int(start_line))
-            if end_line is not None:
+            if start_line is not None and not isinstance(start_line, bool):
+                start_line = int(start_line)
+            elif isinstance(start_line, bool):
+                raise TypeError("start_line cannot be bool")
+            if end_line is not None and not isinstance(end_line, bool):
                 end_line = int(end_line)
+            elif isinstance(end_line, bool):
+                raise TypeError("end_line cannot be bool")
         except (TypeError, ValueError):
             return _fallback_error("smart_read_file", "start_line/end_line must be integers")
+
+        if end_line is not None and end_line < 1:
+            return _fallback_error("smart_read_file", "end_line must be >= 1")
+        if start_line is not None:
+            start_line = max(1, start_line)
 
         if not path or not os.path.exists(path):
             return {"isError": True, "content": [{"type": "text", "text": f"File not found: {path}"}]}
         try:
-            if not stat.S_ISREG(os.stat(path).st_mode):
+            st = os.stat(path)
+            if not stat.S_ISREG(st.st_mode):
                 return _fallback_error("smart_read_file", f"path is not a regular file: {path}")
         except OSError as e:
             return _fallback_error("smart_read_file", f"cannot stat path: {e}")
 
+        if _is_binary_file(path):
+            return _fallback_error("smart_read_file", f"'{os.path.basename(path)}' appears to be a binary file")
+
         # Community 500k quota reached: soft-degrade to bounded raw read (disable Graph/AST/Pointer/Team Cache)
         if is_quota_exceeded:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
-            if start_line is not None and end_line is not None:
-                e_line = min(end_line, len(lines))
-                if start_line > e_line:
-                    return _fallback_error("smart_read_file", f"start_line {start_line} is beyond end of file ({len(lines)} lines)")
-                raw_chunk = "".join(lines[start_line - 1 : e_line])
+            if start_line is not None or end_line is not None:
+                raw_chunk, err = _read_line_slice(path, start_line, end_line)
+                if err:
+                    return _fallback_error("smart_read_file", err)
             else:
-                cap = min(250, len(lines))
-                raw_chunk = "".join(lines[:cap])
-                if len(lines) > cap:
-                    raw_chunk += f"\n// [TokenSafe Community 500k limit reached: showing raw lines 1-{cap} of {len(lines)}. AST/graph slicing & pointer dedup are paused.]\n"
+                cap = 250
+                raw_lines: List[str] = []
+                total_seen = 0
+                with open(path, "r", encoding="utf-8", errors="replace") as f:
+                    for idx, line in enumerate(f, 1):
+                        total_seen = idx
+                        if idx <= cap:
+                            raw_lines.append(line)
+                        elif idx == cap + 1:
+                            pass
+                raw_chunk = "".join(raw_lines)
+                if total_seen > cap:
+                    raw_chunk += f"\n// [TokenSafe Community 500k limit reached: showing raw lines 1-{cap} of {total_seen}. AST/graph slicing & pointer dedup are paused.]\n"
             banner = _quota_banner_if_due(quota, tracker, _mcp_session_id())
-            return {"content": [{"type": "text", "text": banner + raw_chunk}]}
+            return {"content": [{"type": "text", "text": banner + (raw_chunk or "")}]}
 
         abs_path = os.path.abspath(path)
         sym_clean = (symbol or "").strip()
@@ -630,20 +746,15 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             if is_loop:
                 return {"isError": True, "content": [{"type": "text", "text": f"⚠️ {msg}"}]}
 
-        # Only inline extra DependencyPrefetcher stubs when full deps or whole-file mode requested
-        prefetch_block = ""
-        if not sym_clean or eff_dep_mode == "full":
-            prefetch_block, _ = DependencyPrefetcher.prefetch_for_file(path)
-
-        # Check targeted symbol or skeleton
-        if start_line is not None and end_line is not None:
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                lines = f.readlines()
-            end_line = min(end_line, len(lines))
-            if start_line > end_line:
-                return _fallback_error("smart_read_file", f"start_line {start_line} is beyond end of file ({len(lines)} lines)")
-            content = "".join(lines[start_line - 1 : end_line])
-            return {"content": [{"type": "text", "text": (prefetch_block or "") + content}]}
+        # Explicit line range (handles single-bound start_line or end_line as well as both)
+        if start_line is not None or end_line is not None:
+            content, err = _read_line_slice(path, start_line, end_line)
+            if err:
+                return _fallback_error("smart_read_file", err)
+            prefetch_block = ""
+            if not sym_clean or eff_dep_mode == "full":
+                prefetch_block, _ = DependencyPrefetcher.prefetch_for_file(path)
+            return {"content": [{"type": "text", "text": (prefetch_block or "") + (content or "")}]}
 
         if symbol:
             # Team pre-warm hit: a teammate already skeletonized this symbol
@@ -660,6 +771,9 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                     optimized_tokens=skel_t,
                     details={"file": os.path.basename(path), "symbol": symbol, "dep_mode": eff_dep_mode, "source": "team_cache"}
                 )
+                prefetch_block = ""
+                if eff_dep_mode == "full":
+                    prefetch_block, _ = DependencyPrefetcher.prefetch_for_file(path)
                 header = f"// [TokenSafe Team-Cached Skeleton for '{symbol}' | shared by a teammate]\n"
                 return {"content": [{"type": "text", "text": (prefetch_block or "") + header + team_skel}]}
 
@@ -699,30 +813,49 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                         dep_label = "Full body + 1-hop signature deps"
                     header = f"// [TokenSafe Graph-Guided Skeleton for '{symbol}' | {dep_label}]\n"
                     _team_skeleton_prewarm(path, symbol, graph_skel, saved, dep_mode=eff_dep_mode)
+                    prefetch_block = ""
+                    if eff_dep_mode == "full":
+                        prefetch_block, _ = DependencyPrefetcher.prefetch_for_file(path)
                     return {"content": [{"type": "text", "text": (prefetch_block or "") + header + graph_skel}]}
             except Exception:
                 pass
 
             overwrite, metrics = ToolSlicer.optimize_read_file({"Path": path}, context_hint=symbol)
             if overwrite:
-                with open(path, "r", encoding="utf-8", errors="replace") as f:
-                    lines = f.readlines()
                 s_line = overwrite["StartLine"]
                 e_line = overwrite["EndLine"]
-                content = "".join(lines[s_line - 1 : e_line])
+                content, _ = _read_line_slice(path, s_line, e_line)
+                prefetch_block = ""
+                if eff_dep_mode == "full":
+                    prefetch_block, _ = DependencyPrefetcher.prefetch_for_file(path)
                 header = f"// [TOCP Targeted Window: lines {s_line}-{e_line} for '{symbol}']\n"
-                return {"content": [{"type": "text", "text": (prefetch_block or "") + header + content}]}
+                return {"content": [{"type": "text", "text": (prefetch_block or "") + header + (content or "")}]}
 
-        # Check AST skeleton
-        skel_path, orig_t, skel_t = Skeletonizer.get_skeleton_file(path)
+        # Check AST skeleton (preserves target_symbol body when symbol was given; avoids duplicate prefetch)
+        skel_path, orig_t, skel_t = Skeletonizer.get_skeleton_file(path, target_symbol=(symbol or None))
         if skel_path and os.path.exists(skel_path):
             with open(skel_path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
+            if orig_t > skel_t:
+                tracker.record_event(
+                    session_id=_mcp_session_id(),
+                    event_type="AST_SKELETON",
+                    original_tokens=orig_t,
+                    optimized_tokens=skel_t,
+                    details={"target_file": os.path.basename(path), "saved_tokens": orig_t - skel_t}
+                )
             return {"content": [{"type": "text", "text": content}]}
 
-        # Default read
-        with open(path, "r", encoding="utf-8", errors="replace") as f:
-            content = f.read()
+        # Default bounded read (avoid dumping multi-MB files raw)
+        prefetch_block, _ = DependencyPrefetcher.prefetch_for_file(path)
+        max_raw_bytes = 512 * 1024
+        if st.st_size > max_raw_bytes:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read(max_raw_bytes)
+            content += f"\n// [TokenSafe: file truncated at 512KB ({st.st_size:,} bytes total). Use start_line/end_line or symbol to inspect specific sections.]\n"
+        else:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                content = f.read()
         return {"content": [{"type": "text", "text": (prefetch_block or "") + content}]}
 
     elif name == "compress_prompt":
@@ -986,7 +1119,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         if is_quota_exceeded:
             banner = _quota_banner_if_due(quota, tracker, _mcp_session_id())
             return {"content": [{"type": "text", "text": banner + raw_diff}]}
-        max_ctx = int(args.get("max_context", 2))
+        max_ctx = _safe_int(args.get("max_context"), 2, lo=0, hi=50)
         sliced, orig_t, opt_t = DiffSlicer.slice_diff(raw_diff, max_context_lines=max_ctx)
         saved = max(0, orig_t - opt_t)
         if saved > 0:
@@ -1074,12 +1207,14 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
 
         # Resolve path relative to current working directory or absolute
         abs_path = os.path.abspath(path)
+        if not os.path.isdir(abs_path):
+            return _fallback_error("list_dir", f"directory not found: {abs_path}")
         system_roots = {"/", "/Users", "/home", "/root", os.path.expanduser("~")}
-        depth = min(4, max(1, int(args.get("depth", 2))))
+        depth = _safe_int(args.get("depth"), 2, lo=1, hi=4)
         if abs_path in system_roots:
             # Do not walk entire home dir or filesystem root deeply
             depth = 1
-        max_entries = min(150, max(10, int(args.get("max_entries", 80))))
+        max_entries = _safe_int(args.get("max_entries"), 80, lo=10, hi=150)
 
         tree_output = build_dir_tree(abs_path, max_depth=depth, max_entries=max_entries)
         tree_tokens = count_tokens(tree_output)
@@ -1111,7 +1246,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                 return _fallback_error("scoped_search", err or "unspecified project_path")
             target_path = resolved_path
 
-        max_res = args.get("max_results", 25)
+        max_res = _safe_int(args.get("max_results"), 25, lo=1, hi=100)
         c_sens = bool(args.get("case_sensitive", False))
         u_regex = bool(args.get("use_regex", False))
 
@@ -1210,10 +1345,13 @@ def run_mcp_server():
             req = json.loads(line)
         except Exception:
             continue
+        if not isinstance(req, dict):
+            continue
 
         msg_id = req.get("id")
         method = req.get("method")
-        params = req.get("params", {})
+        raw_params = req.get("params")
+        params = raw_params if isinstance(raw_params, dict) else {}
 
         # Notifications (no id, or notifications/*) must never receive JSON-RPC responses
         if msg_id is None or (isinstance(method, str) and method.startswith("notifications/")):
@@ -1223,8 +1361,9 @@ def run_mcp_server():
 
         if method == "initialize":
             try:
-                client_info = (params or {}).get("clientInfo") or {}
-                _set_mcp_client(str(client_info.get("name") or ""))
+                client_info = params.get("clientInfo") or {}
+                if isinstance(client_info, dict):
+                    _set_mcp_client(str(client_info.get("name") or ""))
             except Exception:
                 pass
             try:
@@ -1241,8 +1380,9 @@ def run_mcp_server():
             _TOOLS_LISTED = True
             response["result"] = {"tools": TOOLS}
         elif method == "tools/call":
-            tool_name = params.get("name", "")
-            tool_args = params.get("arguments", {})
+            tool_name = str(params.get("name") or "")
+            raw_tool_args = params.get("arguments")
+            tool_args = raw_tool_args if isinstance(raw_tool_args, dict) else {}
             try:
                 response["result"] = _execute_with_timeout(tool_name, tool_args)
             except Exception as e:

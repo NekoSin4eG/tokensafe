@@ -6,6 +6,7 @@ Provides colorful CLI reports, Markdown exports, and rich modern HTML widgets.
 import sys
 import os
 import json
+import html as html_lib
 from datetime import datetime
 from typing import Dict, Any, List
 
@@ -129,7 +130,8 @@ class Dashboard:
                 ev_type = ev["event_type"]
                 saved = ev["saved_tokens"]
                 pct_ev = ev["reduction_pct"]
-                details = ev.get("details", {})
+                raw_details = ev.get("details")
+                details = raw_details if isinstance(raw_details, dict) else {}
                 detail_desc = details.get("action", "") or details.get("target_file", "") or ""
                 if detail_desc:
                     detail_desc = f"({detail_desc})"
@@ -140,7 +142,7 @@ class Dashboard:
         out.append(f"{DIM}Run `tokensafe html` to view interactive browser dashboard.{RESET}")
 
         if VersionChecker:
-            banner = VersionChecker.get_banner()
+            banner = VersionChecker.get_banner(cache_only=True)
             if banner:
                 out.append(banner)
         else:
@@ -187,7 +189,8 @@ class Dashboard:
         md.append("| :--- | :--- | :--- | :--- | :--- |")
         for ev in recent:
             t_str = ev["timestamp"].split("T")[1][:8] if "T" in ev["timestamp"] else ev["timestamp"]
-            details = ev.get("details", {})
+            raw_details = ev.get("details")
+            details = raw_details if isinstance(raw_details, dict) else {}
             scope = details.get("target_file") or details.get("action") or "General"
             md.append(f"| `{t_str}` | `{ev['event_type']}` | `{scope}` | {ev['original_tokens']} ➔ {ev['optimized_tokens']} | **+{ev['saved_tokens']:,} (-{ev['reduction_pct']}%)** |")
 
@@ -207,7 +210,7 @@ class Dashboard:
 
         breakdown_rows = ""
         for source, data in summary.get("breakdown", {}).items():
-            s_name = EVENT_NAMES.get(source, source)
+            s_name = html_lib.escape(str(EVENT_NAMES.get(source, source)))
             s_pct = round((data['saved'] / total_saved * 100.0), 1) if total_saved > 0 else 0
             breakdown_rows += f"""
             <div class="source-card">
@@ -227,13 +230,15 @@ class Dashboard:
 
         recent_rows = ""
         for ev in recent:
-            t_str = ev["timestamp"].split("T")[1][:8] if "T" in ev["timestamp"] else ev["timestamp"]
-            details = ev.get("details", {})
-            scope = details.get("target_file") or details.get("action") or ev["event_type"]
+            t_str = html_lib.escape(str(ev["timestamp"].split("T")[1][:8] if "T" in ev["timestamp"] else ev["timestamp"]))
+            raw_details = ev.get("details")
+            details = raw_details if isinstance(raw_details, dict) else {}
+            scope = html_lib.escape(str(details.get("target_file") or details.get("action") or ev["event_type"]))
+            ev_type_esc = html_lib.escape(str(ev['event_type']))
             recent_rows += f"""
             <tr>
               <td><span class="badge time">{t_str}</span></td>
-              <td><span class="badge type">{ev['event_type']}</span></td>
+              <td><span class="badge type">{ev_type_esc}</span></td>
               <td class="scope-cell">{scope}</td>
               <td class="tokens-cell">{ev['original_tokens']:,} ➔ {ev['optimized_tokens']:,}</td>
               <td class="saved-cell">+{ev['saved_tokens']:,} (-{ev['reduction_pct']}%)</td>
@@ -254,12 +259,14 @@ class Dashboard:
     </div>
             """
         else:
+            email_esc = html_lib.escape(str(payload.get('email', '')))
+            tier_esc = html_lib.escape(str(tier.upper()))
             banner_html = f"""
     <div style="background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 12px; padding: 14px 18px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
       <div>
-        <strong style="color: #10b981;">⚡ License Active:</strong> TokenSafe {tier.upper()} Plan (Unlimited Tokens).
+        <strong style="color: #10b981;">⚡ License Active:</strong> TokenSafe {tier_esc} Plan (Unlimited Tokens).
       </div>
-      <span style="color: #9ca3af; font-size: 12px;">{payload.get('email', '')}</span>
+      <span style="color: #9ca3af; font-size: 12px;">{email_esc}</span>
     </div>
             """
 

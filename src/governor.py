@@ -39,40 +39,85 @@ class ContextGovernor:
                 total += count_tokens(c)
             elif isinstance(c, list):
                 for item in c:
-                    if isinstance(item, dict) and "text" in item:
+                    if not isinstance(item, dict):
+                        continue
+                    if isinstance(item.get("text"), str):
                         total += count_tokens(item["text"])
+                    elif item.get("type") == "tool_use" and item.get("input") is not None:
+                        total += count_tokens(json.dumps(item["input"], ensure_ascii=False))
+                    elif item.get("type") == "tool_result":
+                        tc = item.get("content")
+                        if isinstance(tc, str):
+                            total += count_tokens(tc)
+                        elif tc is not None:
+                            total += count_tokens(json.dumps(tc, ensure_ascii=False))
+            tcalls = m.get("tool_calls")
+            if tcalls:
+                total += count_tokens(json.dumps(tcalls, ensure_ascii=False))
         return total
+
+    _LANG_EXT_MAP = {
+        "py": ".py", "python": ".py",
+        "ts": ".ts", "typescript": ".ts",
+        "js": ".js", "javascript": ".js",
+        "tsx": ".tsx", "jsx": ".jsx",
+        "go": ".go", "golang": ".go",
+        "java": ".java",
+        "rs": ".rs", "rust": ".rs",
+        "c": ".c", "cpp": ".cpp", "c++": ".cpp",
+        "cs": ".cs", "csharp": ".cs",
+        "kt": ".kt", "kotlin": ".kt",
+        "swift": ".swift", "php": ".php", "rb": ".rb", "ruby": ".rb",
+        "css": ".css", "scss": ".scss",
+    }
 
     @classmethod
     def _fold_code_blocks_in_message(cls, msg: Dict[str, Any]) -> bool:
-        content = msg.get("content")
-        if not isinstance(content, str) or "```" not in content:
-            return False
-
-        def fold_match(match):
-            lang = (match.group(1) or "py").lower()
-            code_text = match.group(2)
-            lines = code_text.splitlines()
-            if len(lines) < 25:
+        def _fold_text(text: str) -> str:
+            def fold_match(match):
+                lang = (match.group(1) or "py").lower().strip()
+                ext = cls._LANG_EXT_MAP.get(lang)
+                if not ext:
+                    return match.group(0)
+                code_text = match.group(2)
+                lines = code_text.splitlines()
+                if len(lines) < 25:
+                    return match.group(0)
+                skel = Skeletonizer.skeletonize_code(code_text, ext)
+                if count_tokens(skel) < count_tokens(code_text) - 50:
+                    return f"```{lang}\n// [Context Governor: AST-folded {len(lines)} lines]\n{skel}\n```"
                 return match.group(0)
+            return cls.CODE_BLOCK_REGEX.sub(fold_match, text)
 
-            ext = f".{lang}" if not lang.startswith(".") else lang
-            if ext not in (".py", ".ts", ".js", ".tsx", ".jsx", ".go", ".java", ".rs", ".c", ".cpp"):
-                ext = ".py"
-
-            skel = Skeletonizer.skeletonize_code(code_text, ext)
-            if count_tokens(skel) < count_tokens(code_text) - 50:
-                return f"```{lang}\n// [Context Governor: AST-folded {len(lines)} lines]\n{skel}\n```"
-            return match.group(0)
-
-        new_content = cls.CODE_BLOCK_REGEX.sub(fold_match, content)
-        if new_content != content:
-            msg["content"] = new_content
-            return True
+        content = msg.get("content")
+        if isinstance(content, str) and "```" in content:
+            new_content = _fold_text(content)
+            if new_content != content:
+                msg["content"] = new_content
+                return True
+        elif isinstance(content, list):
+            changed = False
+            for blk in content:
+                if isinstance(blk, dict) and blk.get("type") == "text" and isinstance(blk.get("text"), str) and "```" in blk["text"]:
+                    new_t = _fold_text(blk["text"])
+                    if new_t != blk["text"]:
+                        blk["text"] = new_t
+                        changed = True
+            return changed
         return False
 
     @staticmethod
+    def _starts_with_tool_result(msg: Dict[str, Any]) -> bool:
+        if msg.get("role") == "tool":
+            return True
+        c = msg.get("content")
+        if isinstance(c, list):
+            return any(isinstance(b, dict) and b.get("type") == "tool_result" for b in c)
+        return False
+
+    @classmethod
     def _consolidate_middle_turns(
+        cls,
         governed_messages: List[Dict[str, Any]],
         label: str = "Context Governor Ledger",
     ) -> List[Dict[str, Any]]:
@@ -81,8 +126,15 @@ class ContextGovernor:
             if governed_messages[0].get("role") in ("system", "developer")
             else None
         )
-        recent_turns = governed_messages[-3:]
-        middle_turns = governed_messages[1:-3] if sys_msg else governed_messages[:-3]
+        start_idx = max(1 if sys_msg else 0, len(governed_messages) - 3)
+        # Never cut inside a tool_use -> tool_result boundary
+        while start_idx > (1 if sys_msg else 0) and cls._starts_with_tool_result(governed_messages[start_idx]):
+            start_idx -= 1
+
+        recent_turns = governed_messages[start_idx:]
+        middle_turns = governed_messages[(1 if sys_msg else 0):start_idx]
+        if not middle_turns:
+            return governed_messages
 
         middle_user_intents = []
         for m in middle_turns:
@@ -176,6 +228,7 @@ class ContextGovernor:
                 actions_taken.append("ast_fold_code_blocks")
 
             if current_tokens > target_budget:
+                compacted_any = False
                 for idx in range(len(governed_messages) - 1):
                     msg = governed_messages[idx]
                     if msg.get("role") == "user" and isinstance(msg.get("content"), str):
@@ -184,8 +237,9 @@ class ContextGovernor:
                             comp = PromptCompactor.compact(raw_user, enable_deepseek=False)
                             if comp["saved_tokens"] >= 5:
                                 msg["content"] = f"[TOCP Intent]: {comp['compact_text']}"
+                                compacted_any = True
                 current_tokens = cls._calculate_total_tokens(governed_messages)
-                if "ast_fold_code_blocks" not in actions_taken or current_tokens < initial_tokens:
+                if compacted_any:
                     actions_taken.append("compact_user_history")
 
             if current_tokens > target_budget and len(governed_messages) > 6:
@@ -298,9 +352,12 @@ class ContextBudget:
                 )
                 for row in cursor.fetchall():
                     ev_type = row["event_type"]
+                    instrumented_events += int(row["cnt"] or 0)
+                    # Snapshot events (CONTEXT_GOVERNOR / EPOCH_ROLLOVER) reflect whole-context size, not additive intake.
+                    if ev_type in ("CONTEXT_GOVERNOR", "EPOCH_ROLLOVER"):
+                        continue
                     bucket = cls.CATEGORY_MAP.get(ev_type, "other")
                     breakdown[bucket] += int(row["received"] or 0)
-                    instrumented_events += int(row["cnt"] or 0)
         except Exception:
             pass
 

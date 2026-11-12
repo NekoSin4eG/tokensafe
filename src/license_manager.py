@@ -351,8 +351,10 @@ class LicenseManager:
             try:
                 if target_dir:
                     os.makedirs(target_dir, exist_ok=True)
-                with open(target_file, "w", encoding="utf-8") as f:
+                tmp_path = f"{target_file}.tmp.{os.getpid()}"
+                with open(tmp_path, "w", encoding="utf-8") as f:
                     json.dump(record, f, indent=2)
+                os.replace(tmp_path, target_file)
             except Exception:
                 pass
 
@@ -436,6 +438,7 @@ class LicenseManager:
         if tracker is not None and hasattr(tracker, "_get_connection"):
             try:
                 with tracker._get_connection() as conn:
+                    conn.execute("BEGIN IMMEDIATE;")
                     conn.execute("""
                         CREATE TABLE IF NOT EXISTS quota_banner_state (
                             session_id TEXT PRIMARY KEY,
@@ -443,18 +446,18 @@ class LicenseManager:
                             updated_at INTEGER NOT NULL
                         )
                     """)
+                    conn.execute("""
+                        INSERT INTO quota_banner_state (session_id, turns, updated_at)
+                        VALUES (?, 1, ?)
+                        ON CONFLICT(session_id) DO UPDATE SET
+                            turns = quota_banner_state.turns + 1,
+                            updated_at = excluded.updated_at
+                    """, (sid, int(time.time())))
                     row = conn.execute(
                         "SELECT turns FROM quota_banner_state WHERE session_id = ?",
                         (sid,),
                     ).fetchone()
-                    turn_no = (int(row["turns"]) if row else 0) + 1
-                    conn.execute("""
-                        INSERT INTO quota_banner_state (session_id, turns, updated_at)
-                        VALUES (?, ?, ?)
-                        ON CONFLICT(session_id) DO UPDATE SET
-                            turns = excluded.turns,
-                            updated_at = excluded.updated_at
-                    """, (sid, turn_no, int(time.time())))
+                    turn_no = int(row["turns"]) if row else 1
                 return turn_no == 1 or (turn_no % n == 0)
             except Exception:
                 pass

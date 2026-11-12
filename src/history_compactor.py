@@ -11,14 +11,18 @@ from src.tokenizer import count_tokens
 
 
 def _extract_step_text(step: dict) -> str:
-    """Step text in any supported transcript format. Antigravity writes a
-    top-level `content` string; Claude Code writes `message.content` as a
-    string or a list of typed blocks (text / thinking)."""
+    """Step text in any supported transcript format (Antigravity string/list, Claude Code text/thinking/tool_result)."""
     if not isinstance(step, dict):
         return ""
     content = step.get("content")
     if isinstance(content, str) and content:
         return content
+    if isinstance(content, list):
+        return " ".join(
+            str(b.get("text") or b.get("thinking") or "")
+            for b in content
+            if isinstance(b, dict)
+        ).strip()
     message = step.get("message")
     if not isinstance(message, dict):
         return ""
@@ -26,20 +30,38 @@ def _extract_step_text(step: dict) -> str:
     if isinstance(mc, str) and mc:
         return mc
     if isinstance(mc, list):
-        parts = []
+        parts: List[str] = []
         for block in mc:
-            if isinstance(block, dict) and block.get("type") in ("text", "thinking"):
-                text = block.get("text")
-                if isinstance(text, str) and text:
-                    parts.append(text)
+            if not isinstance(block, dict):
+                continue
+            btype = block.get("type")
+            if btype == "text":
+                t = block.get("text")
+                if isinstance(t, str) and t:
+                    parts.append(t)
+            elif btype == "thinking":
+                t = block.get("thinking") or block.get("text")
+                if isinstance(t, str) and t:
+                    parts.append(t)
+            elif btype == "tool_result":
+                tc = block.get("content")
+                if isinstance(tc, str) and tc:
+                    parts.append(tc)
+                elif isinstance(tc, list):
+                    for sub in tc:
+                        if isinstance(sub, dict) and isinstance(sub.get("text"), str):
+                            parts.append(sub["text"])
         return " ".join(parts)
     return ""
 
 
-_READ_TOOLS = {"read_file", "view_file", "Read"}
-_EDIT_TOOLS = {"edit_file", "write_file", "Edit", "Write", "NotebookEdit"}
-_COMMAND_TOOLS = {"run_command", "Bash"}
-_PATH_KEYS = ("Path", "path", "FilePath", "file_path", "notebook_path")
+_READ_TOOLS = {
+    "read_file", "view_file", "Read", "smart_read_file",
+    "scoped_search", "list_dir", "get_architecture_graph", "get_api_surface",
+}
+_EDIT_TOOLS = {"edit_file", "write_file", "Edit", "Write", "MultiEdit", "NotebookEdit", "replace_file_content"}
+_COMMAND_TOOLS = {"run_command", "Bash", "sanitize_command"}
+_PATH_KEYS = ("Path", "path", "FilePath", "file_path", "notebook_path", "project_path")
 _COMMAND_KEYS = ("CommandLine", "command")
 
 
@@ -54,22 +76,24 @@ def _arg_value(args: dict, keys) -> str:
 
 
 def _extract_step_tool_calls(step: dict) -> List[Tuple[str, dict]]:
-    """Tool calls in any supported transcript format: Antigravity
-    `tool_calls: [{name, args}]` or Claude Code `message.content` blocks of
-    type `tool_use` with `name` / `input`. Returns (name, args) pairs."""
+    """Tool calls in any supported transcript format."""
     calls: List[Tuple[str, dict]] = []
     if not isinstance(step, dict):
         return calls
-    for tc in step.get("tool_calls") or []:
-        if isinstance(tc, dict):
-            calls.append((str(tc.get("name", "")), tc.get("args") or {}))
+    tc_list = step.get("tool_calls")
+    if isinstance(tc_list, list):
+        for tc in tc_list:
+            if isinstance(tc, dict):
+                args = tc.get("args")
+                calls.append((str(tc.get("name", "")), args if isinstance(args, dict) else {}))
     message = step.get("message")
     if isinstance(message, dict):
         mc = message.get("content")
         if isinstance(mc, list):
             for block in mc:
                 if isinstance(block, dict) and block.get("type") == "tool_use":
-                    calls.append((str(block.get("name", "")), block.get("input") or {}))
+                    inp = block.get("input")
+                    calls.append((str(block.get("name", "")), inp if isinstance(inp, dict) else {}))
     return calls
 
 class HistoryCompactor:
@@ -129,13 +153,19 @@ class HistoryCompactor:
         read_files = set()
         edited_files = set()
         executed_commands = []
-        raw_text_accum = []
+        key_turns: List[str] = []
+        orig_tokens = 0
 
         for step in steps:
-            # Accumulate content for token counting (any supported format)
+            if not isinstance(step, dict):
+                continue
             text = _extract_step_text(step)
             if text:
-                raw_text_accum.append(text)
+                orig_tokens += count_tokens(text)
+                if len(key_turns) < 5:
+                    first_ln = text.splitlines()[0].strip()
+                    if len(first_ln) > 8:
+                        key_turns.append(first_ln[:100])
 
             # Inspect tool calls (Antigravity tool_calls / Claude Code tool_use)
             for name, args in _extract_step_tool_calls(step):
@@ -150,13 +180,9 @@ class HistoryCompactor:
                 elif name in _COMMAND_TOOLS:
                     cmd = _arg_value(args, _COMMAND_KEYS)
                     if cmd:
-                        # Keep short representation
                         clean_cmd = cmd.split()[0] if cmd.split() else cmd
                         if clean_cmd not in executed_commands:
                             executed_commands.append(clean_cmd)
-
-        raw_history_str = " ".join(raw_text_accum)
-        orig_tokens = count_tokens(raw_history_str)
 
         # Only fold if history has accumulated significant mass (> 1,000 tokens)
         if orig_tokens < 1000:
@@ -170,6 +196,11 @@ class HistoryCompactor:
             ledger_lines.append(f"• Modified: {', '.join(sorted(edited_files))}")
         if executed_commands:
             ledger_lines.append(f"• Executed: {', '.join(executed_commands[:5])}")
+        if not (read_files or edited_files or executed_commands):
+            if not key_turns:
+                return None, 0, 0, {}
+            for snippet in key_turns[:3]:
+                ledger_lines.append(f"• Context: {snippet}")
 
         consolidated_text = "\n".join(ledger_lines)
         folded_tokens = count_tokens(consolidated_text)

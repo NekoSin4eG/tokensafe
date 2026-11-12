@@ -1,7 +1,19 @@
 const vscode = require('vscode');
-const { exec } = require('child_process');
+const { execFile } = require('child_process');
 const path = require('path');
 const fs = require('fs');
+const os = require('os');
+
+function resolveDashboardHtml(projectRoot) {
+    const candidates = [
+        path.join(os.homedir(), ".tokensafe", "data", "dashboard.html"),
+        path.join(projectRoot, "data", "dashboard.html"),
+    ];
+    for (const p of candidates) {
+        if (fs.existsSync(p)) return p;
+    }
+    return candidates[0];
+}
 
 function activate(context) {
     const statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
@@ -14,11 +26,10 @@ function activate(context) {
     const projectRoot = path.dirname(path.dirname(__dirname));
     const candidateTokensafe = path.join(projectRoot, "bin", "tokensafe");
     const cliPath = fs.existsSync(candidateTokensafe) ? candidateTokensafe : path.join(projectRoot, "bin", "agy-tokens");
-    const dashboardHtml = path.join(projectRoot, "data", "dashboard.html");
 
     const disposableStats = vscode.commands.registerCommand('tokensafe.showStats', () => {
         if (fs.existsSync(cliPath)) {
-            exec(`python3 "${cliPath}" stats`, (error, stdout) => {
+            execFile('python3', [cliPath, 'stats'], (error, stdout) => {
                 if (stdout) {
                     vscode.window.showInformationMessage(`TokenSafe Savings:\n${stdout.split('\n').slice(0, 5).join('\n')}`);
                 } else {
@@ -31,14 +42,16 @@ function activate(context) {
     });
 
     const disposableDash = vscode.commands.registerCommand('tokensafe.openDashboard', () => {
-        if (fs.existsSync(dashboardHtml)) {
-            vscode.env.openExternal(vscode.Uri.file(dashboardHtml));
+        const existingHtml = resolveDashboardHtml(projectRoot);
+        if (fs.existsSync(existingHtml)) {
+            vscode.env.openExternal(vscode.Uri.file(existingHtml));
         } else {
             vscode.window.showInformationMessage("Generating TokenSafe dashboard...");
             if (fs.existsSync(cliPath)) {
-                exec(`python3 "${cliPath}" html`, () => {
-                    if (fs.existsSync(dashboardHtml)) {
-                        vscode.env.openExternal(vscode.Uri.file(dashboardHtml));
+                execFile('python3', [cliPath, 'html'], () => {
+                    const generatedHtml = resolveDashboardHtml(projectRoot);
+                    if (fs.existsSync(generatedHtml)) {
+                        vscode.env.openExternal(vscode.Uri.file(generatedHtml));
                     }
                 });
             }

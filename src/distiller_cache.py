@@ -24,6 +24,15 @@ _COMBINED_SLOT_RE = re.compile(
 _UNRESOLVED_SLOT_RE = re.compile(r"<(?:FILE|SYM)_\d+>")
 
 
+_BRAND_PROPER_NOUNS = {
+    "github", "gitlab", "bitbucket", "deepseek", "openai", "anthropic",
+    "typescript", "javascript", "postgresql", "postgres", "mongodb",
+    "macos", "iphone", "ipad", "next.js", "node.js", "nuxt.js", "vue.js",
+    "cloudflare", "fastapi", "pytorch", "tensorflow", "graphql", "tailwind",
+    "oauth", "oauth2", "jwt", "tokensafe", "antigravity",
+}
+
+
 class DistillationCache:
     """Thread-safe two-tier cache (In-Memory LRU + Persistent SQLite) with parametric slot templates."""
 
@@ -31,6 +40,7 @@ class DistillationCache:
     _memory_cache: OrderedDict = OrderedDict()
     _template_memory_cache: OrderedDict = OrderedDict()
     _MAX_MEMORY_ENTRIES = 1000
+    _MAX_SQLITE_ENTRIES = 5000
     _db_path: Optional[str] = None
     _initialized_dbs: set = set()
     _hits: int = 0
@@ -60,6 +70,8 @@ class DistillationCache:
             nonlocal file_idx, sym_idx
             file_val = m.group("file")
             if file_val:
+                if file_val.lower() in _BRAND_PROPER_NOUNS:
+                    return file_val
                 if file_val not in val_to_slot:
                     slot = f"<FILE_{file_idx}>"
                     file_idx += 1
@@ -68,6 +80,9 @@ class DistillationCache:
                 return val_to_slot[file_val]
             sym_val = m.group("bt_sym") or m.group("sym")
             if sym_val:
+                # Only ignore proper nouns when NOT explicitly backticked
+                if not m.group("bt_sym") and sym_val.lower() in _BRAND_PROPER_NOUNS:
+                    return sym_val
                 if sym_val not in val_to_slot:
                     slot = f"<SYM_{sym_idx}>"
                     sym_idx += 1
@@ -77,33 +92,32 @@ class DistillationCache:
             return m.group(0)
 
         templated = _COMBINED_SLOT_RE.sub(repl_any, norm)
-        # Lowercase surrounding natural language while keeping uppercase slot tokens intact
         parts = re.split(r"(<(?:FILE|SYM)_\d+>)", templated)
         normalized_tmpl = "".join(p if _UNRESOLVED_SLOT_RE.fullmatch(p) else p.lower() for p in parts)
         return normalized_tmpl, slots
 
     @classmethod
     def _to_template_sexpr(cls, distilled_text: str, slots: Dict[str, str]) -> Optional[str]:
-        """Replaces extracted slot values in distilled S-Expression with placeholders."""
+        """Replaces extracted slot values in distilled S-Expression with placeholders using word boundaries."""
         if not slots:
             return None
         tmpl = distilled_text.strip()
-        # Sort longest values first to avoid partial substring clashes
-        replaced_any = False
+        replaced_count = 0
         for slot, val in sorted(slots.items(), key=lambda kv: len(kv[1]), reverse=True):
-            if val in tmpl:
-                tmpl = tmpl.replace(val, slot)
-                replaced_any = True
-        return tmpl if replaced_any else None
+            pat = re.compile(rf"(?<![A-Za-z0-9_]){re.escape(val)}(?![A-Za-z0-9_])")
+            tmpl_next, n_sub = pat.subn(slot, tmpl)
+            if n_sub > 0:
+                tmpl = tmpl_next
+                replaced_count += 1
+        # Require all extracted slots to be bound in template_sexpr so omitted slots never collide
+        return tmpl if replaced_count == len(slots) else None
 
     @classmethod
     def _instantiate_template(cls, template_sexpr: str, slots: Dict[str, str]) -> Optional[str]:
-        """Substitutes current prompt's slots back into a cached template S-Expression."""
+        """Substitutes current prompt's slots back into a cached template S-Expression in a single pass."""
         if not template_sexpr:
             return None
-        out = template_sexpr
-        for slot, val in slots.items():
-            out = out.replace(slot, val)
+        out = _UNRESOLVED_SLOT_RE.sub(lambda m: slots.get(m.group(0), m.group(0)), template_sexpr)
         if _UNRESOLVED_SLOT_RE.search(out):
             return None
         return out
@@ -112,40 +126,39 @@ class DistillationCache:
     def _get_db_path(cls) -> str:
         if cls._db_path:
             return cls._db_path
-
         data_dir = resolve_data_dir()
         os.makedirs(data_dir, exist_ok=True)
-        cls._db_path = os.path.join(data_dir, "metrics.db")
-        return cls._db_path
+        return os.path.join(data_dir, "metrics.db")
 
     @classmethod
     def _init_db(cls, conn: sqlite3.Connection):
         db_path = cls._get_db_path()
-        if db_path in cls._initialized_dbs:
-            return
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS distillation_cache (
-                prompt_hash TEXT PRIMARY KEY,
-                prompt_text TEXT,
-                distilled_text TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                hit_count INTEGER DEFAULT 0
-            );
-        """)
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_distill_hash ON distillation_cache(prompt_hash);")
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS distillation_templates (
-                template_hash TEXT PRIMARY KEY,
-                template_prompt TEXT,
-                template_sexpr TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                hit_count INTEGER DEFAULT 0
-            );
-        """)
-        conn.commit()
-        cls._initialized_dbs.add(db_path)
+        with cls._lock:
+            if db_path in cls._initialized_dbs and os.path.exists(db_path):
+                return
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS distillation_cache (
+                    prompt_hash TEXT PRIMARY KEY,
+                    prompt_text TEXT,
+                    distilled_text TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    hit_count INTEGER DEFAULT 0
+                );
+            """)
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_distill_hash ON distillation_cache(prompt_hash);")
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS distillation_templates (
+                    template_hash TEXT PRIMARY KEY,
+                    template_prompt TEXT,
+                    template_sexpr TEXT NOT NULL,
+                    provider TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    hit_count INTEGER DEFAULT 0
+                );
+            """)
+            conn.commit()
+            cls._initialized_dbs.add(db_path)
 
     @classmethod
     def get(cls, prompt_text: str) -> Optional[str]:
@@ -211,7 +224,7 @@ class DistillationCache:
             if tmpl_sexpr:
                 instantiated = cls._instantiate_template(tmpl_sexpr, slots)
                 if instantiated:
-                    cls.set(prompt_text, instantiated, provider="template_cache", sync_remote=False)
+                    cls.set(prompt_text, instantiated, provider="template_cache", sync_remote=False, store_template=False)
                     with cls._lock:
                         cls._hits += 1
                     return instantiated
@@ -239,7 +252,7 @@ class DistillationCache:
                             cls._template_memory_cache[tmpl_hash] = tmpl_sexpr_db
                             if len(cls._template_memory_cache) > cls._MAX_MEMORY_ENTRIES:
                                 cls._template_memory_cache.popitem(last=False)
-                        cls.set(prompt_text, instantiated, provider="template_cache", sync_remote=False)
+                        cls.set(prompt_text, instantiated, provider="template_cache", sync_remote=False, store_template=False)
                         with cls._lock:
                             cls._hits += 1
                         return instantiated
@@ -277,7 +290,14 @@ class DistillationCache:
         return None
 
     @classmethod
-    def set(cls, prompt_text: str, distilled_text: str, provider: str = "deepseek", sync_remote: bool = True) -> None:
+    def set(
+        cls,
+        prompt_text: str,
+        distilled_text: str,
+        provider: str = "deepseek",
+        sync_remote: bool = True,
+        store_template: bool = True,
+    ) -> None:
         """Stores a distillation result and parametric template into memory, SQLite, and Team Cache."""
         if not prompt_text or not distilled_text or not distilled_text.strip():
             return
@@ -287,16 +307,23 @@ class DistillationCache:
         clean_distilled = distilled_text.strip()
         now_iso = datetime.now().isoformat()
 
-        tmpl_prompt, slots = cls._extract_template(prompt_text)
-        tmpl_sexpr = cls._to_template_sexpr(clean_distilled, slots) if slots else None
-        tmpl_hash = hashlib.sha256(tmpl_prompt.encode("utf-8")).hexdigest() if tmpl_sexpr else ""
+        tmpl_prompt = ""
+        slots: Dict[str, str] = {}
+        tmpl_sexpr: Optional[str] = None
+        tmpl_hash = ""
+        if store_template:
+            tmpl_prompt, slots = cls._extract_template(prompt_text)
+            tmpl_sexpr = cls._to_template_sexpr(clean_distilled, slots) if slots else None
+            tmpl_hash = hashlib.sha256(tmpl_prompt.encode("utf-8")).hexdigest() if tmpl_sexpr else ""
 
         with cls._lock:
             cls._memory_cache[h] = clean_distilled
+            cls._memory_cache.move_to_end(h)
             if len(cls._memory_cache) > cls._MAX_MEMORY_ENTRIES:
                 cls._memory_cache.popitem(last=False)
             if tmpl_hash and tmpl_sexpr:
                 cls._template_memory_cache[tmpl_hash] = tmpl_sexpr
+                cls._template_memory_cache.move_to_end(tmpl_hash)
                 if len(cls._template_memory_cache) > cls._MAX_MEMORY_ENTRIES:
                     cls._template_memory_cache.popitem(last=False)
 
@@ -313,7 +340,7 @@ class DistillationCache:
                     distilled_text = excluded.distilled_text,
                     provider = excluded.provider
             """, (h, norm_prompt[:500], clean_distilled, provider, now_iso))
-            if tmpl_hash and tmpl_sexpr:
+            if store_template and tmpl_hash and tmpl_sexpr:
                 cursor.execute("""
                     INSERT INTO distillation_templates (template_hash, template_prompt, template_sexpr, provider, created_at, hit_count)
                     VALUES (?, ?, ?, ?, ?, 0)

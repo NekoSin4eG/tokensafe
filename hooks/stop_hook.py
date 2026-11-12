@@ -18,9 +18,10 @@ import sys
 import os
 import json
 
-HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
+HOOK_DIR = os.path.dirname(os.path.realpath(__file__))
 PROJECT_ROOT = os.path.dirname(HOOK_DIR)
-sys.path.insert(0, PROJECT_ROOT)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 BUDGET_NUDGE_EVENT = "STOP_BUDGET_NUDGE"
 
@@ -38,12 +39,14 @@ def main():
             print(json.dumps({}))
             return
         payload = json.loads(raw_input)
+        if not isinstance(payload, dict):
+            payload = {}
     except Exception:
         print(json.dumps({}))
         return
 
-    conversation_id = payload.get("conversationId", "default_session")
-    termination_reason = payload.get("terminationReason", "")
+    conversation_id = str(payload.get("conversationId") or "default_session")
+    termination_reason = str(payload.get("terminationReason") or "")
     fully_idle = bool(payload.get("fullyIdle", False))
 
     response = {}

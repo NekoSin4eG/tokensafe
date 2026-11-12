@@ -6,6 +6,7 @@ Zero external runtime dependencies (standard library urllib + hashlib).
 
 import os
 import json
+import time
 import hashlib
 import threading
 import urllib.request
@@ -18,6 +19,8 @@ class TeamCache:
     """Distributed cross-developer cache client for TokenSafe Team tier."""
 
     DEFAULT_TIMEOUT = float(os.environ.get("TOKENSAFE_CACHE_TIMEOUT", "1.2"))  # Fast 1.2s timeout to prevent blocking agent turns
+    FAILURE_COOLDOWN_SECONDS = 120.0
+    _cooldown_until: float = 0.0
 
     @classmethod
     def _get_cloud_url(cls) -> str:
@@ -31,7 +34,7 @@ class TeamCache:
             return False, ""
 
         valid, payload, _ = LicenseManager.validate_license(key)
-        if valid and payload.get("tier") == "team":
+        if valid and payload.get("tier") in ("team", "enterprise"):
             return True, key
         return False, ""
 
@@ -45,8 +48,10 @@ class TeamCache:
     def get(cls, cache_type: str, key_text: str) -> Optional[str]:
         """
         Queries Shared Team Cache for compiled S-Expression or AST Skeleton.
-        Returns cached value string or None if miss/disabled/timed out.
+        Returns cached value string or None if miss/disabled/timed out/in cooldown.
         """
+        if time.monotonic() < cls._cooldown_until:
+            return None
         is_team, lic_key = cls._is_team_tier()
         if not is_team or not key_text:
             return None
@@ -68,9 +73,11 @@ class TeamCache:
                     data = json.loads(resp.read().decode("utf-8"))
                     val = data.get("value") or data.get("cached_value")
                     if data.get("hit") and val:
+                        cls._cooldown_until = 0.0
                         return val
         except Exception:
-            # Graceful network degradation: fall back to local computation without error
+            # Circuit-break offline/unreachable cloud calls for 120s so misses don't stall repeated prompts
+            cls._cooldown_until = time.monotonic() + cls.FAILURE_COOLDOWN_SECONDS
             return None
 
         return None

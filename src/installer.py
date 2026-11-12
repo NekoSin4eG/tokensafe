@@ -29,9 +29,18 @@ YELLOW = "\033[33m"
 RED = "\033[31m"
 
 HOME = os.path.expanduser("~")
-PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 MCP_SERVER_PATH = os.path.join(PROJECT_ROOT, "src", "mcp_server.py")
 PYTHON_BIN = sys.executable
+
+def _app_data_dir(*parts: str) -> str:
+    if sys.platform == "darwin":
+        base = os.path.join(HOME, "Library", "Application Support")
+    elif sys.platform == "win32":
+        base = os.environ.get("APPDATA") or os.path.join(HOME, "AppData", "Roaming")
+    else:
+        base = os.environ.get("XDG_CONFIG_HOME") or os.path.join(HOME, ".config")
+    return os.path.join(base, *parts)
 
 UNIFIED_TOKENSAFE_RULE = (
     "## TOKENSAFE GRAPH-FIRST OPTIMIZATION PROTOCOL\n"
@@ -58,8 +67,8 @@ AGENTS_REGISTRY = {
     "claude_desktop": {
         "name": "Claude Desktop",
         "type": "mcp_json",
-        "config_path": os.path.join(HOME, "Library", "Application Support", "Claude", "claude_desktop_config.json"),
-        "detect_path": os.path.join(HOME, "Library", "Application Support", "Claude")
+        "config_path": _app_data_dir("Claude", "claude_desktop_config.json"),
+        "detect_path": _app_data_dir("Claude")
     },
     "cursor": {
         "name": "Cursor",
@@ -80,9 +89,9 @@ AGENTS_REGISTRY = {
     "cline": {
         "name": "Cline / Roo Code (VS Code)",
         "type": "mcp_json",
-        "config_path": os.path.join(HOME, "Library", "Application Support", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
-        "rules_path": os.path.join(HOME, "Library", "Application Support", "Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "Rule_TokenSafe.md"),
-        "detect_path": os.path.join(HOME, "Library", "Application Support", "Code")
+        "config_path": _app_data_dir("Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "cline_mcp_settings.json"),
+        "rules_path": _app_data_dir("Code", "User", "globalStorage", "saoudrizwan.claude-dev", "settings", "Rule_TokenSafe.md"),
+        "detect_path": _app_data_dir("Code")
     },
     "claude_code": {
         "name": "Claude Code CLI",
@@ -142,6 +151,35 @@ class AgentInstaller:
         script = os.path.join(PROJECT_ROOT, "hooks", script_name)
         return f"{shlex.quote(PYTHON_BIN)} {shlex.quote(script)}"
 
+    @staticmethod
+    def _load_json_with_backup(config_file: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
+        """Reads a JSON config file after creating a .backup copy.
+        If parsing fails or root is non-dict, refuses to overwrite existing data."""
+        if not os.path.exists(config_file):
+            return {}, None
+        try:
+            shutil.copy2(config_file, f"{config_file}.backup")
+        except Exception:
+            pass
+        try:
+            with open(config_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                return None, f"Existing JSON config '{config_file}' is not an object; left untouched (.backup saved)."
+            return data, None
+        except Exception as e:
+            return None, f"Could not parse existing JSON config '{config_file}' ({e}); left untouched (.backup saved)."
+
+    @staticmethod
+    def _atomic_write_json(config_file: str, data: Dict[str, Any]) -> None:
+        parent = os.path.dirname(config_file)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        tmp = f"{config_file}.tmp.{os.getpid()}"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+        os.replace(tmp, config_file)
+
     @classmethod
     def install_hooks_config(cls, agent_key: str) -> Tuple[bool, str]:
         """Registers TokenSafe lifecycle-hook adapters with agents that support them.
@@ -158,52 +196,83 @@ class AgentInstaller:
         cursor_cmd = cls._tokensafe_hook_command("cursor_hook.py")
 
         if agent_key == "claude_code":
-            info = AGENTS_REGISTRY["claude_code"]
-            config_file = info.get("agents_md_path", "").replace("CLAUDE.md", "settings.json")
             config_file = os.path.join(HOME, ".claude", "settings.json")
             os.makedirs(os.path.dirname(config_file), exist_ok=True)
-            data: Dict[str, Any] = {}
-            if os.path.exists(config_file):
-                try:
-                    with open(config_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                except Exception:
-                    data = {}
+            data, err = cls._load_json_with_backup(config_file)
+            if err or data is None:
+                return False, err or f"Failed to parse {config_file}"
             hooks = data.get("hooks") if isinstance(data.get("hooks"), dict) else {}
-            blob = json.dumps(hooks)
-            if "claude_code_hook.py" in blob:
-                return True, "TokenSafe Claude Code hooks already registered"
             prompt_entry = {"hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
             bash_entry = {"matcher": "Bash", "hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
-            # SessionStart: no matcher = all sources (startup/resume/clear/compact).
             session_entry = {"hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
-            hooks.setdefault("SessionStart", []).append(session_entry)
-            hooks.setdefault("UserPromptSubmit", []).append(prompt_entry)
-            hooks.setdefault("PreToolUse", []).append(bash_entry)
+
+            def _sync_claude_event(event_name: str, default_entry: dict) -> bool:
+                entries = hooks.get(event_name)
+                if not isinstance(entries, list):
+                    hooks[event_name] = [default_entry]
+                    return True
+                seen = False
+                dirty = False
+                for entry in entries:
+                    if isinstance(entry, dict) and isinstance(entry.get("hooks"), list):
+                        for h in entry["hooks"]:
+                            if isinstance(h, dict) and "claude_code_hook.py" in str(h.get("command", "")):
+                                seen = True
+                                if h.get("command") != claude_cmd:
+                                    h["command"] = claude_cmd
+                                    dirty = True
+                if not seen:
+                    entries.append(default_entry)
+                    dirty = True
+                return dirty
+
+            changed = any([
+                _sync_claude_event("SessionStart", session_entry),
+                _sync_claude_event("UserPromptSubmit", prompt_entry),
+                _sync_claude_event("PreToolUse", bash_entry),
+            ])
+            if not changed:
+                return True, "TokenSafe Claude Code hooks already registered"
             data["hooks"] = hooks
-            cls._write_file_safely(config_file, json.dumps(data, indent=2))
+            cls._atomic_write_json(config_file, data)
             return True, "hooks registered (SessionStart + UserPromptSubmit + PreToolUse guard)"
 
         # cursor
         config_file = os.path.join(HOME, ".cursor", "hooks.json")
         os.makedirs(os.path.dirname(config_file), exist_ok=True)
-        data = {}
-        if os.path.exists(config_file):
-            try:
-                with open(config_file, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-            except Exception:
-                data = {}
+        data, err = cls._load_json_with_backup(config_file)
+        if err or data is None:
+            return False, err or f"Failed to parse {config_file}"
         hooks = data.get("hooks") if isinstance(data.get("hooks"), dict) else {}
-        blob = json.dumps(hooks)
-        if "cursor_hook.py" in blob:
-            return True, "TokenSafe Cursor hooks already registered"
         shell_entry = {"command": cursor_cmd, "timeout": 10}
-        hooks.setdefault("beforeShellExecution", []).append(dict(shell_entry))
-        hooks.setdefault("beforeReadFile", []).append(dict(shell_entry))
-        hooks.setdefault("beforeSubmitPrompt", []).append(dict(shell_entry))
+
+        def _sync_cursor_event(event_name: str) -> bool:
+            entries = hooks.get(event_name)
+            if not isinstance(entries, list):
+                hooks[event_name] = [dict(shell_entry)]
+                return True
+            seen = False
+            dirty = False
+            for entry in entries:
+                if isinstance(entry, dict) and "cursor_hook.py" in str(entry.get("command", "")):
+                    seen = True
+                    if entry.get("command") != cursor_cmd:
+                        entry["command"] = cursor_cmd
+                        dirty = True
+            if not seen:
+                entries.append(dict(shell_entry))
+                dirty = True
+            return dirty
+
+        changed = any([
+            _sync_cursor_event("beforeShellExecution"),
+            _sync_cursor_event("beforeReadFile"),
+            _sync_cursor_event("beforeSubmitPrompt"),
+        ])
+        if not changed:
+            return True, "TokenSafe Cursor hooks already registered"
         data["hooks"] = hooks
-        cls._write_file_safely(config_file, json.dumps(data, indent=2))
+        cls._atomic_write_json(config_file, data)
         return True, "guards registered (shell + junk-read + prompt pipeline)"
 
     @classmethod
@@ -244,14 +313,9 @@ class AgentInstaller:
             config_file = info["config_path"]
             os.makedirs(os.path.dirname(config_file), exist_ok=True)
 
-            data = {}
-            if os.path.exists(config_file):
-                try:
-                    with open(config_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    shutil.copy2(config_file, f"{config_file}.backup")
-                except Exception:
-                    data = {}
+            data, err = cls._load_json_with_backup(config_file)
+            if err or data is None:
+                return False, err or f"Failed to parse {config_file}"
 
             if "mcpServers" not in data or not isinstance(data["mcpServers"], dict):
                 data["mcpServers"] = {}
@@ -261,8 +325,7 @@ class AgentInstaller:
                 "args": [MCP_SERVER_PATH]
             }
 
-            with open(config_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+            cls._atomic_write_json(config_file, data)
 
             if "skills_path" in info:
                 cls._symlink_skill(info["skills_path"])
@@ -291,15 +354,11 @@ class AgentInstaller:
             config_file = info["config_path"]
             os.makedirs(os.path.dirname(config_file), exist_ok=True)
 
-            data = {}
-            if os.path.exists(config_file):
-                try:
-                    with open(config_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                except Exception:
-                    data = {}
+            data, err = cls._load_json_with_backup(config_file)
+            if err or data is None:
+                return False, err or f"Failed to parse {config_file}"
 
-            if "mcpServers" not in data:
+            if "mcpServers" not in data or not isinstance(data["mcpServers"], dict):
                 data["mcpServers"] = {}
 
             data["mcpServers"]["tokensafe"] = {
@@ -307,15 +366,7 @@ class AgentInstaller:
                 "args": [MCP_SERVER_PATH]
             }
 
-            # Backup existing
-            if os.path.exists(config_file):
-                try:
-                    shutil.copy2(config_file, f"{config_file}.backup")
-                except Exception:
-                    pass
-
-            with open(config_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+            cls._atomic_write_json(config_file, data)
 
             if "skills_path" in info:
                 cls._symlink_skill(info["skills_path"])
@@ -332,23 +383,29 @@ class AgentInstaller:
             content = ""
             if os.path.exists(config_file):
                 try:
-                    with open(config_file, "r", encoding="utf-8") as f:
-                        content = f.read()
                     shutil.copy2(config_file, f"{config_file}.backup")
                 except Exception:
                     pass
+                try:
+                    with open(config_file, "r", encoding="utf-8") as f:
+                        content = f.read()
+                except Exception:
+                    pass
 
-            server_snippet = (
-                f'\n[mcp_servers.tokensafe]\n'
-                f'command = "{PYTHON_BIN}"\n'
-                f'args = ["{MCP_SERVER_PATH}"]\n'
+            toml_cmd = json.dumps(PYTHON_BIN)
+            toml_srv = json.dumps(MCP_SERVER_PATH)
+            server_section = (
+                f'[mcp_servers.tokensafe]\n'
+                f'command = {toml_cmd}\n'
+                f'args = [{toml_srv}]\n'
             )
 
-            if '[mcp_servers.tokensafe]' in content:
-                pattern = r'\[mcp_servers\.tokensafe\][^\[]*'
-                content = re.sub(pattern, f'[mcp_servers.tokensafe]\ncommand = "{PYTHON_BIN}"\nargs = ["{MCP_SERVER_PATH}"]\n\n', content)
+            if re.search(r'(?m)^\[mcp_servers\.tokensafe\]\s*$', content):
+                # Replace the entire section up to the next TOML table header or EOF (keeps args=[...] intact)
+                pattern = re.compile(r'(?ms)^\[mcp_servers\.tokensafe\]\s*\n(?:(?!^\[).)*')
+                content = pattern.sub(lambda _: server_section + "\n", content)
             else:
-                content = content.rstrip() + "\n" + server_snippet
+                content = (content.rstrip() + "\n\n" + server_section) if content.strip() else server_section
 
             with open(config_file, "w", encoding="utf-8") as f:
                 f.write(content)
@@ -367,21 +424,16 @@ class AgentInstaller:
         elif info["type"] == "claude_md":
             if "config_path" in info:
                 config_file = info["config_path"]
-                data = {}
-                if os.path.exists(config_file):
-                    try:
-                        with open(config_file, "r", encoding="utf-8") as f:
-                            data = json.load(f)
-                    except Exception:
-                        data = {}
+                data, err = cls._load_json_with_backup(config_file)
+                if err or data is None:
+                    return False, err or f"Failed to parse {config_file}"
                 if "mcpServers" not in data or not isinstance(data["mcpServers"], dict):
                     data["mcpServers"] = {}
                 data["mcpServers"]["tokensafe"] = {
                     "command": PYTHON_BIN,
                     "args": [MCP_SERVER_PATH]
                 }
-                with open(config_file, "w", encoding="utf-8") as f:
-                    json.dump(data, f, indent=2)
+                cls._atomic_write_json(config_file, data)
 
             if "agents_md_path" in info:
                 cls._inject_global_rule(info["agents_md_path"], UNIFIED_TOKENSAFE_RULE)
@@ -394,13 +446,9 @@ class AgentInstaller:
         elif info["type"] == "copilot_json":
             config_file = info["config_path"]
             os.makedirs(os.path.dirname(config_file), exist_ok=True)
-            data = {}
-            if os.path.exists(config_file):
-                try:
-                    with open(config_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                except Exception:
-                    data = {}
+            data, err = cls._load_json_with_backup(config_file)
+            if err or data is None:
+                return False, err or f"Failed to parse {config_file}"
             if "mcpServers" not in data or not isinstance(data["mcpServers"], dict):
                 data["mcpServers"] = {}
             data["mcpServers"]["tokensafe"] = {
@@ -409,22 +457,16 @@ class AgentInstaller:
                 "args": [MCP_SERVER_PATH],
                 "tools": ["*"]
             }
-            with open(config_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+            cls._atomic_write_json(config_file, data)
             return True, f"Configured MCP for GitHub Copilot in {config_file}"
 
         elif info["type"] == "zcode_json":
             config_file = info["config_path"]
             os.makedirs(os.path.dirname(config_file), exist_ok=True)
 
-            data = {}
-            if os.path.exists(config_file):
-                try:
-                    with open(config_file, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                    shutil.copy2(config_file, f"{config_file}.backup")
-                except Exception:
-                    data = {}
+            data, err = cls._load_json_with_backup(config_file)
+            if err or data is None:
+                return False, err or f"Failed to parse {config_file}"
 
             if "mcp" not in data or not isinstance(data["mcp"], dict):
                 data["mcp"] = {}
@@ -436,8 +478,7 @@ class AgentInstaller:
                 "args": [MCP_SERVER_PATH]
             }
 
-            with open(config_file, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
+            cls._atomic_write_json(config_file, data)
 
             if "skills_path" in info:
                 cls._symlink_skill(info["skills_path"])
@@ -481,10 +522,13 @@ class AgentInstaller:
 
     @classmethod
     def _symlink_dir(cls, source_path: str, target_path: str):
-        """Safely creates or replaces a symlink to a directory."""
+        """Safely creates or replaces a symlink to a directory (falls back to copytree if symlinks fail)."""
         if not os.path.exists(source_path):
             return
-        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        parent = os.path.dirname(target_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
+        # Remove previous link or directory cleanly
         if os.path.islink(target_path) or os.path.exists(target_path):
             try:
                 if os.path.islink(target_path) or os.path.isfile(target_path):
@@ -496,19 +540,26 @@ class AgentInstaller:
         try:
             os.symlink(source_path, target_path)
         except Exception:
-            pass
+            try:
+                shutil.copytree(source_path, target_path, dirs_exist_ok=True, ignore=shutil.ignore_patterns(".git", "__pycache__", "node_modules", "*.pyc"))
+            except Exception:
+                pass
 
     @classmethod
     def _write_file_safely(cls, file_path: str, content: str):
         """Safely writes content creating parent directories."""
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        parent = os.path.dirname(file_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         with open(file_path, "w", encoding="utf-8") as f:
             f.write(content)
 
     @classmethod
     def _inject_global_rule(cls, file_path: str, rule_snippet: str, tag: str = "tokensafe"):
         """Injects or updates a delimited rule block in a markdown instruction file."""
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
+        parent = os.path.dirname(file_path)
+        if parent:
+            os.makedirs(parent, exist_ok=True)
         content = ""
         if os.path.exists(file_path):
             try:
@@ -520,8 +571,10 @@ class AgentInstaller:
         end_tag = f"<!-- /{tag} -->"
         pattern = re.compile(rf"{re.escape(start_tag)}.*?{re.escape(end_tag)}", re.DOTALL)
         wrapped = f"{start_tag}\n{rule_snippet.strip()}\n{end_tag}"
-        if start_tag in content:
-            new_content = pattern.sub(wrapped, content)
+        if start_tag in content and end_tag in content:
+            new_content = pattern.sub(lambda _: wrapped, content)
+        elif start_tag in content:
+            new_content = content.replace(start_tag, wrapped, 1)
         else:
             new_content = (content.rstrip() + "\n\n" + wrapped).lstrip()
         with open(file_path, "w", encoding="utf-8") as f:
@@ -582,22 +635,16 @@ class AgentInstaller:
         cursor_mcp = os.path.join(project_dir, ".cursor", "mcp.json")
         try:
             os.makedirs(os.path.dirname(cursor_mcp), exist_ok=True)
-            data = {}
-            if os.path.exists(cursor_mcp):
-                try:
-                    with open(cursor_mcp, "r", encoding="utf-8") as f:
-                        data = json.load(f)
-                except Exception:
-                    data = {}
-            if "mcpServers" not in data or not isinstance(data["mcpServers"], dict):
-                data["mcpServers"] = {}
-            data["mcpServers"]["tokensafe"] = {
-                "command": PYTHON_BIN,
-                "args": [MCP_SERVER_PATH]
-            }
-            with open(cursor_mcp, "w", encoding="utf-8") as f:
-                json.dump(data, f, indent=2)
-            created.append(".cursor/mcp.json")
+            data, err = cls._load_json_with_backup(cursor_mcp)
+            if not err and data is not None:
+                if "mcpServers" not in data or not isinstance(data["mcpServers"], dict):
+                    data["mcpServers"] = {}
+                data["mcpServers"]["tokensafe"] = {
+                    "command": PYTHON_BIN,
+                    "args": [MCP_SERVER_PATH]
+                }
+                cls._atomic_write_json(cursor_mcp, data)
+                created.append(".cursor/mcp.json")
         except Exception:
             pass
 
@@ -617,13 +664,9 @@ class AgentInstaller:
         directory. Stored relative to the project root when the plugin lives
         inside it (team-shareable), otherwise as an absolute path."""
         config_path = os.path.join(project_dir, ".agents", "plugins.json")
-        config: Dict[str, Any] = {}
-        if os.path.isfile(config_path):
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    config = json.load(f)
-            except Exception:
-                config = {}
+        config, err = cls._load_json_with_backup(config_path)
+        if err or config is None:
+            return
 
         abs_path = os.path.abspath(plugin_path if os.path.isabs(plugin_path) else os.path.join(os.getcwd(), plugin_path))
         if abs_path == project_dir or abs_path.startswith(project_dir + os.sep):

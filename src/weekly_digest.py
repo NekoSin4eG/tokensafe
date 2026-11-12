@@ -145,13 +145,16 @@ class WeeklyDigestGenerator:
                         team_emails.add(str(lic["customer_email"]).strip().lower())
 
             placeholders = ",".join(["?"] * len(team_emails))
-            params = list(team_emails) + [seven_days_ago]
+            params = list(team_emails) + [seven_days_ago, now]
 
-            # 3. Aggregate 7-day telemetry
+            # 3. Aggregate 7-day telemetry (bounded [seven_days_ago, now], excluding synthetic ROLLUP_LIFETIME)
             events = conn.execute(
                 f"""
                 SELECT * FROM telemetry
-                WHERE customer_email IN ({placeholders}) AND timestamp >= ?
+                WHERE customer_email IN ({placeholders})
+                  AND timestamp >= ?
+                  AND timestamp <= ?
+                  AND COALESCE(event_type, '') != 'ROLLUP_LIFETIME'
                 ORDER BY timestamp DESC;
                 """,
                 params,

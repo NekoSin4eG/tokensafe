@@ -81,22 +81,31 @@ class DependencyPrefetcher:
                     symbols = [alias.name for alias in node.names]
 
                     dep_path = None
+                    mod_rel = os.path.join(*module.split(".")) if module else ""
                     if level > 0:
-                        # Relative import
-                        rel_levels = ".." * (level - 1)
-                        target_dir = os.path.abspath(os.path.join(current_dir, rel_levels))
-                        candidate = os.path.join(target_dir, f"{module}.py") if module else None
-                        if candidate and os.path.exists(candidate):
-                            dep_path = candidate
-                        elif not module:
-                            candidate = os.path.join(target_dir, "__init__.py")
-                            if os.path.exists(candidate):
-                                dep_path = candidate
-                    else:
-                        # Check if local file in same directory
-                        candidate = os.path.join(current_dir, f"{module}.py")
-                        if os.path.exists(candidate):
-                            dep_path = candidate
+                        # Relative import: level=1 -> '.', level=2 -> '..', level=3 -> '../..'
+                        parents = [".."] * (level - 1)
+                        target_dir = os.path.abspath(os.path.join(current_dir, *parents)) if parents else current_dir
+                        if mod_rel:
+                            for cand in (
+                                os.path.join(target_dir, f"{mod_rel}.py"),
+                                os.path.join(target_dir, mod_rel, "__init__.py"),
+                            ):
+                                if os.path.exists(cand):
+                                    dep_path = cand
+                                    break
+                        else:
+                            cand = os.path.join(target_dir, "__init__.py")
+                            if os.path.exists(cand):
+                                dep_path = cand
+                    elif mod_rel:
+                        for cand in (
+                            os.path.join(current_dir, f"{mod_rel}.py"),
+                            os.path.join(current_dir, mod_rel, "__init__.py"),
+                        ):
+                            if os.path.exists(cand):
+                                dep_path = cand
+                                break
 
                     if dep_path and os.path.exists(dep_path):
                         results.append({"path": dep_path, "symbols": symbols})
@@ -126,14 +135,16 @@ class DependencyPrefetcher:
             elif default_import:
                 symbols = [default_import.strip()]
 
-            # Resolve target file path (check .ts, .tsx, .js, /index.ts)
+            # Resolve target file path (handles already-extensioned ESM imports like './foo.js' -> './foo.ts')
             base_target = os.path.normpath(os.path.join(current_dir, rel_path))
-            resolved = None
-            for ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", "/index.ts", "/index.tsx", "/index.js", "/index.mjs"):
-                candidate = f"{base_target}{ext}" if not ext.startswith("/") else f"{base_target}{ext}"
-                if os.path.exists(candidate):
-                    resolved = candidate
-                    break
+            base_no_js = re.sub(r"\.(?:mjs|cjs|jsx|js)$", "", base_target)
+            candidates: List[str] = []
+            if os.path.isfile(base_target):
+                candidates.append(base_target)
+            for root_cand in dict.fromkeys((base_target, base_no_js)):
+                for ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", "/index.ts", "/index.tsx", "/index.js", "/index.mjs"):
+                    candidates.append(f"{root_cand}{ext}")
+            resolved = next((c for c in candidates if os.path.isfile(c)), None)
 
             if resolved and symbols:
                 results.append({"path": resolved, "symbols": symbols})
@@ -169,25 +180,39 @@ class DependencyPrefetcher:
             except Exception:
                 pass
         else:
-            # TS/JS interface/class/type/function extraction
+            # TS/JS interface/class/type/function extraction (brace-depth safe)
             for sym in symbols:
-                pattern = re.compile(
-                    rf"""(?:export\s+)?(interface|type|class)\s+{re.escape(sym)}\b\s*\{{([^}}]*)\}}""",
-                    re.DOTALL
-                )
-                m = pattern.search(code)
-                if m:
-                    kind = m.group(1)
-                    body = m.group(2).strip()
-                    body_clean = re.sub(r"\s+", " ", body)
-                    extracted.append(f"{kind} {sym} {{ {body_clean} }}")
+                decl_re = re.compile(rf"(?:export\s+(?:default\s+)?)?(?:declare\s+)?(interface|type|class|enum)\s+{re.escape(sym)}\b[^{{;]*")
+                dm = decl_re.search(code)
+                if dm:
+                    kind = dm.group(1)
+                    rest = code[dm.end():]
+                    if rest.lstrip().startswith("{"):
+                        brace_idx = code.find("{", dm.end())
+                        depth = 0
+                        end_idx = brace_idx
+                        for idx in range(brace_idx, min(len(code), brace_idx + 2000)):
+                            ch = code[idx]
+                            if ch == "{":
+                                depth += 1
+                            elif ch == "}":
+                                depth -= 1
+                                if depth == 0:
+                                    end_idx = idx
+                                    break
+                        body_clean = re.sub(r"\s+", " ", code[brace_idx + 1 : end_idx].strip())
+                        if len(body_clean) > 120:
+                            body_clean = body_clean[:117] + "..."
+                        extracted.append(f"{kind} {sym} {{ {body_clean} }}")
+                        continue
+                fn_pattern = re.compile(rf"""(?:export\s+(?:default\s+)?)?(?:async\s+)?(function|const|let)\s+{re.escape(sym)}\b[^\n;]*""", re.MULTILINE)
+                fm = fn_pattern.search(code)
+                if fm:
+                    sig = fm.group(0).replace("export default ", "").replace("export ", "").strip()
+                    sig = sig.rstrip("{").strip()
+                    sig = re.sub(r"\s+", " ", sig)
+                    extracted.append(sig)
                 else:
-                    fn_pattern = re.compile(rf"""(?:export\s+)?(function|const)\s+{re.escape(sym)}\b[^{{;]*""", re.MULTILINE)
-                    fm = fn_pattern.search(code)
-                    if fm:
-                        sig = re.sub(r"\s+", " ", fm.group(0).replace("export ", "").strip())
-                        extracted.append(sig)
-                    else:
-                        extracted.append(sym)
+                    extracted.append(sym)
 
         return "; ".join(extracted) if extracted else ", ".join(symbols)

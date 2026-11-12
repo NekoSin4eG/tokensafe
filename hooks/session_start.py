@@ -19,9 +19,10 @@ import sys
 import os
 import json
 
-HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
+HOOK_DIR = os.path.dirname(os.path.realpath(__file__))
 PROJECT_ROOT = os.path.dirname(HOOK_DIR)
-sys.path.insert(0, PROJECT_ROOT)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from src.metrics import MetricsTracker
 from src.license_manager import LicenseManager
@@ -47,14 +48,17 @@ def main():
             print(json.dumps({}))
             return
         payload = json.loads(raw_input)
+        if not isinstance(payload, dict):
+            payload = {}
     except Exception:
         print(json.dumps({}))
         return
 
     # hooks.md: hook CWD is the plugin directory, not the workspace — use the
     # workspacePaths from the payload for project-scoped audits.
-    workspace_paths = payload.get("workspacePaths") or []
-    workspace_root = workspace_paths[0] if workspace_paths else os.getcwd()
+    raw_ws = payload.get("workspacePaths")
+    workspace_paths = raw_ws if isinstance(raw_ws, list) else []
+    workspace_root = str(workspace_paths[0]) if workspace_paths else os.getcwd()
 
     inject_steps = [
         {"systemMessage": {"systemMessage": PROTOCOL_DIRECTIVES, "metadata": {}}}

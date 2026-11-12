@@ -9,6 +9,7 @@ import sys
 import json
 import time
 import re
+import shlex
 import subprocess
 import threading
 import urllib.parse
@@ -38,6 +39,8 @@ from src.paths import resolve_data_dir
 
 DATA_DIR = resolve_data_dir()
 CACHE_FILE = os.path.join(DATA_DIR, "version_cache.json")
+_DEFAULT_DATA_DIR = DATA_DIR
+_DEFAULT_CACHE_FILE = CACHE_FILE
 CLOUD_CHECK_URL = os.environ.get("TOKENSAFE_VERSION_URL", "https://api.tokensafe.dev/api/version/check")
 
 # ANSI color codes
@@ -67,9 +70,20 @@ class VersionChecker:
     """Manages cached client-side version discovery and CLI banners."""
 
     @classmethod
+    def _effective_data_dir(cls) -> str:
+        if DATA_DIR != _DEFAULT_DATA_DIR:
+            return DATA_DIR
+        return resolve_data_dir()
+
+    @classmethod
     def get_cache_path(cls) -> str:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        return CACHE_FILE
+        if CACHE_FILE != _DEFAULT_CACHE_FILE:
+            parent = os.path.dirname(CACHE_FILE) or "."
+            os.makedirs(parent, exist_ok=True)
+            return CACHE_FILE
+        dd = cls._effective_data_dir()
+        os.makedirs(dd, exist_ok=True)
+        return os.path.join(dd, "version_cache.json")
 
     @classmethod
     def load_cache(cls) -> Optional[Dict[str, Any]]:
@@ -78,7 +92,8 @@ class VersionChecker:
             return None
         try:
             with open(cache_path, "r", encoding="utf-8") as f:
-                return json.load(f)
+                data = json.load(f)
+            return data if isinstance(data, dict) else None
         except Exception:
             return None
 
@@ -86,8 +101,10 @@ class VersionChecker:
     def save_cache(cls, data: Dict[str, Any]):
         cache_path = cls.get_cache_path()
         try:
-            with open(cache_path, "w", encoding="utf-8") as f:
+            tmp = f"{cache_path}.tmp.{os.getpid()}.{threading.get_ident()}"
+            with open(tmp, "w", encoding="utf-8") as f:
                 json.dump(data, f, indent=2)
+            os.replace(tmp, cache_path)
         except Exception:
             pass
 
@@ -178,12 +195,24 @@ class VersionChecker:
         return payload
 
     @classmethod
-    def get_banner(cls, current_version: str = CURRENT_VERSION, license_key: str = "") -> Optional[str]:
+    def get_banner(
+        cls,
+        current_version: str = CURRENT_VERSION,
+        license_key: str = "",
+        cache_only: bool = False,
+    ) -> Optional[str]:
         """
         Returns a styled ANSI banner string if an update is available or required,
-        or None if up to date.
+        or None if up to date. When cache_only=True, reads cached version state
+        without blocking on network roundtrips.
         """
-        info = cls.check_version(current_version=current_version, license_key=license_key)
+        if cache_only:
+            cached = cls.load_cache()
+            if not cls._cache_matches_version(cached, current_version):
+                return None
+            info = cached or {}
+        else:
+            info = cls.check_version(current_version=current_version, license_key=license_key)
         force_update = info.get("force_update", False)
         update_available = info.get("update_available", False)
         latest = info.get("latest_version", current_version)
@@ -294,11 +323,12 @@ class VersionChecker:
 
                 def _zenity_wait():
                     if p.wait() == 0:
+                        cmd_argv = shlex.split(update_command) or [update_command]
                         for term in (
-                            ["x-terminal-emulator", "-e", update_command],
-                            ["gnome-terminal", "--", update_command],
-                            ["konsole", "-e", update_command],
-                            ["xterm", "-e", update_command]
+                            ["x-terminal-emulator", "-e", *cmd_argv],
+                            ["gnome-terminal", "--", *cmd_argv],
+                            ["konsole", "-e", *cmd_argv],
+                            ["xterm", "-e", *cmd_argv],
                         ):
                             try:
                                 subprocess.Popen(term)
@@ -344,42 +374,39 @@ class VersionChecker:
         if not update_available and not force:
             return False
 
-        cached = cls.load_cache() or {}
+        # Cross-process claim BEFORE checking/updating last_os_notify_at so two concurrent
+        # processes never both pass the 24h guard and show duplicate dialogs.
+        dd = cls._effective_data_dir()
+        os.makedirs(dd, exist_ok=True)
+        claim_path = os.path.join(dd, ".update_dialog.claim")
         now = int(time.time())
-        last_notified_ver = cached.get("last_os_notify_version", "")
-        last_notified_at = cached.get("last_os_notify_at", 0)
-
-        if not force and last_notified_ver == latest and (now - last_notified_at) < CACHE_TTL:
-            return False
-
-        # Cross-process claim: several agent hook processes can pass the 24h
-        # cache check simultaneously (Antigravity + ZCode + adapters), which
-        # rendered the update dialog TWICE. Only the process that wins the
-        # O_EXCL claim shows the dialog; the claim self-expires.
-        claim_path = os.path.join(DATA_DIR, ".update_dialog.claim")
         try:
             if os.path.exists(claim_path):
                 if (now - os.path.getmtime(claim_path)) < 60:
                     return False
-                os.remove(claim_path)  # stale claim: safe to reclaim (O_EXCL guards the race)
+                os.remove(claim_path)
             fd = os.open(claim_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             os.write(fd, str(os.getpid()).encode("utf-8"))
             os.close(fd)
         except FileExistsError:
             return False
         except OSError:
-            pass  # claim is best-effort; never block the dialog entirely on fs errors
+            pass
 
         try:
+            # Re-read cache inside the lock/claim so stale or concurrent updates are visible
+            cached = cls.load_cache() or dict(info)
+            last_notified_ver = cached.get("last_os_notify_version", "")
+            last_notified_at = cached.get("last_os_notify_at", 0)
+            if not force and last_notified_ver == latest and (now - last_notified_at) < CACHE_TTL:
+                return False
+
             dispatched = cls.show_os_dialog(
                 current_version=current_version,
                 latest_version=latest,
                 update_command=cmd
             )
             if dispatched:
-                # Mark "notified" only after the dialog actually dispatched.
-                # Writing it earlier let a silently TCC-blocked osascript buy
-                # 24h of dialog silence without the user ever seeing anything.
                 try:
                     cached["last_os_notify_version"] = latest
                     cached["last_os_notify_at"] = now
@@ -388,7 +415,6 @@ class VersionChecker:
                     pass
             return dispatched
         finally:
-            # Release the dialog claim so a future version can notify again.
             try:
                 os.remove(claim_path)
             except OSError:
@@ -429,12 +455,16 @@ class VersionChecker:
             if os.name == "nt":
                 flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
             script_path = os.path.abspath(__file__)
-            cmd = [sys.executable, script_path, "--check-bg"]
+            cmd = [sys.executable, script_path, "--check-bg", f"--current-version={current_version}"]
             if force:
                 cmd.append("--force")
+            child_env = dict(os.environ)
+            if license_key:
+                child_env["TOKENSAFE_BG_LICENSE_KEY"] = license_key
             subprocess.Popen(
                 cmd,
                 cwd=PROJECT_ROOT,
+                env=child_env,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
@@ -449,6 +479,11 @@ if __name__ == "__main__":
     if "--check-bg" in sys.argv:
         try:
             is_force = "--force" in sys.argv
-            VersionChecker.notify_os_update(force=is_force)
+            bg_ver = CURRENT_VERSION
+            for a in sys.argv[1:]:
+                if a.startswith("--current-version="):
+                    bg_ver = a.split("=", 1)[1].strip() or CURRENT_VERSION
+            bg_key = os.environ.get("TOKENSAFE_BG_LICENSE_KEY", "")
+            VersionChecker.notify_os_update(current_version=bg_ver, license_key=bg_key, force=is_force)
         except Exception:
             pass

@@ -12,6 +12,7 @@ import urllib.error
 from typing import Optional, Dict, Any
 from src.distiller_cache import DistillationCache
 from src.license_manager import LicenseManager
+from src.paths import resolve_data_dir
 
 class DeepSeekDistiller:
     """Uses DeepSeek-Flash as a high-density semantic compiler for prompts."""
@@ -42,27 +43,34 @@ Rules:
 
     @classmethod
     def _get_config(cls) -> Dict[str, Any]:
-        """Loads API key and configuration from environment or data/config.json."""
+        """Loads API key and configuration from environment or config.json."""
         config = {
-            "api_key": os.environ.get("DEEPSEEK_API_KEY", ""),
+            "api_key": os.environ.get("DEEPSEEK_API_KEY", "").strip(),
             "model": cls.DEFAULT_MODEL,
             "timeout": cls.DEFAULT_TIMEOUT,
             "enabled": True
         }
 
-        # Check data/config.json relative to project root
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        config_path = os.path.join(base_dir, "data", "config.json")
+        config_path = os.path.join(resolve_data_dir(), "config.json")
         if os.path.exists(config_path):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
                     file_conf = json.load(f)
+                if isinstance(file_conf, dict):
                     if not config["api_key"] and file_conf.get("deepseek_api_key"):
-                        config["api_key"] = file_conf["deepseek_api_key"]
-                    config["model"] = file_conf.get("deepseek_model", config["model"])
-                    config["timeout"] = file_conf.get("deepseek_timeout", config["timeout"])
-                    config["max_tokens"] = int(file_conf.get("distill_max_tokens", 60))
-                    config["enabled"] = file_conf.get("enable_deepseek_tier", True)
+                        config["api_key"] = str(file_conf["deepseek_api_key"]).strip()
+                    config["model"] = str(file_conf.get("deepseek_model") or config["model"])
+                    try:
+                        raw_to = file_conf.get("deepseek_timeout")
+                        config["timeout"] = float(raw_to if raw_to is not None else config["timeout"])
+                    except (TypeError, ValueError):
+                        pass
+                    try:
+                        raw_mt = file_conf.get("distill_max_tokens")
+                        config["max_tokens"] = int(raw_mt if raw_mt is not None else 60)
+                    except (TypeError, ValueError):
+                        config["max_tokens"] = 60
+                    config["enabled"] = bool(file_conf.get("enable_deepseek_tier", True))
             except Exception:
                 pass
 
@@ -109,7 +117,8 @@ Rules:
             data=json.dumps(payload).encode("utf-8"),
             headers={
                 "Authorization": f"Bearer {conf['api_key']}",
-                "Content-Type": "application/json"
+                "Content-Type": "application/json",
+                "User-Agent": "TokenSafe/1.0",
             }
         )
 
@@ -119,12 +128,12 @@ Rules:
                     data = json.loads(resp.read().decode("utf-8"))
                     choices = data.get("choices", [])
                     if choices:
-                        content = choices[0].get("message", {}).get("content", "").strip()
-                        # Clean backticks if any
-                        content = re.sub(r"^```[a-zA-Z]*\n?|```$", "", content).strip()
-                        if content.startswith("(") and content.endswith(")"):
-                            DistillationCache.set(raw_text, content, provider="deepseek")
-                            return content
+                        from src.distiller import UniversalDistiller
+                        raw_msg = choices[0].get("message", {}).get("content", "")
+                        clean = UniversalDistiller._sanitize_s_expression(raw_msg)
+                        if clean:
+                            DistillationCache.set(raw_text, clean, provider="deepseek")
+                            return clean
         except Exception:
             # Network issue, timeout, or rate limit: fallback gracefully
             return None

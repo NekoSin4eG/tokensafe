@@ -21,7 +21,7 @@ import sys
 import json
 import os
 
-HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
+HOOK_DIR = os.path.dirname(os.path.realpath(__file__))
 PROJECT_ROOT = os.path.dirname(HOOK_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -68,12 +68,15 @@ def main():
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
+        if not isinstance(payload, dict):
+            payload = {}
     except Exception:
-        print(json.dumps({}))
+        print(json.dumps(_allow("")))
         return
-    event = str(payload.get("hook_event_name") or "")
+    event = ""
     try:
-        response = handle(event, payload if isinstance(payload, dict) else {})
+        event = str(payload.get("hook_event_name") or "")
+        response = handle(event, payload)
     except Exception:
         response = _allow(event)
     if not isinstance(response, dict) or not response:

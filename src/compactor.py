@@ -13,6 +13,7 @@ from src.tokenizer import count_tokens
 from src.distiller import UniversalDistiller
 from src.secret_redactor import SecretRedactor
 from src.license_manager import LicenseManager
+from src.paths import resolve_data_dir
 
 class PromptCompactor:
     """Transforms verbose natural language requests into compact Intent IR across major world languages."""
@@ -324,8 +325,7 @@ class PromptCompactor:
     @classmethod
     def _get_min_distill_tokens(cls) -> int:
         """Loads minimum token threshold for LLM distillation from config or returns 100."""
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        config_path = os.path.join(base_dir, "data", "config.json")
+        config_path = os.path.join(resolve_data_dir(), "config.json")
         if os.path.exists(config_path):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
@@ -431,8 +431,8 @@ class PromptCompactor:
                         # Extract symbol
                         symbol = cls.extract_symbol(raw_text, target_file)
 
-                        # Extract traits if present in distilled S-Expression: e.g. [async redis ...]
-                        trait_match = re.search(r"\[(.*?)\]", distilled)
+                        # Extract traits from S-Expression header (before quoted minimal_intent)
+                        trait_match = re.search(r'^\([A-Z]+(?:\s+[^\[\]"]+)?\s+\[(.*?)\]', distilled)
                         traits = trait_match.group(1).split() if trait_match else []
 
                         return {
@@ -450,13 +450,28 @@ class PromptCompactor:
                         }
 
         # Tier 1: Multilingual Local Regex Compactor
-        files = cls.FILE_REGEX.findall(raw_text)
+        # Skip destructive regex rewriting when fenced code blocks dominate, and mask URLs /
+        # inline code spans before matching FILE_REGEX or punctuation stripping.
+        has_fenced_code = "```" in raw_text
+        protected_spans: Dict[str, str] = {}
+
+        def _mask_span(m: re.Match) -> str:
+            tok = f"__TSPH_{len(protected_spans)}__"
+            protected_spans[tok] = m.group(0)
+            return tok
+
+        url_free = re.sub(r"https?://[^\s<>'\"`]+", _mask_span, raw_text)
+        code_free = re.sub(r"```[\s\S]*?```|`[^`\n]+`", _mask_span, url_free)
+
+        files = cls.FILE_REGEX.findall(url_free)
         target_file = files[0] if files else ""
 
         action = "TASK"
+        matched_action_regex = None
         for act_name, regex in cls.ACTION_PATTERNS:
             if regex.search(raw_text):
                 action = act_name
+                matched_action_regex = regex
                 break
 
         traits = []
@@ -467,24 +482,39 @@ class PromptCompactor:
 
         symbol = cls.extract_symbol(raw_text, target_file)
 
-        delta = raw_text
-        if target_file:
-            delta = delta.replace(target_file, " ")
-        if symbol:
-            delta = re.sub(r"\b" + re.escape(symbol) + r"\b", " ", delta)
-            delta = delta.replace(f"`{symbol}`", " ")
+        if has_fenced_code:
+            # Keep fenced code verbatim by skipping Tier 1 word/punctuation mangling
+            delta = raw_text.strip()
+        else:
+            delta = url_free
+            if target_file:
+                delta = delta.replace(target_file, " ")
+            if symbol:
+                delta = re.sub(r"\b" + re.escape(symbol) + r"\b", " ", delta)
+                delta = delta.replace(f"`{symbol}`", " ")
 
-        for pattern in cls.STOP_PHRASES:
-            delta = re.sub(pattern, " ", delta, flags=re.I)
+            # Protect remaining secondary filenames and inline backtick code spans
+            delta = re.sub(r"`[^`\n]+`", _mask_span, delta)
+            for extra_f in files[1:]:
+                if extra_f and extra_f in delta:
+                    tok = f"__TSPH_{len(protected_spans)}__"
+                    protected_spans[tok] = extra_f
+                    delta = delta.replace(extra_f, tok)
 
-        for _, regex in cls.ACTION_PATTERNS:
-            delta = regex.sub(" ", delta)
+            for pattern in cls.STOP_PHRASES:
+                delta = re.sub(pattern, " ", delta, flags=re.I)
 
-        for regex, _ in cls.TRAIT_MAPPINGS:
-            delta = regex.sub(" ", delta)
+            # Strip only the matched primary action word so secondary intents ("Fix error") survive
+            if matched_action_regex is not None:
+                delta = matched_action_regex.sub(" ", delta)
 
-        delta = re.sub(r"[\.,:;\"'\(\)\[\]\{\}`\?¿¡！。，：；“”‘’「」『』、]", " ", delta)
-        delta = re.sub(r"\s+", " ", delta).strip()
+            for regex, _ in cls.TRAIT_MAPPINGS:
+                delta = regex.sub(" ", delta)
+
+            delta = re.sub(r"[\.,:;\"'\(\)\[\]\{\}`\?¿¡！。，：；“”‘’「」『』、]", " ", delta)
+            for tok, orig_val in protected_spans.items():
+                delta = delta.replace(tok, orig_val)
+            delta = re.sub(r"\s+", " ", delta).strip()
 
         parts = [action]
         if target_file:
@@ -493,10 +523,10 @@ class PromptCompactor:
             parts.append(symbol)
         if traits:
             parts.append(f"[{' '.join(traits)}]")
-        if delta and len(delta) > 2:
+        if delta and len(delta) > 2 and not has_fenced_code:
             parts.append(f'"{delta}"')
 
-        compact_expr = f"({' '.join(parts)})"
+        compact_expr = raw_text.strip() if has_fenced_code else f"({' '.join(parts)})"
         compact_tokens = count_tokens(compact_expr)
 
         if compact_tokens > original_tokens:

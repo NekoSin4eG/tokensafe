@@ -58,11 +58,16 @@ class AgentFirewall:
 
     @staticmethod
     def _file_content_hash(file_path: str) -> str:
-        """sha256 of the file's RAW bytes — the diff-aware truth that survives
-        git checkout mtime resets."""
+        """sha256 of the file's RAW bytes — streamed in 64KB chunks."""
         try:
+            h = hashlib.sha256()
             with open(file_path, "rb") as f:
-                return hashlib.sha256(f.read()).hexdigest()
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    h.update(chunk)
+            return h.hexdigest()
         except OSError:
             return ""
 
@@ -117,34 +122,45 @@ class AgentFirewall:
 
         abs_path = os.path.abspath(file_path)
         symbol_key = (symbol or "").strip()
-        current_hash = cls._file_content_hash(abs_path)
+        current_hash = ""
 
         hit_data = None
         hit_scope = "session"
 
         def _query():
-            nonlocal hit_data, hit_scope
+            nonlocal hit_data, hit_scope, current_hash
             with tracker._get_connection() as conn:
-                # Stage 1: in-session, mtime-validated
+                # Stage 1: in-session lookup; verify content_hash when present so same-second edits never serve stale content
                 row = conn.execute("""
-                    SELECT id, content, tokens, mtime, hit_count
+                    SELECT id, content, tokens, mtime, hit_count, content_hash
                     FROM subagent_file_cache
                     WHERE session_id = ? AND file_path = ? AND symbol = ?;
                 """, (session_id, abs_path, symbol_key)).fetchone()
 
                 if row and row["mtime"] >= current_mtime:
-                    hit_data = (row["id"], row["content"], row["tokens"], row["hit_count"] + 1)
-                elif current_hash:
-                    # Stage 2: cross-session, content-hash-validated
-                    row2 = conn.execute("""
-                        SELECT id, content, tokens, hit_count
-                        FROM subagent_file_cache
-                        WHERE file_path = ? AND symbol = ? AND content_hash = ?
-                        ORDER BY created_at DESC LIMIT 1;
-                    """, (abs_path, symbol_key, current_hash)).fetchone()
-                    if row2:
-                        hit_data = (row2["id"], row2["content"], row2["tokens"], row2["hit_count"] + 1)
-                        hit_scope = "persistent"
+                    stored_hash = row["content_hash"] or ""
+                    if stored_hash:
+                        if not current_hash:
+                            current_hash = cls._file_content_hash(abs_path)
+                        if not current_hash or stored_hash == current_hash:
+                            hit_data = (row["id"], row["content"], row["tokens"], row["hit_count"] + 1)
+                    else:
+                        hit_data = (row["id"], row["content"], row["tokens"], row["hit_count"] + 1)
+                if hit_data is None:
+                    # Only hash the file when we actually need Stage 2 persistent fallback
+                    if not current_hash:
+                        current_hash = cls._file_content_hash(abs_path)
+                    if current_hash:
+                        # Stage 2: cross-session, content-hash-validated
+                        row2 = conn.execute("""
+                            SELECT id, content, tokens, hit_count
+                            FROM subagent_file_cache
+                            WHERE file_path = ? AND symbol = ? AND content_hash = ?
+                            ORDER BY created_at DESC LIMIT 1;
+                        """, (abs_path, symbol_key, current_hash)).fetchone()
+                        if row2:
+                            hit_data = (row2["id"], row2["content"], row2["tokens"], row2["hit_count"] + 1)
+                            hit_scope = "persistent"
 
         try:
             _query()
@@ -157,7 +173,7 @@ class AgentFirewall:
             cache_id, content, tokens, hit_count = hit_data
             try:
                 with tracker._get_connection() as conn:
-                    conn.execute("UPDATE subagent_file_cache SET hit_count = ? WHERE id = ?;", (hit_count, cache_id))
+                    conn.execute("UPDATE subagent_file_cache SET hit_count = hit_count + 1 WHERE id = ?;", (cache_id,))
             except Exception:
                 pass
 
@@ -181,7 +197,8 @@ class AgentFirewall:
                     f"'{os.path.basename(abs_path)}{sym_label}' (sha256:{short_hash})]\n"
                 )
                 payload = header + content
-                opt_tokens = 40
+                # Honest accounting: full-content return saves 0 tokens vs raw cached text
+                opt_tokens = count_tokens(payload)
 
             saved = max(0, tokens - opt_tokens)
             try:

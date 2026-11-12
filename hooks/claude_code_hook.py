@@ -17,7 +17,7 @@ import sys
 import json
 import os
 
-HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
+HOOK_DIR = os.path.dirname(os.path.realpath(__file__))
 PROJECT_ROOT = os.path.dirname(HOOK_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -111,7 +111,8 @@ def handle(event: str, payload: dict) -> dict:
                         transcript_path, turn
                     )
                     if folded and stats.get("saved_tokens", 0) > 0:
-                        tracker = MetricsTracker()
+                        if tracker is None:
+                            tracker = MetricsTracker()
                         prev_event = tracker.get_last_event(session_id, "HISTORY_FOLD")
                         prev_orig = 0
                         if prev_event and isinstance(prev_event.get("details"), dict):
@@ -147,7 +148,9 @@ def handle(event: str, payload: dict) -> dict:
 
     if event == "PreToolUse":
         tool = str(payload.get("tool_name") or "")
-        tool_input = payload.get("tool_input") or {}
+        tool_input = payload.get("tool_input")
+        if not isinstance(tool_input, dict):
+            tool_input = {}
         if tool in ("Bash", "Shell", "bash"):
             command = str(tool_input.get("command") or "")
             verdict = guard_command(command, AGENT, session_id)
@@ -176,12 +179,17 @@ def main():
     try:
         raw = sys.stdin.read()
         payload = json.loads(raw) if raw.strip() else {}
+        if not isinstance(payload, dict):
+            payload = {}
     except Exception:
         print(json.dumps({}))
         return
-    event = str(payload.get("hook_event_name") or "")
+    event = ""
     try:
-        response = handle(event, payload if isinstance(payload, dict) else {})
+        event = str(payload.get("hook_event_name") or "")
+        response = handle(event, payload)
+        if not isinstance(response, dict):
+            response = {}
     except Exception:
         response = {}
     if event in ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"):

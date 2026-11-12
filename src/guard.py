@@ -13,10 +13,14 @@ Protects local workspaces and repository integrity by intercepting dangerous ope
 
 import os
 import re
+import shlex
 import fnmatch
 import subprocess
 from typing import Tuple, Optional, Dict, Any, List, NamedTuple
 from src.secret_redactor import SecretRedactor
+from src.command_sanitizer import CommandSanitizer
+
+_TOKENSAFE_SRC_DIR = os.path.dirname(os.path.abspath(__file__))
 
 class GuardResult(NamedTuple):
     blocked: bool
@@ -50,6 +54,16 @@ class TokenSafeGuard:
         "services", "controllers", "models", "internal", "pkg", "hooks"
     )
 
+    _TEST_PATH_RE = re.compile(
+        r"(?:^|/)(?:__tests__|__mocks__|tests?|specs?|mocks?|fixtures?)(?:/|$)"
+        r"|(?:^|/)(?:test_[^/]+|mock_[^/]+|[^/]+_test\.[^/]+|[^/]+_spec\.[^/]+|[^/]+\.test\.[^/]+|[^/]+\.spec\.[^/]+|conftest\.py)$",
+        re.IGNORECASE,
+    )
+    _CODE_DIR_RE = re.compile(
+        r"(?:^|[\s/'\"=])(?:" + "|".join(CODE_DIRS) + r")(?:/|$|[\s'\"])"
+    )
+    _TEMPLATE_EXAMPLES = (".example", ".sample", ".template")
+
     @classmethod
     def is_doc_file(cls, file_path: str) -> bool:
         """Determines if the targeted file is documentation or non-executable text."""
@@ -59,11 +73,22 @@ class TokenSafeGuard:
 
     @classmethod
     def is_test_file(cls, file_path: str) -> bool:
-        """Determines if the targeted file is part of a test suite or mock fixture."""
+        """Determines if the targeted file is part of a test suite or mock fixture using segment/filename boundaries."""
         if not file_path:
             return False
-        p = file_path.lower()
-        return any(part in p for part in ("test", "mock", "fixture", "spec", "__tests__"))
+        norm = file_path.replace("\\", "/")
+        return bool(cls._TEST_PATH_RE.search(norm))
+
+    @classmethod
+    def is_scanner_file(cls, file_path: str) -> bool:
+        """True only for TokenSafe's own guard/redactor modules (never arbitrary app/guard.py files)."""
+        if not file_path:
+            return False
+        abs_p = os.path.abspath(file_path)
+        return abs_p in (
+            os.path.join(_TOKENSAFE_SRC_DIR, "guard.py"),
+            os.path.join(_TOKENSAFE_SRC_DIR, "secret_redactor.py"),
+        )
 
     @classmethod
     def inspect_file_write(cls, file_path: str, code_snippet: str) -> GuardResult:
@@ -76,7 +101,7 @@ class TokenSafeGuard:
 
         is_test = cls.is_test_file(file_path)
         is_doc = cls.is_doc_file(file_path)
-        is_scanner = bool(file_path and os.path.basename(file_path) in ("guard.py", "secret_redactor.py"))
+        is_scanner = cls.is_scanner_file(file_path)
         skip_code_checks = is_test or is_doc or is_scanner
 
         # 1. Secret & Private Key Fallback Guard
@@ -90,20 +115,20 @@ class TokenSafeGuard:
 
         # 2. Insecure SSL/TLS Verification Bypass Detection
         if not skip_code_checks:
-            # Python: verify=False in requests, httpx, urllib3, aiohttp
-            if re.search(r"\bverify\s*=\s*False\b", code_snippet):
+            # Python: verify=False (requests, httpx, urllib3) or ssl=False / unverified context
+            if re.search(r"""(?:\bverify\s*=\s*False\b|\bssl\s*=\s*False\b|ssl\._create_unverified_context\s*\()""", code_snippet):
                 return GuardResult(
                     blocked=True,
                     check_name="TLS_VERIFY_BYPASS",
                     reason=(
-                        f"Insecure SSL/TLS verification bypass detected ('verify=False') in "
+                        f"Insecure SSL/TLS verification bypass detected in "
                         f"'{os.path.basename(file_path) if file_path else 'code'}'. "
                         f"Disabling TLS certificate checks exposes connections to Man-in-the-Middle (MitM) attacks."
                     )
                 )
 
             # Node.js: NODE_TLS_REJECT_UNAUTHORIZED = '0' or rejectUnauthorized: false
-            if re.search(r"""(?:NODE_TLS_REJECT_UNAUTHORIZED\s*=\s*['"]0['"]|\brejectUnauthorized\s*:\s*false\b)""", code_snippet):
+            if re.search(r"""(?:NODE_TLS_REJECT_UNAUTHORIZED(?:\s*["'\]]?\s*=\s*|["']?\s*:\s*)['"]0['"]|\b["']?rejectUnauthorized["']?\s*:\s*false\b)""", code_snippet):
                 return GuardResult(
                     blocked=True,
                     check_name="TLS_VERIFY_BYPASS",
@@ -116,9 +141,11 @@ class TokenSafeGuard:
 
         # 3. Raw SQL Injection in Query Execution
         if not skip_code_checks:
-            # Python: cursor.execute(f"...") or conn.execute(f"...")
+            _db_clients = r"(?:cursor|cur|conn|connection|db|pool|client|knex|session|sequelize|prisma)"
+            _sql_kw = r"(?:\s*SELECT|\s*INSERT|\s*UPDATE|\s*DELETE|\s*DROP|\s*ALTER|\s*TRUNCATE)"
+            # Python: f-string or + concatenation inside .execute()
             py_fstring_sql = re.search(
-                r"""\b(?:cursor|conn|connection|db)\.execute\s*\(\s*f["'](?:\s*SELECT|\s*INSERT|\s*UPDATE|\s*DELETE|\s*DROP|\s*ALTER)""",
+                rf"""\b{_db_clients}\.execute\s*\(\s*(?:f["']{_sql_kw}|["']{_sql_kw}[^"']*["']\s*\+)""",
                 code_snippet,
                 re.IGNORECASE
             )
@@ -127,7 +154,7 @@ class TokenSafeGuard:
                     blocked=True,
                     check_name="SQL_INJECTION",
                     reason=(
-                        f"Potential SQL injection detected: f-string interpolation inside query execution in "
+                        f"Potential SQL injection detected: dynamic string interpolation inside query execution in "
                         f"'{os.path.basename(file_path) if file_path else 'code'}'. "
                         f"Use parameterized queries with bound placeholders ('?' or '%s') instead of dynamic string formatting."
                     )
@@ -135,7 +162,7 @@ class TokenSafeGuard:
 
             # Python: .execute("... %s ..." % (...)) or .format(...)
             py_format_sql = re.search(
-                r"""\b(?:cursor|conn|connection|db)\.execute\s*\(\s*["'](?:\s*SELECT|\s*INSERT|\s*UPDATE|\s*DELETE)[^"']+['"]\s*(?:%|\.format\s*\()""",
+                rf"""\b{_db_clients}\.execute\s*\(\s*["']{_sql_kw}[^"']+['"]\s*(?:%|\.format\s*\()""",
                 code_snippet,
                 re.IGNORECASE
             )
@@ -150,9 +177,9 @@ class TokenSafeGuard:
                     )
                 )
 
-            # JS/TS: db.query(`SELECT ... ${var}`) or pool.query(`... ${var}`)
+            # JS/TS: db.query(`SELECT ... ${var}`) or raw `+ var`
             js_template_sql = re.search(
-                r"""\b(?:db|pool|client|connection|knex)\.(?:query|execute|raw)\s*\(\s*`(?:\s*SELECT|\s*INSERT|\s*UPDATE|\s*DELETE|\s*DROP)[^`]*\$\{[^}]+\}""",
+                rf"""\b{_db_clients}\.(?:query|execute|raw|\$queryRawUnsafe|\$executeRawUnsafe)\s*\(\s*(?:`{_sql_kw}[^`]*\$\{{[^}}]+\}}|["']{_sql_kw}[^"']*["']\s*\+)""",
                 code_snippet,
                 re.IGNORECASE
             )
@@ -161,9 +188,9 @@ class TokenSafeGuard:
                     blocked=True,
                     check_name="SQL_INJECTION",
                     reason=(
-                        f"Potential SQL injection detected: template literal interpolation '${{...}}' inside query execution in "
+                        f"Potential SQL injection detected: template literal or concatenation inside query execution in "
                         f"'{os.path.basename(file_path) if file_path else 'code'}'. "
-                        f"Use parameterized queries with bound placeholders ('$1', '$2' or '?') instead of string template interpolation."
+                        f"Use parameterized queries with bound placeholders ('$1', '$2' or '?') instead of string interpolation."
                     )
                 )
 
@@ -193,6 +220,46 @@ class TokenSafeGuard:
         return GuardResult(blocked=False)
 
     @classmethod
+    def _tokenize_stage(cls, stage: str) -> List[str]:
+        try:
+            return shlex.split(stage)
+        except ValueError:
+            return stage.split()
+
+    @classmethod
+    def _stage_cmd_tokens(cls, stage: str) -> Tuple[str, List[str]]:
+        tokens = cls._tokenize_stage(stage)
+        i = 0
+        while i < len(tokens):
+            tok = tokens[i]
+            if tok in ("sudo", "env", "command", "time", "nohup"):
+                i += 1
+                continue
+            if "=" in tok and not tok.startswith("-") and tok.split("=", 1)[0].replace("_", "").isalnum():
+                i += 1
+                continue
+            break
+        if i >= len(tokens):
+            return "", []
+        return os.path.basename(tokens[i]), tokens[i + 1 :]
+
+    @classmethod
+    def _is_sensitive_filename(cls, path_arg: str) -> bool:
+        base = os.path.basename(path_arg.rstrip("/\\"))
+        if not base:
+            return False
+        low = base.lower()
+        if any(low.endswith(suf) for suf in cls._TEMPLATE_EXAMPLES):
+            return False
+        if low in cls.SENSITIVE_GIT_FILES:
+            return True
+        if low.startswith(".env."):
+            return True
+        if low.endswith((".pem", ".key")):
+            return True
+        return False
+
+    @classmethod
     def inspect_command(cls, command: str, cwd: str = "") -> GuardResult:
         """
         Audits shell and terminal commands before execution.
@@ -202,57 +269,119 @@ class TokenSafeGuard:
             return GuardResult(blocked=False)
 
         cmd = command.strip()
+        stages = [st for _, st in CommandSanitizer.split_stages(cmd) if st]
 
-        # 1. Destructive Unbounded File Deletion (rm -rf / or rm -rf ~ or rm -rf *)
-        rm_dangerous = re.search(
-            r"""\brm\s+(?:-[a-zA-Z]*[rf][a-zA-Z]*\s+)+(?:/|~|\$HOME|\.\.|\.|\.\/|\*|/\*|\.\/\*)(?:\s|$|;|&|\|)""",
-            cmd
-        )
-        if rm_dangerous or re.search(r"""\brm\s+-[a-zA-Z]*[rf][a-zA-Z]*\s+--no-preserve-root\b""", cmd):
-            return GuardResult(
-                blocked=True,
-                check_name="DESTRUCTIVE_RM",
-                reason=(
-                    f"Destructive unbounded file deletion blocked: '{cmd}'. "
-                    f"Running 'rm -rf' on root, home, parent directories, or wildcards poses catastrophic data loss risk."
-                )
-            )
-
-        # 2. Git Staging Protection for Sensitive Files (.env, private keys)
-        # Explicit git add of sensitive file
-        git_add_explicit = re.search(
-            r"""\bgit\s+add\s+(?:.*?\s+)?(?:['"]?(?:\.env|\.env\.[a-zA-Z0-9_-]+|[^'"]*\.pem|[^'"]*\.key|id_rsa|id_ed25519|credentials\.json)['"]?)(?:\s|$|;|&|\|)""",
-            cmd,
-            re.IGNORECASE
-        )
-        if git_add_explicit:
-            return GuardResult(
-                blocked=True,
-                check_name="GIT_SECRET_STAGING",
-                reason=(
-                    f"Blocked staging of sensitive credential file into git repository: '{cmd}'. "
-                    f"Environment files and private keys must be added to .gitignore and never committed to source control."
-                )
-            )
-
-        # Catch blanket 'git add .' or 'git add -A' when sensitive files exist in directory
-        if re.search(r"""\bgit\s+(?:add\s+(?:\.|\-A|\*)|commit\s+-[a-zA-Z]*a)""", cmd):
-            target_dir = cwd or os.getcwd()
-            sensitive = cls._find_unignored_sensitive_file(target_dir)
-            if sensitive:
+        # 1. Destructive Unbounded File Deletion (rm -rf /, rm -rf ~, rm -rf *, etc.)
+        _DANGEROUS_RM_TARGETS = {"", "/", "~", "~/", "~/*", "$HOME", "${HOME}", "..", ".", "./", "*", "/*", "./*"}
+        for stage in stages:
+            cmd_tok, cmd_args = cls._stage_cmd_tokens(stage)
+            if cmd_tok != "rm":
+                continue
+            has_rf = False
+            no_preserve_root = False
+            targets: List[str] = []
+            past_ddash = False
+            for a in cmd_args:
+                if a == "--" and not past_ddash:
+                    past_ddash = True
+                    continue
+                if not past_ddash and a.startswith("-"):
+                    if a == "--no-preserve-root":
+                        no_preserve_root = True
+                    elif a in ("--recursive", "--force"):
+                        has_rf = True
+                    elif not a.startswith("--") and ("r" in a or "f" in a or "R" in a):
+                        has_rf = True
+                else:
+                    targets.append(a)
+            if no_preserve_root and has_rf:
                 return GuardResult(
                     blocked=True,
-                    check_name="GIT_SECRET_STAGING",
+                    check_name="DESTRUCTIVE_RM",
                     reason=(
-                        f"Blocked blanket git staging: '{cmd}'. "
-                        f"Unignored sensitive file '{sensitive}' detected in working tree. "
-                        f"Add '{sensitive}' to .gitignore or stage files explicitly to prevent credential leaks into git."
+                        f"Destructive unbounded file deletion blocked: '{cmd}'. "
+                        f"Running 'rm -rf' with --no-preserve-root poses catastrophic data loss risk."
                     )
                 )
+            if has_rf:
+                for tgt in targets:
+                    norm_tgt = tgt.rstrip("/") if tgt != "/" else "/"
+                    if tgt in _DANGEROUS_RM_TARGETS or norm_tgt in ("/", "~", "$HOME", "${HOME}", ".", "..", "*"):
+                        return GuardResult(
+                            blocked=True,
+                            check_name="DESTRUCTIVE_RM",
+                            reason=(
+                                f"Destructive unbounded file deletion blocked: '{cmd}'. "
+                                f"Running 'rm -rf' on root, home, parent directories, or wildcards poses catastrophic data loss risk."
+                            )
+                        )
 
-        # 3. Network Data Exfiltration Prevention (piping secrets to curl/wget)
+        # 2. Git Staging Protection for Sensitive Files (.env, private keys)
+        for stage in stages:
+            cmd_tok, cmd_args = cls._stage_cmd_tokens(stage)
+            if cmd_tok != "git":
+                continue
+            git_dir = cwd or os.getcwd()
+            sub_idx = 0
+            while sub_idx < len(cmd_args):
+                a = cmd_args[sub_idx]
+                if a == "-C" and sub_idx + 1 < len(cmd_args):
+                    cand_dir = cmd_args[sub_idx + 1]
+                    git_dir = cand_dir if os.path.isabs(cand_dir) else os.path.abspath(os.path.join(git_dir, cand_dir))
+                    sub_idx += 2
+                elif a in ("-c", "--git-dir", "--work-tree") and sub_idx + 1 < len(cmd_args):
+                    sub_idx += 2
+                elif a.startswith("-"):
+                    sub_idx += 1
+                else:
+                    break
+            subcmd = cmd_args[sub_idx] if sub_idx < len(cmd_args) else ""
+            sub_args = cmd_args[sub_idx + 1 :]
+
+            if subcmd == "add":
+                blanket = False
+                for a in sub_args:
+                    if a in ("--all", "-A", ".", "./", "*"):
+                        blanket = True
+                    elif not a.startswith("-") and cls._is_sensitive_filename(a):
+                        return GuardResult(
+                            blocked=True,
+                            check_name="GIT_SECRET_STAGING",
+                            reason=(
+                                f"Blocked staging of sensitive credential file into git repository: '{cmd}'. "
+                                f"Environment files and private keys must be added to .gitignore and never committed to source control."
+                            )
+                        )
+                if blanket:
+                    sensitive = cls._find_unignored_sensitive_file(git_dir)
+                    if sensitive:
+                        return GuardResult(
+                            blocked=True,
+                            check_name="GIT_SECRET_STAGING",
+                            reason=(
+                                f"Blocked blanket git staging: '{cmd}'. "
+                                f"Unignored sensitive file '{sensitive}' detected in working tree. "
+                                f"Add '{sensitive}' to .gitignore or stage files explicitly to prevent credential leaks into git."
+                            )
+                        )
+            elif subcmd == "commit":
+                if any(a == "--all" or (a.startswith("-") and not a.startswith("--") and "a" in a) for a in sub_args):
+                    sensitive = cls._find_unignored_sensitive_file(git_dir)
+                    if sensitive:
+                        return GuardResult(
+                            blocked=True,
+                            check_name="GIT_SECRET_STAGING",
+                            reason=(
+                                f"Blocked blanket git staging: '{cmd}'. "
+                                f"Unignored sensitive file '{sensitive}' detected in working tree. "
+                                f"Add '{sensitive}' to .gitignore or stage files explicitly to prevent credential leaks into git."
+                            )
+                        )
+
+        # 3. Network Data Exfiltration Prevention (piping or posting secrets to curl/wget/nc)
+        _SENS_EXFIL = r"(?:\.env(?:\.[\w-]+)?|id_rsa|id_ed25519|\.key|\.pem|credentials\.json|service_account\.json|secret|password|token)"
         exfil_pattern = re.search(
-            r"""\b(?:curl|wget|nc|ncat|netcat)\b.*?(?:\$\(cat\s+[^)]*(?:\.env|id_rsa|\.key|\.pem|secret|password|token)[^)]*\)|`cat\s+[^`]*(?:\.env|id_rsa|\.key|\.pem|secret|password|token)[^`]*`|-d\s+@(?:[^\s]*(?:\.env|id_rsa|\.key|\.pem))|-F\s+[^=]*=@(?:[^\s]*(?:\.env|id_rsa|\.key|\.pem))|--post-file[=\s]+(?:[^\s]*(?:\.env|id_rsa|\.key|\.pem)))""",
+            rf"""(?:\b(?:curl|wget|nc|ncat|netcat)\b.*?(?:\$\(\s*(?:cat\s+)?<?\s*[^)]*{_SENS_EXFIL}[^)]*\)|`cat\s+[^`]*{_SENS_EXFIL}[^`]*`|(?:-d|--data|--data-binary|--data-raw|-T|--upload-file)[=\s]*@?[^\s]*{_SENS_EXFIL}|-F\s+[^=]*=@[^\s]*{_SENS_EXFIL}|--post-file[=\s]+[^\s]*{_SENS_EXFIL}|<\s*[^\s]*{_SENS_EXFIL})|\bcat\s+[^\s|]*{_SENS_EXFIL}\s*\|\s*(?:curl|wget|nc|ncat|netcat)\b)""",
             cmd,
             re.IGNORECASE
         )
@@ -267,20 +396,18 @@ class TokenSafeGuard:
             )
 
         # 4. Package Typosquatting / Hallucination Early Warning (Non-blocking warning)
-        pkg_install_match = re.search(
-            r"""\b(?:pip(?:3)?\s+install|npm\s+(?:i|install)|pnpm\s+add|yarn\s+add|bun\s+add)\s+([a-zA-Z0-9_\-\s@/]+)""",
+        for pkg_install_match in re.finditer(
+            r"""\b(?:pip(?:3)?\s+install|npm\s+(?:i|install)|pnpm\s+add|yarn\s+add|bun\s+add)\s+([^;&|\n]+)""",
             cmd
-        )
-        if pkg_install_match:
+        ):
             pkg_str = pkg_install_match.group(1)
             tokens = [t.strip().lower() for t in pkg_str.split() if t.strip() and not t.startswith("-")]
             for tok in tokens:
                 if tok.startswith("@"):
-                    # Scoped package e.g. @org/pkg or @org/pkg@1.0.0
                     sub = tok[1:]
                     base_pkg = sub.split("@")[0].strip()
                 else:
-                    base_pkg = tok.split("==")[0].split("@")[0].strip()
+                    base_pkg = re.split(r"[=<>~!@\[\]]", tok, maxsplit=1)[0].strip()
 
                 if base_pkg in cls.KNOWN_TYPOSQUATS or f"@{base_pkg}" in cls.KNOWN_TYPOSQUATS:
                     return GuardResult(
@@ -305,58 +432,100 @@ class TokenSafeGuard:
         return GuardResult(blocked=False)
 
     @classmethod
+    def _has_code_target_in_args(cls, cmd_tok: str, cmd_args: List[str]) -> bool:
+        """Separates grep/rg/find pattern vs path args so grep 'app' server.log is not flagged."""
+        positionals: List[str] = []
+        skip_next = False
+        value_flags = {"-e", "-f", "-m", "-A", "-B", "-C", "-g", "--glob", "--type", "-t", "-name", "-iname", "-path"}
+        for a in cmd_args:
+            if skip_next:
+                skip_next = False
+                continue
+            if a in value_flags:
+                skip_next = True
+                continue
+            if a.startswith("-"):
+                continue
+            positionals.append(a)
+
+        # For grep/egrep/rg without -e, the first positional is the PATTERN; remaining positionals are PATHS.
+        if cmd_tok in ("grep", "egrep", "rg", "ripgrep"):
+            has_e = any(a == "-e" or a.startswith("--regexp") for a in cmd_args)
+            path_args = positionals if has_e else positionals[1:]
+        else:
+            path_args = positionals
+
+        for p in path_args:
+            low_p = p.lower()
+            if any(low_p.endswith(ext) or ext in low_p for ext in cls.CODE_EXTENSIONS):
+                return True
+            segs = [s for s in re.split(r"[/\\]", p.strip("\"'")) if s]
+            if any(s in cls.CODE_DIRS for s in segs):
+                return True
+        return False
+
+    @classmethod
     def _check_raw_code_search(cls, cmd: str) -> Optional[str]:
         """
         Detects unconstrained terminal code searches (grep/rg/find targeting source files).
-        Enforces use of TokenSafe MCP tools (smart_read_file, get_architecture_graph).
-        Excludes safe pipe filters (e.g., git log | grep, ps | grep, npm test | grep).
+        Quote-aware splitting catches piped bypasses (rg foo src/ | head) while
+        allowing safe process pipe filters (ps aux | grep node, cat server.log | grep app).
         """
-        # Split compound commands (&&, ||, ;)
-        stages = [s.strip() for s in re.split(r'(?:&&|\|\||;)', cmd) if s.strip()]
+        pairs = CommandSanitizer.split_stages(cmd)
+        # Group pipeline chains separated by && / || / ; / \n
+        pipelines: List[List[str]] = []
+        for op, stage in pairs:
+            if op == "|" and pipelines:
+                pipelines[-1].append(stage)
+            else:
+                pipelines.append([stage])
 
-        for stage in stages:
-            pipe_parts = [p.strip() for p in stage.split('|')]
+        for pipe_parts in pipelines:
+            first_tok, first_args = cls._stage_cmd_tokens(pipe_parts[0])
+            targets_to_check: List[str] = []
+            if len(pipe_parts) == 1:
+                targets_to_check = [pipe_parts[0]]
+            else:
+                if first_tok in ("grep", "egrep", "rg", "ripgrep", "find") or (first_tok == "git" and "grep" in first_args[:3]):
+                    targets_to_check.append(pipe_parts[0])
+                if first_tok in ("cat", "less", "more"):
+                    if any(any(a.lower().endswith(ext) for ext in cls.CODE_EXTENSIONS) for a in first_args):
+                        targets_to_check.append(pipe_parts[-1])
 
-            # If grep is preceded by a non-code command (ps, git log, docker, npm test), it's a pipe filter
-            if len(pipe_parts) > 1:
-                first_part = pipe_parts[0]
-                is_file_dump = bool(re.search(r'\b(cat|less|more)\s+[\w\.\/\-]+', first_part))
-                if not is_file_dump:
-                    continue
+            for sub_cmd in targets_to_check:
+                cmd_tok, cmd_args = cls._stage_cmd_tokens(sub_cmd)
+                is_git_grep = cmd_tok == "git" and "grep" in cmd_args[:3]
 
-            sub_cmd = pipe_parts[-1]
-
-            # 1. Check for grep / egrep / ripgrep (rg)
-            grep_match = re.search(r'\b(grep|egrep|rg|ripgrep)\b', sub_cmd)
-            if grep_match:
-                has_code_ext = any(ext in sub_cmd for ext in cls.CODE_EXTENSIONS)
-                has_code_dir = any(re.search(rf'\b{re.escape(d)}(?:/|\b)', sub_cmd) for d in cls.CODE_DIRS)
-                # '-rn' / '-Rn' are the canonical recursive forms — the flag
-                # regex must accept letters after r/R, plus the long --recursive.
-                is_recursive_all = bool(re.search(r'\b(grep|egrep)\b.*?\s(?:-[a-zA-Z]*[rR][a-zA-Z]*|--recursive)\b', sub_cmd)) or \
-                                   bool(re.search(r'\brg\b', sub_cmd))
-
-                if has_code_ext or has_code_dir or is_recursive_all:
-                    return (
-                        f"Raw terminal code search blocked: '{sub_cmd}'. "
-                        f"TokenSafe Protocol mandates using MCP tools to prevent context window bloat:\n"
-                        f"• To search keywords, symbols, or configs: call 'tokensafe:scoped_search(query, scope)'\n"
-                        f"• To inspect definitions/symbols in a file: call 'tokensafe:smart_read_file(path, symbol)'\n"
-                        f"• To locate God Nodes & architecture: call 'tokensafe:get_architecture_graph(project_path)'\n"
-                        f"• To inspect project exports & types: call 'tokensafe:get_api_surface(project_path)'"
+                if cmd_tok in ("grep", "egrep", "rg", "ripgrep") or is_git_grep:
+                    effective_args = cmd_args[cmd_args.index("grep") + 1:] if is_git_grep else cmd_args
+                    has_code_ext = any(ext in sub_cmd for ext in cls.CODE_EXTENSIONS)
+                    has_code_dir = cls._has_code_target_in_args("grep" if is_git_grep else cmd_tok, effective_args)
+                    is_recursive_grep = (cmd_tok in ("grep", "egrep") or is_git_grep) and any(
+                        (a.startswith("-") and not a.startswith("--") and ("r" in a or "R" in a)) or a == "--recursive"
+                        for a in effective_args
                     )
+                    is_rg = cmd_tok in ("rg", "ripgrep")
 
-            # 2. Check for find on source code
-            find_match = re.search(r'\bfind\b\s+([\w\.\/\-]+)', sub_cmd)
-            if find_match:
-                has_code_ext = any(ext in sub_cmd for ext in cls.CODE_EXTENSIONS)
-                has_code_dir = any(re.search(rf'\b{re.escape(d)}(?:/|\b)', sub_cmd) for d in cls.CODE_DIRS)
-                if has_code_ext or has_code_dir:
-                    return (
-                        f"Raw file crawl via 'find' blocked: '{sub_cmd}'. "
-                        f"Use 'tokensafe:scoped_search(query)' or 'tokensafe:get_architecture_graph(project_path)' "
-                        f"instead of scanning directory trees."
-                    )
+                    if has_code_ext or has_code_dir or is_recursive_grep or is_rg:
+                        return (
+                            f"Raw terminal code search blocked: '{sub_cmd}'. "
+                            f"TokenSafe Protocol mandates using MCP tools to prevent context window bloat:\n"
+                            f"• To search keywords, symbols, or configs: call 'tokensafe:scoped_search(query, scope)'\n"
+                            f"• To inspect definitions/symbols in a file: call 'tokensafe:smart_read_file(path, symbol)'\n"
+                            f"• To locate God Nodes & architecture: call 'tokensafe:get_architecture_graph(project_path)'\n"
+                            f"• To inspect project exports & types: call 'tokensafe:get_api_surface(project_path)'"
+                        )
+
+                elif cmd_tok == "find":
+                    has_code_ext = any(ext in sub_cmd for ext in cls.CODE_EXTENSIONS)
+                    has_code_dir = cls._has_code_target_in_args(cmd_tok, cmd_args) or bool(cls._CODE_DIR_RE.search(sub_cmd))
+                    is_root_file_crawl = any(a in (".", "./") for a in cmd_args[:2]) and ("-type" in cmd_args and "f" in cmd_args)
+                    if has_code_ext or has_code_dir or is_root_file_crawl:
+                        return (
+                            f"Raw file crawl via 'find' blocked: '{sub_cmd}'. "
+                            f"Use 'tokensafe:scoped_search(query)' or 'tokensafe:get_architecture_graph(project_path)' "
+                            f"instead of scanning directory trees."
+                        )
 
         return None
 
@@ -364,12 +533,13 @@ class TokenSafeGuard:
     def _find_unignored_sensitive_file(cls, target_dir: str) -> Optional[str]:
         """
         Returns the repo-relative path of the first unignored sensitive file, or None.
-        Prefers `git status --porcelain -uall` (exact .gitignore semantics incl.
-        negation and nested ignore files) over crawling the tree with os.walk,
-        which was both slow on large repos and inaccurate about ignore rules.
+        Prefers `git status --porcelain -uall` (skipping deleted 'D' entries).
         """
         def _is_sensitive_name(name: str) -> bool:
-            return name in cls.SENSITIVE_GIT_FILES or (name.startswith(".env") and not name.endswith(".example"))
+            low = name.lower()
+            if any(low.endswith(suf) for suf in cls._TEMPLATE_EXAMPLES):
+                return False
+            return name in cls.SENSITIVE_GIT_FILES or (name.startswith(".env") and not any(low.endswith(suf) for suf in cls._TEMPLATE_EXAMPLES))
 
         # 1. Fast & exact: ask git itself (only lists non-ignored files).
         try:
@@ -379,7 +549,8 @@ class TokenSafeGuard:
             )
             if res.returncode == 0:
                 for line in res.stdout.splitlines():
-                    # Format: "XY PATH" (path may be quoted; renames use "old -> new")
+                    if len(line) >= 2 and line[:2] in (" D", "D ", "DD"):
+                        continue
                     path_part = line[3:].strip() if len(line) > 3 else ""
                     if path_part.startswith('"') and path_part.endswith('"'):
                         path_part = path_part[1:-1]
@@ -390,37 +561,50 @@ class TokenSafeGuard:
         except Exception:
             pass
 
-        # 2. Fallback: bounded manual walk with naive gitignore matching.
+        # 2. Fallback: bounded manual walk with cached .gitignore patterns
+        ignore_patterns = cls._load_gitignore_patterns(target_dir)
         for root, dirs, files in os.walk(target_dir):
-            # Prune common heavy/inert subtrees
             dirs[:] = [d for d in dirs if d not in (".git", "node_modules", ".venv", "venv", "__pycache__", "dist", "build", ".next", ".turbo")]
             for f in files:
                 if _is_sensitive_name(f):
                     full = os.path.join(root, f)
                     rel_path = os.path.relpath(full, target_dir)
-                    if not cls._is_git_ignored(full, target_dir):
+                    if not cls._matches_gitignore(full, target_dir, ignore_patterns):
                         return rel_path
         return None
+
+    @staticmethod
+    def _load_gitignore_patterns(repo_root: str) -> List[str]:
+        gitignore_path = os.path.join(repo_root, ".gitignore")
+        patterns: List[str] = []
+        if not os.path.exists(gitignore_path):
+            return patterns
+        try:
+            with open(gitignore_path, "r", encoding="utf-8", errors="replace") as f:
+                for raw_line in f:
+                    line = raw_line.strip()
+                    if line and not line.startswith("#") and not line.startswith("!"):
+                        patterns.append(line.lstrip("/"))
+        except Exception:
+            pass
+        return patterns
+
+    @staticmethod
+    def _matches_gitignore(file_path: str, repo_root: str, patterns: List[str]) -> bool:
+        if not patterns:
+            return False
+        filename = os.path.basename(file_path)
+        rel_path = os.path.relpath(file_path, repo_root).replace("\\", "/")
+        for clean_pattern in patterns:
+            if fnmatch.fnmatch(filename, clean_pattern) or fnmatch.fnmatch(rel_path, clean_pattern):
+                return True
+            if clean_pattern.endswith("/") and rel_path.startswith(clean_pattern):
+                return True
+            if "/" not in clean_pattern and rel_path.startswith(clean_pattern + "/"):
+                return True
+        return False
 
     @classmethod
     def _is_git_ignored(cls, file_path: str, repo_root: str) -> bool:
         """Checks if a file is covered by .gitignore in the repository."""
-        gitignore_path = os.path.join(repo_root, ".gitignore")
-        if not os.path.exists(gitignore_path):
-            return False
-        try:
-            filename = os.path.basename(file_path)
-            rel_path = os.path.relpath(file_path, repo_root).replace("\\", "/")
-            with open(gitignore_path, "r", encoding="utf-8", errors="replace") as f:
-                for raw_line in f:
-                    line = raw_line.strip()
-                    if not line or line.startswith("#"):
-                        continue
-                    clean_pattern = line.lstrip("/")
-                    if fnmatch.fnmatch(filename, clean_pattern) or fnmatch.fnmatch(rel_path, clean_pattern):
-                        return True
-                    if clean_pattern.endswith("/") and rel_path.startswith(clean_pattern):
-                        return True
-        except Exception:
-            pass
-        return False
+        return cls._matches_gitignore(file_path, repo_root, cls._load_gitignore_patterns(repo_root))

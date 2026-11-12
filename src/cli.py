@@ -11,7 +11,7 @@ import sys
 import os
 import subprocess
 
-SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
 PROJECT_ROOT = os.path.dirname(SCRIPT_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -93,9 +93,36 @@ def summarize_unittest_output(raw: str, full_traceback: bool = False) -> str:
     return "\n".join(out)
 
 
+def _print_help():
+    print("TokenSafe CLI — usage: tokensafe <command> [args]\n")
+    print("Commands:")
+    print("  stats / markdown / html        Savings analytics (terminal / .md report / dashboard)")
+    print("  benchmark                      Zero-context-loss benchmark suite (simulated SWE-bench harness)")
+    print("  graph / map / skeleton         Architecture graph / API surface / AST skeleton of a file")
+    print("  test <prompt>                  Preview TOCP S-expression prompt compaction")
+    print("  digest [--send] [--email=...]  Compile (and optionally dispatch) the weekly team digest")
+    print("  guard <command>                Pre-flight safety check for a shell command")
+    print("  doctor                         Audit MCP tool overhead and token tax")
+    print("  tests [pytest] [--traceback]   Run the unit test suite (compact failure report)")
+    print("  prune [--days N | --max N]     Compact metrics database (roll old events)")
+    print("  vacuum                         Reclaim SQLite disk space")
+    print("  reset                          Reset all local token metrics")
+    print("  install | setup [--all]        Configure detected agent environments")
+    print("  update | upgrade               Self-update npm/PyPI package and re-sync agents")
+    print("  check-update                   Check for a newer published version")
+    print("  activate / license             License activation and status")
+    print("  sync                           Sync telemetry with the cloud backend")
+    print("  providers / proxy / mcp        Providers info / proxy server / MCP stdio server")
+    print("  --version                      Print version and exit")
+
+
 def main():
     args = sys.argv[1:]
     command = args[0] if args else "stats"
+
+    if command in ("--help", "-h", "help"):
+        _print_help()
+        return
 
     # Fast path: version queries must not construct MetricsTracker (which creates
     # the data dir and SQLite database). `tokensafe --version` may run in read-only
@@ -113,28 +140,20 @@ def main():
                 VersionChecker.notify_os_update(force=True)
         return
 
-    tracker = MetricsTracker()
-    dashboard = Dashboard(tracker)
-
     if command in ("stats", "dashboard"):
+        tracker = MetricsTracker()
+        dashboard = Dashboard(tracker)
         try:
             from src.telemetry_sync import TelemetrySync
             TelemetrySync.sync_background()
         except Exception:
             pass
         print(dashboard.render_terminal())
-        # Update banner in the most-reliable visibility channel: the stats
-        # output itself. Best-effort — never break the dashboard render.
-        try:
-            from src.version_checker import VersionChecker
-            banner = VersionChecker.get_banner()
-            if banner:
-                print(banner)
-        except Exception:
-            pass
 
     elif command in ("html", "web"):
         from src.paths import resolve_data_dir
+        tracker = MetricsTracker()
+        dashboard = Dashboard(tracker)
         html_content = dashboard.render_html()
         out_path = os.path.join(resolve_data_dir(), "dashboard.html")
         os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -142,10 +161,19 @@ def main():
             f.write(html_content)
         print(f"\n⚡ Interactive HTML Dashboard generated at: {out_path}")
         try:
-            subprocess.run(["open", out_path])
+            if sys.platform == "darwin":
+                subprocess.run(["open", out_path], check=False)
+            elif os.name == "nt":
+                os.startfile(out_path)  # type: ignore[attr-defined]
+            else:
+                subprocess.run(["xdg-open", out_path], check=False)
             print("   Opened in default browser.")
         except Exception:
-            pass
+            try:
+                import webbrowser
+                webbrowser.open(f"file://{os.path.abspath(out_path)}")
+            except Exception:
+                pass
 
     elif command in ("benchmark", "bench"):
         from src.benchmark import BenchmarkSuite
@@ -204,26 +232,40 @@ def main():
         sub = args[1] if len(args) > 1 else "help"
         if sub in ("audit", "scan"):
             target_path = args[2] if len(args) > 2 else os.getcwd()
+            if not os.path.exists(target_path):
+                print(f"\n\033[31m✖ Target path not found: {target_path}\033[0m\n")
+                sys.exit(1)
             print(f"\n\033[1m\033[36m🛡️ TOKENSAFE SECURITY & HYGIENE AUDIT 🛡️\033[0m")
             print(f"  Target: {target_path}\n")
             violations = []
             files_scanned = 0
             code_exts = (".py", ".ts", ".tsx", ".js", ".jsx", ".go", ".rs", ".java")
-            for root, dirs, files in os.walk(target_path):
-                dirs[:] = [d for d in dirs if d not in (".git", "node_modules", "dist", "build", ".next", ".venv", "venv", "__pycache__")]
-                for f in files:
-                    if f.endswith(code_exts):
-                        files_scanned += 1
-                        full_p = os.path.join(root, f)
-                        try:
-                            with open(full_p, "r", encoding="utf-8", errors="replace") as fp:
-                                content = fp.read()
-                            res = TokenSafeGuard.inspect_file_write(full_p, content)
-                            if res.blocked:
-                                rel_p = os.path.relpath(full_p, target_path)
-                                violations.append((rel_p, res.check_name, res.reason))
-                        except Exception:
-                            pass
+            if os.path.isfile(target_path):
+                files_scanned = 1
+                try:
+                    with open(target_path, "r", encoding="utf-8", errors="replace") as fp:
+                        content = fp.read()
+                    res = TokenSafeGuard.inspect_file_write(target_path, content)
+                    if res.blocked:
+                        violations.append((os.path.basename(target_path), res.check_name, res.reason))
+                except Exception:
+                    pass
+            else:
+                for root, dirs, files in os.walk(target_path):
+                    dirs[:] = [d for d in dirs if d not in (".git", "node_modules", "dist", "build", ".next", ".venv", "venv", "__pycache__")]
+                    for f in files:
+                        if f.endswith(code_exts):
+                            files_scanned += 1
+                            full_p = os.path.join(root, f)
+                            try:
+                                with open(full_p, "r", encoding="utf-8", errors="replace") as fp:
+                                    content = fp.read()
+                                res = TokenSafeGuard.inspect_file_write(full_p, content)
+                                if res.blocked:
+                                    rel_p = os.path.relpath(full_p, target_path)
+                                    violations.append((rel_p, res.check_name, res.reason))
+                            except Exception:
+                                pass
             if not violations:
                 print(f"  \033[32m✔ All {files_scanned} files passed TokenSafe Guard audit cleanly! Zero secret fallbacks or SQLi.\033[0m\n")
             else:
@@ -231,8 +273,21 @@ def main():
                 for rel_p, check, reason in violations:
                     print(f"    \033[31m• [{check}]\033[0m {rel_p}: {reason}")
                 print()
-        elif sub in ("check", "test") or len(args) > 1:
-            cmd_to_test = " ".join(args[2:]) if sub in ("check", "test") and len(args) > 2 else " ".join(args[1:])
+        elif sub in ("check", "test") and len(args) > 2:
+            cmd_to_test = " ".join(args[2:])
+            print(f"\n\033[1m\033[36m🛡️ TOKENSAFE COMMAND GUARD CHECK 🛡️\033[0m\n")
+            print(f"  Command: \033[1m{cmd_to_test}\033[0m")
+            res = TokenSafeGuard.inspect_command(cmd_to_test)
+            if res.blocked:
+                print(f"  Status:  \033[31m\033[1mBLOCKED\033[0m [{res.check_name}]")
+                print(f"  Reason:  {res.reason}\n")
+            elif res.warning_only:
+                print(f"  Status:  \033[33m\033[1mWARNING\033[0m [{res.check_name}]")
+                print(f"  Notice:  {res.reason}\n")
+            else:
+                print(f"  Status:  \033[32m\033[1mALLOWED\033[0m (Command is safe and policy-compliant)\n")
+        elif sub not in ("help", "--help", "-h", "check", "test") and len(args) > 1:
+            cmd_to_test = " ".join(args[1:])
             print(f"\n\033[1m\033[36m🛡️ TOKENSAFE COMMAND GUARD CHECK 🛡️\033[0m\n")
             print(f"  Command: \033[1m{cmd_to_test}\033[0m")
             res = TokenSafeGuard.inspect_command(cmd_to_test)
@@ -247,11 +302,23 @@ def main():
         else:
             print("\nUsage:")
             print("  tokensafe guard \"<command>\"       Audit a terminal command line")
+            print("  tokensafe guard check \"<command>\" Audit a terminal command line")
             print("  tokensafe guard audit [path]      Recursively audit source files for secrets & vulnerabilities\n")
 
     elif command == "proxy":
         from src.proxy import run_proxy
-        port = int(args[1]) if len(args) > 1 else 8765
+        if len(args) > 1 and args[1] in ("--help", "-h", "help"):
+            print("Usage: tokensafe proxy [port]   (default: 8765)")
+            return
+        port = 8765
+        if len(args) > 1:
+            try:
+                port = int(args[1])
+                if not (1 <= port <= 65535):
+                    raise ValueError("port out of range")
+            except ValueError:
+                print(f"Invalid port '{args[1]}'. Expected integer 1..65535 (default: 8765).")
+                sys.exit(1)
         run_proxy(port)
 
     elif command == "mcp":
@@ -305,9 +372,15 @@ def main():
     elif command in ("map", "surface"):
         from src.graph_engine import GraphEngine
         target_dir = args[1] if len(args) > 1 else os.getcwd()
+        if not os.path.isdir(target_dir):
+            print(f"\n\033[31m✖ Directory not found: {target_dir}\033[0m\n")
+            sys.exit(1)
         graph = GraphEngine.get_instance(target_dir)
         out_file = os.path.join(os.path.abspath(target_dir), "tokensafe-out", "API_SURFACE.md")
         graph.generate_api_surface(out_file)
+        if not os.path.exists(out_file):
+            print(f"\n\033[31m✖ Could not write API Surface Map to: {out_file}\033[0m\n")
+            sys.exit(1)
         print(f"\n✓ Generated API Surface Map: {out_file} ({os.path.getsize(out_file):,} bytes)")
         print(f"  AI agents can read this file in ~1.5k tokens instead of reading the entire repo.\n")
 
@@ -420,7 +493,7 @@ def main():
             print("\nSet environment variable or add to data/config.json to activate.\n")
 
     elif command in ("markdown", "md", "export"):
-        print(dashboard.render_markdown())
+        print(Dashboard(MetricsTracker()).render_markdown())
 
     elif command == "test":
         if len(args) < 2:
@@ -500,7 +573,7 @@ def main():
 
         print(f"\n\033[1m\033[36m⚡ DATA RETENTION PRUNE ⚡\033[0m")
         print(f"Policy: retain events < {days or 'any'} days old, max {max_events or 'unlimited'} entries.")
-        res = tracker.prune(days=days, max_events=max_events, vacuum=True)
+        res = MetricsTracker().prune(days=days, max_events=max_events, vacuum=True)
         b_before = res.get("db_size_before", 0) / 1024.0
         b_after = res.get("db_size_after", 0) / 1024.0
         print(f"\033[32m✔ Pruned {res['pruned_events']} granular events into lifetime rollup table.\033[0m")
@@ -508,21 +581,27 @@ def main():
 
     elif command == "vacuum":
         print("\n\033[1m\033[36m⚡ VACUUMING METRICS DATABASE ⚡\033[0m")
-        b_before = (os.path.getsize(tracker.db_path) if os.path.exists(tracker.db_path) else 0) / 1024.0
-        tracker.vacuum()
-        b_after = (os.path.getsize(tracker.db_path) if os.path.exists(tracker.db_path) else 0) / 1024.0
+        t = MetricsTracker()
+        b_before = (os.path.getsize(t.db_path) if os.path.exists(t.db_path) else 0) / 1024.0
+        t.vacuum()
+        b_after = (os.path.getsize(t.db_path) if os.path.exists(t.db_path) else 0) / 1024.0
         print(f"\033[32m✔ Database compacted. Size: {b_before:.1f} KB ➔ {b_after:.1f} KB\033[0m\n")
 
     elif command in ("digest", "weekly-digest"):
         from src.weekly_digest import WeeklyDigestGenerator
-        from src.mailer import TokenSafeMailer
 
         target_email = None
         do_send = "--send" in args
 
-        for a in args:
+        idx = 1
+        while idx < len(args):
+            a = args[idx]
             if a.startswith("--email="):
                 target_email = a.split("=", 1)[1].strip()
+            elif a == "--email" and idx + 1 < len(args):
+                target_email = args[idx + 1].strip()
+                idx += 1
+            idx += 1
 
         if not target_email:
             from src.license_manager import LicenseManager
@@ -537,21 +616,16 @@ def main():
             stats = {
                 "owner_email": target_email,
                 "tier": "team",
-                "seats_total": 5,
-                "active_members_count": 4,
-                "total_members_count": 5,
-                "total_original_tokens": 5800000,
-                "total_saved_tokens": 4200000,
-                "total_saved_human": "4.2M",
-                "total_usd_saved": 28.50,
-                "total_events": 340,
-                "reduction_pct": 72.4,
-                "leaderboard": [
-                    {"rank": 1, "email": "alex.dev@corp.com", "saved_tokens": 1650000, "saved_tokens_human": "1.7M", "usd_saved_formatted": "$11.20", "event_count": 120},
-                    {"rank": 2, "email": "maria.arch@corp.com", "saved_tokens": 1200000, "saved_tokens_human": "1.2M", "usd_saved_formatted": "$8.10", "event_count": 94},
-                    {"rank": 3, "email": "sergey.qa@corp.com", "saved_tokens": 850000, "saved_tokens_human": "850K", "usd_saved_formatted": "$5.70", "event_count": 68},
-                    {"rank": 4, "email": target_email, "saved_tokens": 500000, "saved_tokens_human": "500K", "usd_saved_formatted": "$3.50", "event_count": 58}
-                ]
+                "seats_total": 1,
+                "active_members_count": 0,
+                "total_members_count": 0,
+                "total_original_tokens": 0,
+                "total_saved_tokens": 0,
+                "total_saved_human": "0",
+                "total_usd_saved": 0.0,
+                "total_events": 0,
+                "reduction_pct": 0.0,
+                "leaderboard": [],
             }
 
         print(WeeklyDigestGenerator.render_email_text(stats))
@@ -564,45 +638,27 @@ def main():
         print(f"\n📧 Apple-style email HTML preview generated at: {out_html}")
 
         if do_send:
-            ok = TokenSafeMailer.send_weekly_digest(target_email, stats, sync=True)
-            if ok:
-                print(f"\033[32m✔ Weekly digest successfully dispatched to {target_email}!\033[0m\n")
-            else:
-                print(f"\033[33m○ Digest dispatch queued (SMTP_PASS not configured in local environment).\033[0m\n")
+            try:
+                from src.mailer import TokenSafeMailer
+                ok = TokenSafeMailer.send_weekly_digest(target_email, stats, sync=True)
+                if ok:
+                    print(f"\033[32m✔ Weekly digest successfully dispatched to {target_email}!\033[0m\n")
+                else:
+                    print(f"\033[33m○ Digest dispatch queued (SMTP_PASS not configured in local environment).\033[0m\n")
+            except ImportError:
+                print("\n\033[33m○ Email delivery is handled by TokenSafe Cloud; preview HTML saved locally.\033[0m\n")
         else:
             print("Tip: Run with --send to dispatch email, or --email=<addr> to target specific team.\n")
 
     elif command == "reset":
         confirm = input("Are you sure you want to reset all token metrics? [y/N]: ").strip().lower()
         if confirm == "y":
-            tracker.reset()
+            MetricsTracker().reset()
             print("Metrics database reset successfully.")
         else:
             print("Reset cancelled.")
 
     else:
-        if command in ("--help", "-h", "help"):
-            print("TokenSafe CLI — usage: tokensafe <command> [args]\n")
-            print("Commands:")
-            print("  stats / markdown / html        Savings analytics (terminal / .md report / dashboard)")
-            print("  benchmark                      Zero-context-loss benchmark suite (simulated SWE-bench harness)")
-            print("  graph / map / skeleton         Architecture graph / API surface / AST skeleton of a file")
-            print("  test <prompt>                  Preview TOCP S-expression prompt compaction")
-            print("  digest [--send] [--email=...]  Compile (and optionally dispatch) the weekly team digest")
-            print("  guard <command>                Pre-flight safety check for a shell command")
-            print("  doctor                         Audit MCP tool overhead and token tax")
-            print("  tests [pytest] [--traceback]   Run the unit test suite (compact failure report)")
-            print("  prune [--days N | --max N]     Compact metrics database (roll old events)")
-            print("  vacuum                         Reclaim SQLite disk space")
-            print("  reset                          Reset all local token metrics")
-            print("  install | setup [--all]        Configure detected agent environments")
-            print("  update | upgrade               Self-update npm/PyPI package and re-sync agents")
-            print("  check-update                   Check for a newer published version")
-            print("  activate / license             License activation and status")
-            print("  sync                           Sync telemetry with the cloud backend")
-            print("  providers / proxy / mcp        Providers info / proxy server / MCP stdio server")
-            print("  --version                      Print version and exit")
-            sys.exit(0)
         print(f"Unknown command: {command}")
         print("Available commands: stats, sync, html, test, tests, doctor, providers, mcp, benchmark, proxy, graph, map, skeleton, guard, vacuum, prune, digest, activate, license, markdown, install, setup, update, check-update, reset. Run 'tokensafe help' for details.")
         sys.exit(1)

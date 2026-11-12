@@ -115,7 +115,13 @@ class ScopedSearch:
 
         query = query.strip()
         scope = (scope or "all").lower().strip()
-        max_results = min(100, max(1, int(max_results)))
+        if max_results is None or isinstance(max_results, bool):
+            max_results = 25
+        else:
+            try:
+                max_results = min(100, max(1, int(max_results)))
+            except (TypeError, ValueError):
+                max_results = 25
 
         # Compile search pattern
         flags = 0 if case_sensitive else re.IGNORECASE
@@ -148,13 +154,14 @@ class ScopedSearch:
             if total_scanned_files >= max_scanned_files:
                 break
 
-            # Prune ignored directories in-place
+            # Prune ignored directories in-place (allow safe dot-config dirs like .github/.claude/.gemini)
             dirnames[:] = [
-                d for d in dirnames
-                if d not in IGNORED_DIRS and not d.startswith(".")
+                d for d in sorted(dirnames)
+                if d not in IGNORED_DIRS and (not d.startswith(".") or d in (".github", ".gitlab", ".claude", ".gemini", ".agents"))
             ]
 
-            for fname in filenames:
+            manifest_priority = {"package.json", "pyproject.toml", "cargo.toml", "go.mod"}
+            for fname in sorted(filenames, key=lambda s: (0 if s.lower() in manifest_priority else 1, s.lower())):
                 if time.monotonic() - start_time > timeout_seconds:
                     timed_out = True
                     break
@@ -166,11 +173,14 @@ class ScopedSearch:
                 if not cls.is_match_file(fname, rel_path, scope):
                     continue
 
-                # Skip non-regular files (FIFOs/pipes/devices) and files larger than 1MB
+                # Skip non-regular files (FIFOs/pipes/devices), >1MB files, and binary files (NUL byte probe)
                 try:
                     st = os.stat(full_path)
                     if not stat.S_ISREG(st.st_mode) or st.st_size > 1024 * 1024:
                         continue
+                    with open(full_path, "rb") as bf:
+                        if b"\x00" in bf.read(2048):
+                            continue
                 except OSError:
                     continue
 
@@ -179,6 +189,8 @@ class ScopedSearch:
                 try:
                     with open(full_path, "r", encoding="utf-8", errors="replace") as f:
                         for line_idx, line in enumerate(f, 1):
+                            if len(line) > 8192:
+                                continue
                             if pattern.search(line):
                                 clean_line = line.strip()
                                 # Truncate long lines to 100 characters for compact token output

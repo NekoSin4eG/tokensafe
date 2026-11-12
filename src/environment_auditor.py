@@ -100,7 +100,9 @@ class EnvironmentAuditor:
             if os.path.isfile(p):
                 try:
                     with open(p, "r", encoding="utf-8") as f:
-                        configured.update(json.load(f).get("mcpServers", {}))
+                        loaded = json.load(f)
+                    if isinstance(loaded, dict) and isinstance(loaded.get("mcpServers"), dict):
+                        configured.update(loaded["mcpServers"])
                 except Exception:
                     continue
         # Plugin-declared servers (plugins/<name>/mcp_config.json) are loaded
@@ -117,7 +119,9 @@ class EnvironmentAuditor:
                     continue
                 try:
                     with open(plugin_cfg, "r", encoding="utf-8") as f:
-                        configured.update(json.load(f).get("mcpServers", {}))
+                        loaded = json.load(f)
+                    if isinstance(loaded, dict) and isinstance(loaded.get("mcpServers"), dict):
+                        configured.update(loaded["mcpServers"])
                 except Exception:
                     continue
         return configured
@@ -136,13 +140,15 @@ class EnvironmentAuditor:
 
         def _sub(match: "re.Match[str]") -> str:
             inc = match.group(1)
+            if inc.startswith(("http://", "https://")):
+                return match.group(0)
             if not os.path.isabs(inc):
                 inc = os.path.join(os.path.dirname(path), inc)
             try:
                 with open(inc, "r", encoding="utf-8", errors="replace") as f:
                     return f.read()
             except Exception:
-                return ""
+                return match.group(0)
 
         return _RULE_INCLUDE_RE.sub(_sub, text)
 
@@ -234,10 +240,23 @@ class EnvironmentAuditor:
                     "is_bloat": False
                 }
 
-        # 2. Count skills
+        # 2. Count skills (follow symlinked plugins/skills with cycle protection; skip disabled plugins)
         skills_count = 0
+        disabled_plugins = cls._get_disabled_plugin_names()
+        plugins_dir = os.path.abspath(cls.get_plugins_dir())
+        seen_skill_dirs = set()
         for sdir in cls.get_skills_dirs(workspace_root):
-            for root, dirs, files in os.walk(sdir):
+            is_plugins_root = os.path.abspath(sdir) == plugins_dir
+            for root, dirs, files in os.walk(sdir, followlinks=True):
+                real_root = os.path.realpath(root)
+                if real_root in seen_skill_dirs:
+                    dirs[:] = []
+                    continue
+                seen_skill_dirs.add(real_root)
+                if is_plugins_root and os.path.abspath(root) == plugins_dir:
+                    dirs[:] = [d for d in dirs if d not in disabled_plugins and not d.endswith(".disabled")]
+                else:
+                    dirs[:] = [d for d in dirs if d not in ("node_modules", ".git", "__pycache__", ".venv", "venv") and not d.endswith(".disabled")]
                 if "SKILL.md" in files:
                     skills_count += 1
 
@@ -312,11 +331,12 @@ class EnvironmentAuditor:
                 try:
                     with open(real_path, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                    mcp_servers = data.get("mcpServers", {})
-                    if server_name in mcp_servers:
+                    if not isinstance(data, dict):
+                        continue
+                    mcp_servers = data.get("mcpServers")
+                    if isinstance(mcp_servers, dict) and server_name in mcp_servers:
                         server_config = mcp_servers.pop(server_name)
-                        # Save disabled config
-                        if "disabledMcpServers" not in data:
+                        if not isinstance(data.get("disabledMcpServers"), dict):
                             data["disabledMcpServers"] = {}
                         data["disabledMcpServers"][server_name] = server_config
                         with open(real_path, "w", encoding="utf-8") as f:
@@ -357,10 +377,12 @@ class EnvironmentAuditor:
                 try:
                     with open(real_path, "r", encoding="utf-8") as f:
                         data = json.load(f)
-                    disabled_servers = data.get("disabledMcpServers", {})
-                    if server_name in disabled_servers:
+                    if not isinstance(data, dict):
+                        continue
+                    disabled_servers = data.get("disabledMcpServers")
+                    if isinstance(disabled_servers, dict) and server_name in disabled_servers:
                         srv_cfg = disabled_servers.pop(server_name)
-                        if "mcpServers" not in data:
+                        if not isinstance(data.get("mcpServers"), dict):
                             data["mcpServers"] = {}
                         data["mcpServers"][server_name] = srv_cfg
                         with open(real_path, "w", encoding="utf-8") as f:

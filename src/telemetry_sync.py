@@ -35,9 +35,40 @@ from src.metrics import resolve_measurement
 from src.paths import resolve_data_dir
 
 DATA_DIR = resolve_data_dir()
-METRICS_DB_PATH = os.path.join(DATA_DIR, "metrics.db")
+METRICS_DB_PATH = os.environ.get("TOKENSAFE_DB_PATH") or os.path.join(DATA_DIR, "metrics.db")
 SYNC_STATE_PATH = os.path.join(DATA_DIR, "sync_state.json")
 SYNC_LOCK_PATH = os.path.join(DATA_DIR, ".sync.lock")
+_DEFAULT_DATA_DIR = DATA_DIR
+_DEFAULT_METRICS_DB_PATH = METRICS_DB_PATH
+_DEFAULT_SYNC_STATE_PATH = SYNC_STATE_PATH
+_DEFAULT_SYNC_LOCK_PATH = SYNC_LOCK_PATH
+
+
+def _data_dir() -> str:
+    if DATA_DIR != _DEFAULT_DATA_DIR:
+        return DATA_DIR
+    return resolve_data_dir()
+
+
+def _metrics_db_path() -> str:
+    if METRICS_DB_PATH != _DEFAULT_METRICS_DB_PATH:
+        return METRICS_DB_PATH
+    explicit = os.environ.get("TOKENSAFE_DB_PATH", "").strip()
+    if explicit:
+        return explicit
+    return os.path.join(_data_dir(), "metrics.db")
+
+
+def _sync_state_path() -> str:
+    if SYNC_STATE_PATH != _DEFAULT_SYNC_STATE_PATH:
+        return SYNC_STATE_PATH
+    return os.path.join(_data_dir(), "sync_state.json")
+
+
+def _sync_lock_path() -> str:
+    if SYNC_LOCK_PATH != _DEFAULT_SYNC_LOCK_PATH:
+        return SYNC_LOCK_PATH
+    return os.path.join(_data_dir(), ".sync.lock")
 
 
 def _get_cloud_url() -> str:
@@ -61,7 +92,8 @@ class TelemetrySync:
     @classmethod
     def get_state(cls) -> Dict[str, Any]:
         """Loads sync cursor state from persistent JSON."""
-        if not os.path.exists(SYNC_STATE_PATH):
+        state_path = _sync_state_path()
+        if not os.path.exists(state_path):
             return {
                 "last_synced_event_id": 0,
                 "last_synced_at": 0,
@@ -69,8 +101,14 @@ class TelemetrySync:
                 "lifetime_rollup_synced": False
             }
         try:
-            with open(SYNC_STATE_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
+            with open(state_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {
+                "last_synced_event_id": 0,
+                "last_synced_at": 0,
+                "total_synced_events": 0,
+                "lifetime_rollup_synced": False
+            }
         except Exception:
             return {
                 "last_synced_event_id": 0,
@@ -81,11 +119,14 @@ class TelemetrySync:
 
     @classmethod
     def save_state(cls, state: Dict[str, Any]):
-        """Persists sync cursor state."""
-        os.makedirs(DATA_DIR, exist_ok=True)
+        """Persists sync cursor state atomically."""
+        state_path = _sync_state_path()
+        os.makedirs(os.path.dirname(state_path) or ".", exist_ok=True)
         try:
-            with open(SYNC_STATE_PATH, "w", encoding="utf-8") as f:
+            tmp_path = f"{state_path}.tmp.{os.getpid()}.{threading.get_ident()}"
+            with open(tmp_path, "w", encoding="utf-8") as f:
                 json.dump(state, f, indent=2)
+            os.replace(tmp_path, state_path)
         except Exception:
             pass
 
@@ -97,9 +138,10 @@ class TelemetrySync:
 
         total_local = 0
         pending = 0
-        if os.path.exists(METRICS_DB_PATH):
+        db_path = _metrics_db_path()
+        if os.path.exists(db_path):
             try:
-                conn = sqlite3.connect(METRICS_DB_PATH)
+                conn = sqlite3.connect(db_path)
                 c = conn.cursor()
                 row = c.execute("SELECT COUNT(*) FROM events").fetchone()
                 total_local = row[0] if row else 0
@@ -145,17 +187,24 @@ class TelemetrySync:
             active_key = license_key or LicenseManager.get_active_license_key()
 
             target_email = (email or "").strip().lower()
-            if not target_email and active_key:
-                _, payload, _ = LicenseManager.validate_license(active_key)
-                target_email = payload.get("email", "").strip().lower()
+            if active_key and not active_key.startswith("ts_live_"):
+                is_valid, payload, _ = LicenseManager.validate_license(active_key)
+                if not is_valid:
+                    # Expired/revoked license must downgrade to Community sync instead of getting 401 forever
+                    active_key = ""
+                    if not target_email:
+                        target_email = ""
+                elif not target_email:
+                    target_email = str(payload.get("email", "")).strip().lower()
 
-            # Community fallback: unauthenticated users participate in global token savings
+            # Community fallback: unauthenticated or expired users participate in global community sync
             if not target_email:
                 target_email = "community@tokensafe.dev"
             if not active_key:
                 active_key = "community"
 
-            if not os.path.exists(METRICS_DB_PATH):
+            db_path = _metrics_db_path()
+            if not os.path.exists(db_path):
                 return {
                     "success": True,
                     "synced_events": 0,
@@ -168,7 +217,7 @@ class TelemetrySync:
 
             try:
                 from src.metrics import MetricsTracker
-                local_monthly_measured = MetricsTracker(db_path=METRICS_DB_PATH).get_monthly_saved_tokens(measured_only=True)
+                local_monthly_measured = MetricsTracker(db_path=db_path).get_monthly_saved_tokens(measured_only=True)
             except Exception:
                 local_monthly_measured = 0
             machine_fp = "" if os.environ.get("TOKENSAFE_TELEMETRY_DISABLED") in ("1", "true", "yes") else LicenseManager.get_machine_fingerprint()
@@ -189,6 +238,8 @@ class TelemetrySync:
                     "last_synced_event_id": current_last_id,
                     "last_synced_at": state.get("last_synced_at", 0) if total_sent == 0 else int(time.time()),
                     "last_attempt_at": int(time.time()),
+                    "last_quota_sync_at": state.get("last_quota_sync_at", 0),
+                    "consecutive_failures": int(state.get("consecutive_failures", 0) or 0) + 1,
                     "total_synced_events": cumulative_synced,
                     "lifetime_rollup_synced": rollup_synced
                 }
@@ -203,7 +254,7 @@ class TelemetrySync:
             max_pages = 25
             for page_idx in range(max_pages):
                 try:
-                    conn = sqlite3.connect(METRICS_DB_PATH)
+                    conn = sqlite3.connect(db_path)
                     conn.row_factory = sqlite3.Row
                     cur = conn.cursor()
 
@@ -327,7 +378,7 @@ class TelemetrySync:
                                     srv_measured = int(resp_body.get("server_monthly_measured_saved") or 0)
                                     if srv_measured > 0:
                                         from src.metrics import MetricsTracker
-                                        MetricsTracker(db_path=METRICS_DB_PATH).record_server_quota_floor(srv_measured)
+                                        MetricsTracker(db_path=db_path).record_server_quota_floor(srv_measured)
                                 except Exception:
                                     pass
                                 total_sent += len(chunk)
@@ -344,6 +395,7 @@ class TelemetrySync:
                                     "last_synced_at": int(time.time()),
                                     "last_attempt_at": int(time.time()),
                                     "last_quota_sync_at": int(time.time()),
+                                    "consecutive_failures": 0,
                                     "total_synced_events": cumulative_synced,
                                     "lifetime_rollup_synced": rollup_synced
                                 })
@@ -368,6 +420,22 @@ class TelemetrySync:
     def _is_pid_alive(pid: int) -> bool:
         if pid <= 0:
             return False
+        if os.name == "nt":
+            try:
+                import ctypes
+                SYNCHRONIZE = 0x00100000
+                PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+                handle = ctypes.windll.kernel32.OpenProcess(SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, False, int(pid))
+                if not handle:
+                    return False
+                try:
+                    code = ctypes.c_ulong()
+                    ok = ctypes.windll.kernel32.GetExitCodeProcess(handle, ctypes.byref(code))
+                    return bool(ok and code.value == 259)  # STILL_ACTIVE
+                finally:
+                    ctypes.windll.kernel32.CloseHandle(handle)
+            except Exception:
+                return False
         try:
             os.kill(pid, 0)
             return True
@@ -414,23 +482,25 @@ class TelemetrySync:
         now = time.time()
         state = cls.get_state()
         last_synced = max(state.get("last_synced_at", 0), state.get("last_attempt_at", 0))
-        if not force and (now - last_synced) < throttle_seconds:
+        failures = int(state.get("consecutive_failures", 0) or 0)
+        eff_throttle = throttle_seconds
+        if not force and failures > 0:
+            eff_throttle = min(300.0, max(throttle_seconds, throttle_seconds * (2 ** min(failures, 4))))
+        if not force and (now - last_synced) < eff_throttle:
             return
 
         status = cls.get_sync_status()
         if status.get("pending_events", 0) == 0:
             return
 
-        os.makedirs(DATA_DIR, exist_ok=True)
-        # Claim a short-lived spawn handoff token atomically so concurrent hooks
-        # don't spawn duplicate workers, while the spawned child replaces the
-        # lock with its own `worker:<pid>` instead of deadlocking on parent PID.
+        lock_path = _sync_lock_path()
+        os.makedirs(os.path.dirname(lock_path) or ".", exist_ok=True)
         claim_token = secrets.token_hex(8)
         spawn_marker = f"spawn:{claim_token}:{now:.3f}"
         lock_claimed = False
         for _ in range(2):
             try:
-                fd = os.open(SYNC_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 try:
                     os.write(fd, spawn_marker.encode("utf-8"))
                 finally:
@@ -439,15 +509,14 @@ class TelemetrySync:
                 break
             except FileExistsError:
                 try:
-                    with open(SYNC_LOCK_PATH, "r", encoding="utf-8") as f:
+                    with open(lock_path, "r", encoding="utf-8") as f:
                         existing = f.read()
                     if cls._lock_is_active(existing, allow_legacy_self=False):
                         return
                 except OSError:
                     return
-                # Stale spawn/dead-worker/legacy-self lock: reclaim it once
                 try:
-                    os.unlink(SYNC_LOCK_PATH)
+                    os.unlink(lock_path)
                 except OSError:
                     return
         if not lock_claimed:
@@ -469,19 +538,20 @@ class TelemetrySync:
             )
         except Exception:
             try:
-                with open(SYNC_LOCK_PATH, "r", encoding="utf-8") as f:
+                with open(lock_path, "r", encoding="utf-8") as f:
                     if f.read().strip() == spawn_marker:
-                        os.unlink(SYNC_LOCK_PATH)
+                        os.unlink(lock_path)
             except OSError:
                 pass
 
 
 def _claim_worker_lock(claim_token: str) -> bool:
     """Claims or takes over .sync.lock for the current sync worker process."""
+    lock_path = _sync_lock_path()
     worker_marker = f"worker:{os.getpid()}"
     for _ in range(2):
         try:
-            fd = os.open(SYNC_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
             try:
                 os.write(fd, worker_marker.encode("utf-8"))
             finally:
@@ -489,20 +559,20 @@ def _claim_worker_lock(claim_token: str) -> bool:
             return True
         except FileExistsError:
             try:
-                with open(SYNC_LOCK_PATH, "r", encoding="utf-8") as f:
+                with open(lock_path, "r", encoding="utf-8") as f:
                     existing = f.read().strip()
             except OSError:
                 return False
 
             if claim_token and existing.startswith(f"spawn:{claim_token}:"):
-                tmp_path = f"{SYNC_LOCK_PATH}.{os.getpid()}.tmp"
+                tmp_path = f"{lock_path}.{os.getpid()}.tmp"
                 try:
                     fd = os.open(tmp_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                     try:
                         os.write(fd, worker_marker.encode("utf-8"))
                     finally:
                         os.close(fd)
-                    os.replace(tmp_path, SYNC_LOCK_PATH)
+                    os.replace(tmp_path, lock_path)
                     return True
                 except OSError:
                     try:
@@ -516,7 +586,7 @@ def _claim_worker_lock(claim_token: str) -> bool:
                 return False
 
             try:
-                os.unlink(SYNC_LOCK_PATH)
+                os.unlink(lock_path)
             except OSError:
                 return False
     return False
@@ -529,19 +599,20 @@ if __name__ == "__main__":
         if arg.startswith("--claim-token="):
             claim_token = arg.split("=", 1)[1].strip()
 
-    os.makedirs(DATA_DIR, exist_ok=True)
+    lock_path = _sync_lock_path()
+    os.makedirs(os.path.dirname(lock_path) or ".", exist_ok=True)
     if not _claim_worker_lock(claim_token):
         sys.exit(0)
 
     worker_marker = f"worker:{os.getpid()}"
     try:
-        res = TelemetrySync.sync(timeout=10.0, verbose=not is_bg)
+        res = TelemetrySync.sync(timeout=2.5 if is_bg else 10.0, verbose=not is_bg)
         if not is_bg:
             print(json.dumps(res, indent=2))
     finally:
         try:
-            with open(SYNC_LOCK_PATH, "r", encoding="utf-8") as f:
+            with open(lock_path, "r", encoding="utf-8") as f:
                 if f.read().strip() == worker_marker:
-                    os.remove(SYNC_LOCK_PATH)
+                    os.remove(lock_path)
         except Exception:
             pass

@@ -34,6 +34,7 @@ class DiffSlicer:
             return raw_diff, 0, 0
 
         orig_tokens = count_tokens(raw_diff)
+        max_context_lines = max(0, int(max_context_lines))
         lines = raw_diff.splitlines()
         output_lines: List[str] = []
 
@@ -49,21 +50,23 @@ class DiffSlicer:
                 output_lines.extend(context_run)
             else:
                 if is_trailing:
-                    # Keep first N lines of trailing context
-                    output_lines.extend(context_run[:limit])
+                    # Keep first N lines of trailing context (0 when limit == 0)
+                    if limit > 0:
+                        output_lines.extend(context_run[:limit])
                     output_lines.append(f" ... ({len(context_run) - limit} context lines omitted)")
                 else:
-                    # Keep last N lines of leading context
+                    # Keep last N lines of leading context (0 when limit == 0)
                     output_lines.append(f" ... ({len(context_run) - limit} context lines omitted)")
-                    output_lines.extend(context_run[-limit:])
+                    if limit > 0:
+                        output_lines.extend(context_run[-limit:])
             context_run = []
 
         for line in lines:
             # File header detection
             if line.startswith("diff --git "):
                 flush_context(max_context_lines, is_trailing=True)
-                parts = line.split(" ")
-                current_file = parts[-1] if len(parts) > 2 else ""
+                m_file = re.match(r'^diff --git\s+"?(?:a/)?(.+?)"?\s+"?(?:b/)?(.+?)"?\s*$', line)
+                current_file = m_file.group(2) if m_file else (line.split(" ")[-1].strip('"'))
                 # Check if ignored file pattern or extension
                 skip_current_file = any(pat in current_file for pat in cls.IGNORED_DIFF_PATTERNS) or current_file.endswith((".lock", ".lockb", ".sum", ".map", ".png", ".jpg", ".svg"))
                 if skip_current_file:
@@ -106,15 +109,10 @@ class DiffSlicer:
     def optimize_git_diff_command(cls, cmd: str) -> Tuple[Optional[str], int, str]:
         """
         Rewrites git diff commands to enforce 2-line unified diffs and ignore lockfiles.
-        Per-stage: excludes are appended to each `git diff` stage itself, never
-        to the tail of a compound command (which would leak pathspecs into an
-        unrelated trailing command like `npm test`).
+        Per-stage: -U2 and excludes apply cleanly per git diff stage.
         """
         clean_cmd = cmd.strip()
-        if not re.search(r"\bgit\s+diff\b", clean_cmd):
-            return None, 0, ""
-
-        if "--unified=" in clean_cmd or "-U" in clean_cmd:
+        if not re.search(r"\bgit\s+(?:-C\s+\S+\s+)?diff\b", clean_cmd):
             return None, 0, ""
 
         from src.command_sanitizer import CommandSanitizer
@@ -122,11 +120,19 @@ class DiffSlicer:
         lockfile_excludes = " ':!*lock*' ':!*.min.*' ':!*.map'"
         changed = False
         for i, (op, stage) in enumerate(pairs):
-            if not re.search(r"\bgit\s+diff\b", stage):
+            if not re.search(r"^(?:[A-Za-z_]\w*=\S*\s+)*(?:sudo\s+|env\s+)?git(?:\s+-C\s+\S+)?\s+diff\b", stage):
                 continue
-            if ":!" in stage:
-                continue  # caller already manages pathspec excludes
-            pairs[i] = (op, stage.replace("git diff", "git diff -U2", 1) + lockfile_excludes)
+            if ":!" in stage or re.search(r"(?:^|\s)(?:--unified=\d+|-U\d*)\b", stage):
+                continue
+            new_stage = re.sub(r"\bdiff\b", "diff -U2", stage, count=1)
+            if "-- " not in stage and not stage.rstrip().endswith("--"):
+                toks = CommandSanitizer._split_tokens_safe(stage)
+                diff_pos = toks.index("diff") if "diff" in toks else 1
+                sub_args = toks[diff_pos + 1 :]
+                has_path = any(not a.startswith("-") and not CommandSanitizer._GIT_REF_RE.match(a) for a in sub_args)
+                if not has_path:
+                    new_stage += lockfile_excludes
+            pairs[i] = (op, new_stage)
             changed = True
 
         if not changed:

@@ -99,14 +99,22 @@ class MetricsTracker:
         """
         marker = os.path.join(os.path.dirname(db_path) or ".", ".metrics_last_prune")
         claim = marker + ".claim"
+        _CLAIM_STALE_TTL = 300.0
         try:
-            if os.path.exists(marker) and (time.time() - os.path.getmtime(marker)) < _AUTOPRUNE_INTERVAL:
+            now = time.time()
+            if os.path.exists(marker) and (now - os.path.getmtime(marker)) < _AUTOPRUNE_INTERVAL:
                 return
+            if os.path.exists(claim):
+                try:
+                    if (now - os.path.getmtime(claim)) > _CLAIM_STALE_TTL:
+                        os.unlink(claim)
+                except OSError:
+                    pass
             try:
                 fd = os.open(claim, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
                 os.close(fd)
             except FileExistsError:
-                return  # another process is pruning right now
+                return  # another active process is pruning right now
             try:
                 tracker = cls(db_path)
                 tracker.prune(days=tracker.retention_days, max_events=tracker.max_events, vacuum=False)
@@ -132,6 +140,24 @@ class MetricsTracker:
                 return
             with self._get_connection() as conn:
                 cursor = conn.cursor()
+                try:
+                    uv_row = cursor.execute("PRAGMA user_version;").fetchone()
+                    user_ver = int(uv_row[0]) if uv_row else 0
+                except Exception:
+                    user_ver = 0
+                if user_ver >= 2:
+                    tbl = cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='events';").fetchone()
+                    if tbl is not None:
+                        cursor.execute(
+                            "UPDATE events SET measurement = 'estimated' "
+                            "WHERE measurement = 'measured' AND event_type IN "
+                            "('GRAPH_TOPOLOGY', 'HISTORY_FOLD', 'PROMPT', 'ROLLUP_LIFETIME', "
+                            "'COMMAND_FILTER', 'LOOP_GUARD', 'SCOPED_SEARCH', 'DIR_LIST', "
+                            "'GUARD_SECRET', 'GUARD_DESTRUCTIVE', 'GUARD_TLS_VERIFY_BYPASS', "
+                            "'GUARD_JUNK_READ', 'GUARD_INFINITE', 'GUARD_RAW_CODE_SEARCH');"
+                        )
+                        _INITIALIZED_METRICS_DBS.add(self.db_path)
+                        return
                 try:
                     cursor.execute("PRAGMA journal_mode=WAL;")
                 except sqlite3.Error:
@@ -199,6 +225,7 @@ class MetricsTracker:
                 """)
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id)")
+                cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_measurement_type ON events(measurement, event_type)")
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS quota_daily (
                         day_key TEXT PRIMARY KEY,
@@ -217,6 +244,10 @@ class MetricsTracker:
                         WHERE timestamp >= ? AND measurement = 'measured' AND saved_tokens > 0
                         GROUP BY substr(timestamp, 1, 10)
                     """, (cutoff_30,))
+                try:
+                    cursor.execute("PRAGMA user_version = 2;")
+                except sqlite3.Error:
+                    pass
             _INITIALIZED_METRICS_DBS.add(self.db_path)
 
     def _quota_mirror_path(self) -> str:
@@ -228,69 +259,118 @@ class MetricsTracker:
             return os.path.join(os.path.dirname(default_data), ".qledger.json")
         return os.path.join(os.path.dirname(self.db_path), ".qledger.json")
 
-    def _sync_quota_mirror(self, day_key: str, delta_measured: int = 0) -> int:
-        """Merges quota_daily with a sidecar ledger so deleting metrics.db or pruning >5k rows cannot reset quota."""
-        mirror_path = self._quota_mirror_path()
-        cutoff_day = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
-        data: Dict[str, Any] = {"days": {}, "server_floor": 0, "server_floor_ts": 0}
+    @staticmethod
+    def _qledger_write_atomic(mirror_path: str, data: Dict[str, Any]) -> None:
+        parent = os.path.dirname(mirror_path) or "."
+        os.makedirs(parent, exist_ok=True)
+        tmp_p = f"{mirror_path}.tmp.{os.getpid()}.{threading.get_ident()}"
+        with open(tmp_p, "w", encoding="utf-8") as f:
+            json.dump(data, f)
+        os.replace(tmp_p, mirror_path)
+
+    @staticmethod
+    def _qledger_locked(mirror_path: str, mutate_fn):
+        parent = os.path.dirname(mirror_path) or "."
+        os.makedirs(parent, exist_ok=True)
+        lock_path = mirror_path + ".lock"
+        fh = open(lock_path, "a+")
+        locked_posix = False
+        locked_win = False
         try:
-            if os.path.exists(mirror_path):
-                with open(mirror_path, "r", encoding="utf-8") as f:
-                    loaded = json.load(f)
-                if isinstance(loaded, dict):
-                    data.update(loaded)
-        except Exception:
-            pass
-        days = {
-            str(k): int(v)
-            for k, v in (data.get("days") or {}).items()
-            if str(k) >= cutoff_day and int(v or 0) > 0
-        }
-        if delta_measured > 0 and day_key >= cutoff_day:
-            days[day_key] = days.get(day_key, 0) + int(delta_measured)
-        data["days"] = days
-        if delta_measured > 0:
             try:
-                os.makedirs(os.path.dirname(mirror_path), exist_ok=True)
-                tmp_p = mirror_path + ".tmp"
-                with open(tmp_p, "w", encoding="utf-8") as f:
-                    json.dump(data, f)
-                os.replace(tmp_p, mirror_path)
+                import fcntl
+                fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+                locked_posix = True
+            except ImportError:
+                try:
+                    import msvcrt
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_LOCK, 1)
+                    locked_win = True
+                except Exception:
+                    pass
+            return mutate_fn()
+        finally:
+            try:
+                if locked_posix:
+                    import fcntl
+                    fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+                elif locked_win:
+                    import msvcrt
+                    fh.seek(0)
+                    msvcrt.locking(fh.fileno(), msvcrt.LK_UNLCK, 1)
             except Exception:
                 pass
-        local_sum = sum(days.values())
-        srv_floor = 0
-        try:
-            if time.time() - float(data.get("server_floor_ts", 0)) <= 30 * 86400:
-                srv_floor = int(data.get("server_floor", 0) or 0)
-        except Exception:
+            fh.close()
+
+    def _sync_quota_mirror(self, day_key: str, delta_measured: int = 0) -> int:
+        """Merges quota_daily with a sidecar ledger under file lock so concurrent hooks cannot drop deltas."""
+        mirror_path = self._quota_mirror_path()
+        cutoff_day = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+
+        def _do():
+            data: Dict[str, Any] = {"days": {}, "server_floor": 0, "server_floor_ts": 0}
+            try:
+                if os.path.exists(mirror_path):
+                    with open(mirror_path, "r", encoding="utf-8") as f:
+                        loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        data.update(loaded)
+            except Exception:
+                pass
+            days = {
+                str(k): int(v)
+                for k, v in (data.get("days") or {}).items()
+                if str(k) >= cutoff_day and int(v or 0) > 0
+            }
+            if delta_measured > 0 and day_key >= cutoff_day:
+                days[day_key] = days.get(day_key, 0) + int(delta_measured)
+            data["days"] = days
+            if delta_measured > 0:
+                try:
+                    self._qledger_write_atomic(mirror_path, data)
+                except Exception:
+                    pass
+            local_sum = sum(days.values())
             srv_floor = 0
-        return max(local_sum, srv_floor)
+            try:
+                if time.time() - float(data.get("server_floor_ts", 0)) <= 30 * 86400:
+                    srv_floor = int(data.get("server_floor", 0) or 0)
+            except Exception:
+                srv_floor = 0
+            return max(local_sum, srv_floor)
+
+        try:
+            return self._qledger_locked(mirror_path, _do)
+        except Exception:
+            return _do()
 
     def record_server_quota_floor(self, server_monthly_measured: int) -> None:
-        """Persists a server-verified 30-day measured quota floor so client resets cannot roll back usage."""
+        """Persists a server-verified 30-day measured quota floor under file lock."""
         if int(server_monthly_measured or 0) <= 0:
             return
         mirror_path = self._quota_mirror_path()
-        data: Dict[str, Any] = {"days": {}, "server_floor": 0, "server_floor_ts": 0}
+
+        def _do():
+            data: Dict[str, Any] = {"days": {}, "server_floor": 0, "server_floor_ts": 0}
+            try:
+                if os.path.exists(mirror_path):
+                    with open(mirror_path, "r", encoding="utf-8") as f:
+                        loaded = json.load(f)
+                    if isinstance(loaded, dict):
+                        data.update(loaded)
+            except Exception:
+                pass
+            data["server_floor"] = max(int(data.get("server_floor", 0) or 0), int(server_monthly_measured))
+            data["server_floor_ts"] = int(time.time())
+            try:
+                self._qledger_write_atomic(mirror_path, data)
+            except Exception:
+                pass
+
         try:
-            if os.path.exists(mirror_path):
-                with open(mirror_path, "r", encoding="utf-8") as f:
-                    loaded = json.load(f)
-                if isinstance(loaded, dict):
-                    data.update(loaded)
+            self._qledger_locked(mirror_path, _do)
         except Exception:
-            pass
-        data["server_floor"] = max(int(data.get("server_floor", 0) or 0), int(server_monthly_measured))
-        data["server_floor_ts"] = int(time.time())
-        try:
-            os.makedirs(os.path.dirname(mirror_path), exist_ok=True)
-            tmp_p = mirror_path + ".tmp"
-            with open(tmp_p, "w", encoding="utf-8") as f:
-                json.dump(data, f)
-            os.replace(tmp_p, mirror_path)
-        except Exception:
-            pass
+            _do()
 
     def record_event(
         self,
@@ -557,9 +637,10 @@ class MetricsTracker:
         for r in rows:
             ev = dict(r)
             try:
-                ev["details"] = json.loads(ev["details"])
+                parsed = json.loads(ev["details"]) if ev.get("details") else {}
+                ev["details"] = parsed if isinstance(parsed, dict) else {}
             except Exception:
-                pass
+                ev["details"] = {}
             events.append(ev)
         return events
 
@@ -580,9 +661,10 @@ class MetricsTracker:
                 return None
             res = dict(row)
             try:
-                res["details"] = json.loads(res["details"])
+                parsed = json.loads(res["details"]) if res.get("details") else {}
+                res["details"] = parsed if isinstance(parsed, dict) else {}
             except Exception:
-                pass
+                res["details"] = {}
             return res
 
     def recalculate_sessions(self):
@@ -716,8 +798,13 @@ class MetricsTracker:
                 cursor.execute(f"DELETE FROM events WHERE {combined_where}", params)
 
         cutoff_qd = (datetime.now() - timedelta(days=45)).strftime("%Y-%m-%d")
+        cutoff_banner = int(time.time()) - 30 * 86400
         with self._get_connection() as conn:
             conn.execute("DELETE FROM quota_daily WHERE day_key < ?", (cutoff_qd,))
+            try:
+                conn.execute("DELETE FROM quota_banner_state WHERE updated_at < ?", (cutoff_banner,))
+            except sqlite3.OperationalError:
+                pass
 
         if vacuum and prune_count > 0:
             self.vacuum()

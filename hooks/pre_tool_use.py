@@ -12,21 +12,15 @@ import sys
 import os
 import json
 
-HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
+HOOK_DIR = os.path.dirname(os.path.realpath(__file__))
 PROJECT_ROOT = os.path.dirname(HOOK_DIR)
-sys.path.insert(0, PROJECT_ROOT)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
-from src.slicer import ToolSlicer
-from src.skeletonizer import Skeletonizer
-from src.command_sanitizer import CommandSanitizer
 from src.loop_detector import LoopDetector
 from src.metrics import MetricsTracker
 from src.tokenizer import count_tokens
-from src.agent_firewall import AgentFirewall
-from src.diff_slicer import DiffSlicer
 from src.license_manager import LicenseManager
-from src.secret_redactor import SecretRedactor
-from src.guard import TokenSafeGuard
 
 
 def _trigger_bg_sync():
@@ -37,30 +31,32 @@ def _trigger_bg_sync():
         pass
 
 
-def main():
-    try:
-        raw_input = sys.stdin.read()
-        if not raw_input.strip():
-            print(json.dumps({"decision": "allow"}))
-            return
+def _resolve_hook_path(raw_path: str, hook_cwd: str) -> str:
+    if not raw_path:
+        return ""
+    if os.path.isabs(raw_path):
+        return raw_path
+    return os.path.abspath(os.path.join(hook_cwd, raw_path))
 
-        payload = json.loads(raw_input)
-    except Exception:
-        print(json.dumps({"decision": "allow"}))
-        return
 
-    tool_call = payload.get("toolCall", {})
-    tool_name = tool_call.get("name", "")
-    args = tool_call.get("args", {})
-    conversation_id = payload.get("conversationId", "default_session")
-    last_user_input = payload.get("lastUserInput", "")
-    # Working directory of the tool call: lets the Command Sanitizer peek at
-    # package.json to identify the runner behind opaque `yarn/npm test` scripts
-    hook_cwd = payload.get("cwd") or os.getcwd()
+def _handle(payload: dict) -> dict:
+    tool_call = payload.get("toolCall")
+    if not isinstance(tool_call, dict):
+        tool_call = {}
+    tool_name = str(tool_call.get("name") or "")
+    args = tool_call.get("args")
+    if not isinstance(args, dict):
+        args = {}
+    conversation_id = str(payload.get("conversationId") or "default_session")
+    last_user_input = str(payload.get("lastUserInput") or "")
+    # Working directory of the tool call: lets CommandSanitizer peek at
+    # package.json and Guard audit git staging in the user's repo (never plugin CWD).
+    workspace_paths = payload.get("workspacePaths") if isinstance(payload.get("workspacePaths"), list) else []
+    hook_cwd = str(payload.get("cwd") or (workspace_paths[0] if workspace_paths else "") or os.getcwd())
 
     tracker = MetricsTracker()
     quota = LicenseManager.check_quota(tracker)
-    is_quota_exceeded = quota.get("is_quota_exceeded", False)
+    is_quota_exceeded = bool(quota.get("is_quota_exceeded", False))
 
     # 1. Loop Detector Guard (Applies to all tools)
     is_loop, repeat_count, loop_msg = LoopDetector.check_loop(conversation_id, tool_name, args)
@@ -72,18 +68,16 @@ def main():
             optimized_tokens=100,
             details={"tool": tool_name, "repeats": repeat_count}
         )
-        print(json.dumps({
-            "decision": "force_ask",
-            "reason": loop_msg
-        }))
         _trigger_bg_sync()
-        return
+        return {"decision": "force_ask", "reason": loop_msg}
 
-    response = {"decision": "allow"}
+    response: dict = {"decision": "allow"}
 
     # 2. TokenSafe Guard: Inspect file writes and edits for security violations
     if tool_name in ("write_file", "edit_file"):
-        path = args.get("Path", "")
+        from src.guard import TokenSafeGuard
+        raw_path = str(args.get("Path") or args.get("TargetFile") or args.get("path") or "")
+        path = _resolve_hook_path(raw_path, hook_cwd)
         code_to_check = args.get("Content", "") if tool_name == "write_file" else args.get("Replacement", "")
         guard_res = TokenSafeGuard.inspect_file_write(path, code_to_check)
         if guard_res.blocked:
@@ -98,23 +92,20 @@ def main():
                     "reason": guard_res.reason
                 }
             )
-            print(json.dumps({
-                "decision": "deny",
-                "reason": f"🛡️ TokenSafe Guard: {guard_res.reason}"
-            }))
             _trigger_bg_sync()
-            return
+            return {"decision": "deny", "reason": f"🛡️ TokenSafe Guard: {guard_res.reason}"}
 
     # 3. Output Guard: Block write_file on large existing files to enforce edit_file
     if tool_name == "write_file":
-        path = args.get("Path", "")
+        raw_path = str(args.get("Path") or args.get("path") or "")
+        path = _resolve_hook_path(raw_path, hook_cwd)
         content = args.get("Content", "")
         is_append = args.get("Append", False)
 
         if not is_append and path and os.path.exists(path):
             try:
                 with open(path, "r", encoding="utf-8", errors="replace") as f:
-                    existing_lines = len(f.readlines())
+                    existing_lines = sum(1 for _ in f)
             except Exception:
                 existing_lines = 0
 
@@ -132,25 +123,30 @@ def main():
                         "saved_output_tokens": max(0, content_tokens - 80)
                     }
                 )
-
-                print(json.dumps({
+                _trigger_bg_sync()
+                return {
                     "decision": "deny",
                     "reason": (
                         f"Token Optimizer Output Guard: '{os.path.basename(path)}' already exists with {existing_lines} lines. "
                         f"Wholesale rewriting via write_file burns expensive output tokens. "
                         f"Please use 'edit_file' with surgical Target and Replacement blocks instead."
                     )
-                }))
-                _trigger_bg_sync()
-                return
+                }
 
     # 3. read_file Optimization (AST Windowing & Skeletonization).
     #    'view_file' is the IDE-surface name for the same tool (hooks.md) —
     #    route it through the same optimization pipeline.
     elif tool_name in ("read_file", "view_file"):
-        path = args.get("Path") or args.get("path") or args.get("FilePath") or ""
-        start_line = args.get("StartLine") or args.get("startLine")
-        end_line = args.get("EndLine") or args.get("endLine")
+        from src.slicer import ToolSlicer
+        from src.skeletonizer import Skeletonizer
+        raw_path = str(args.get("Path") or args.get("path") or args.get("FilePath") or "")
+        path = _resolve_hook_path(raw_path, hook_cwd)
+        start_line = args.get("StartLine")
+        if start_line is None:
+            start_line = args.get("startLine")
+        end_line = args.get("EndLine")
+        if end_line is None:
+            end_line = args.get("endLine")
         # The overwrite merge is shallow top-level key replacement — we must
         # rewrite the SAME keys the agent actually sent, or a "path"/"FilePath"
         # read would get the optimized content under a brand-new "Path" key
@@ -163,26 +159,17 @@ def main():
             # Free tier quota reached: pass through raw read_file without AST skeletonization
             if LicenseManager.should_emit_quota_banner(tracker, conversation_id, every_n_turns=5) and quota.get("warning"):
                 response["reason"] = quota["warning"]
-            print(json.dumps(response))
-            return
+            return response
 
-        # Step 3A: Subagent Firewall — Check if file was already read in active session
-        is_hit, cached_text, saved_dedup = AgentFirewall.check_cache(
-            session_id=conversation_id,
-            file_path=path,
-            tracker=tracker
-        )
-        if is_hit and saved_dedup > 0:
-            # Point to cached skeleton view or let tool proceed with cached metadata
-            response["reason"] = f"Token Optimizer: Subagent Firewall dedup hit (Saved ~{saved_dedup} tokens)"
-
-        # Step 3B: If model explicitly specified line range, respect it
+        # Step 3A: If model explicitly specified line range, respect it
         if start_line is not None and end_line is not None:
-            print(json.dumps(response))
-            return
+            return response
 
         # Step 3B: If a specific symbol/function is targeted in user prompt, check graph-guided skeleton first
-        overwrite_args, metrics = ToolSlicer.optimize_read_file(args, context_hint=last_user_input)
+        slicer_args = dict(args)
+        if path:
+            slicer_args[path_key] = path
+        overwrite_args, metrics = ToolSlicer.optimize_read_file(slicer_args, context_hint=last_user_input)
         target_sym = metrics.get("target_symbol")
         if target_sym and path and os.path.exists(path):
             skel_path, orig_t, skel_t = Skeletonizer.get_skeleton_file(path, target_symbol=target_sym)
@@ -201,8 +188,7 @@ def main():
                         "saved_tokens": saved
                     }
                 )
-                print(json.dumps(response))
-                return
+                return response
 
         if overwrite_args and metrics.get("saved_tokens", 0) > 0:
             response["overwrite"] = {
@@ -225,8 +211,7 @@ def main():
                     "lines_sliced": metrics.get("lines_sliced", 0)
                 }
             )
-            print(json.dumps(response))
-            return
+            return response
 
         # Step 3C: If entire file requested with no symbol target, provide AST Skeleton (mtime-cached)
         if path and os.path.exists(path):
@@ -249,13 +234,15 @@ def main():
                         "saved_tokens": saved
                     }
                 )
-                print(json.dumps(response))
-                return
+                return response
 
     # 4. run_command Optimization & TokenSafe Guard
     elif tool_name == "run_command":
-        cmd = args.get("CommandLine", "")
-        guard_res = TokenSafeGuard.inspect_command(cmd)
+        from src.guard import TokenSafeGuard
+        from src.diff_slicer import DiffSlicer
+        from src.command_sanitizer import CommandSanitizer
+        cmd = str(args.get("CommandLine") or "")
+        guard_res = TokenSafeGuard.inspect_command(cmd, cwd=hook_cwd)
         if guard_res.blocked:
             tracker.record_event(
                 session_id=conversation_id,
@@ -264,12 +251,8 @@ def main():
                 optimized_tokens=0,
                 details={"cmd": cmd[:100], "reason": guard_res.reason}
             )
-            print(json.dumps({
-                "decision": "deny",
-                "reason": f"🛡️ TokenSafe Guard: {guard_res.reason}"
-            }))
             _trigger_bg_sync()
-            return
+            return {"decision": "deny", "reason": f"🛡️ TokenSafe Guard: {guard_res.reason}"}
         elif guard_res.warning_only:
             response["reason"] = f"⚠️ TokenSafe Guard Warning: {guard_res.reason}"
 
@@ -277,8 +260,7 @@ def main():
             # Free tier quota reached: skip Pro diff/command optimization while Security Guards remain active
             if LicenseManager.should_emit_quota_banner(tracker, conversation_id, every_n_turns=5) and quota.get("warning"):
                 response["reason"] = response.get("reason") or quota["warning"]
-            print(json.dumps(response))
-            return
+            return response
 
         # Check AST Diff Slicer first (per-stage rewrite of git diff stages),
         # then run the Command Sanitizer on the result so other stages
@@ -309,6 +291,26 @@ def main():
                     "reason": reason
                 }
             )
+
+    return response
+
+
+def main():
+    try:
+        raw_input = sys.stdin.read()
+        if not raw_input.strip():
+            print(json.dumps({"decision": "allow"}))
+            return
+        payload = json.loads(raw_input)
+        if not isinstance(payload, dict):
+            print(json.dumps({"decision": "allow"}))
+            return
+        response = _handle(payload)
+        if not isinstance(response, dict):
+            response = {"decision": "allow"}
+    except Exception:
+        # Hooks must always fail open so an internal error never blocks the IDE/agent.
+        response = {"decision": "allow"}
 
     print(json.dumps(response))
 

@@ -16,9 +16,10 @@ import sys
 import os
 import json
 
-HOOK_DIR = os.path.dirname(os.path.abspath(__file__))
+HOOK_DIR = os.path.dirname(os.path.realpath(__file__))
 PROJECT_ROOT = os.path.dirname(HOOK_DIR)
-sys.path.insert(0, PROJECT_ROOT)
+if PROJECT_ROOT not in sys.path:
+    sys.path.insert(0, PROJECT_ROOT)
 
 from src.compactor import PromptCompactor
 from src.history_compactor import HistoryCompactor
@@ -54,22 +55,14 @@ def _proxy_is_active() -> bool:
         pass
     return False
 
-def main():
+def _handle(payload: dict) -> dict:
+    last_user_input = str(payload.get("lastUserInput") or "")
+    conversation_id = str(payload.get("conversationId") or "default_session")
     try:
-        raw_input = sys.stdin.read()
-        if not raw_input.strip():
-            print(json.dumps({}))
-            return
-
-        payload = json.loads(raw_input)
-    except Exception:
-        print(json.dumps({}))
-        return
-
-    last_user_input = payload.get("lastUserInput", "")
-    conversation_id = payload.get("conversationId", "default_session")
-    invocation_num = payload.get("invocationNum", 1)
-    transcript_path = payload.get("transcriptPath", "")
+        invocation_num = int(payload.get("invocationNum", 1) or 1)
+    except (TypeError, ValueError):
+        invocation_num = 1
+    transcript_path = str(payload.get("transcriptPath") or "")
 
     tracker = MetricsTracker()
     inject_steps = []
@@ -140,7 +133,7 @@ def main():
     folded_text = None
     fresh_fold = False
     orig_hist_tokens = 0
-    if not quota.get("is_quota_exceeded", False) and invocation_num >= 3 and transcript_path:
+    if not is_quota_exceeded and invocation_num >= 3 and transcript_path:
         folded_text, orig_hist_tokens, folded_tokens, stats = HistoryCompactor.fold_transcript(
             transcript_path, invocation_num
         )
@@ -202,8 +195,15 @@ def main():
         if not is_valid_remind:
             guard_unreminded = True
         else:
-            reminded_id = int((last_remind.get("details") or {}).get("guard_id", 0))
-            guard_unreminded = int(recent_guard.get("id", 0)) > reminded_id
+            rem_details = last_remind.get("details")
+            rem_dict = rem_details if isinstance(rem_details, dict) else {}
+            try:
+                reminded_id = int(rem_dict.get("guard_id", 0) or 0)
+                recent_id = int(recent_guard.get("id", 0) or 0)
+            except (TypeError, ValueError):
+                reminded_id = 0
+                recent_id = 0
+            guard_unreminded = recent_id > reminded_id
     if fresh_fold or guard_unreminded:
         inject_steps.append({
             "systemMessage": {
@@ -223,10 +223,7 @@ def main():
             except Exception:
                 pass
 
-    # 5. Context Budget HUD warning: inject once per session when the
-    #    context crosses 80% of the estimated window. history_mass upgrades
-    #    the instrumented floor to a semi-real estimate, so the threshold is
-    #    actually reachable; the warning carries a ready-to-run compact command.
+    # 5. Context Budget HUD warning
     try:
         budget = ContextBudget.estimate(
             tracker, session_id=conversation_id,
@@ -262,9 +259,25 @@ def main():
     except Exception:
         pass
 
-    response = {}
-    if inject_steps:
-        response["injectSteps"] = inject_steps
+    return {"injectSteps": inject_steps} if inject_steps else {}
+
+
+def main():
+    try:
+        raw_input = sys.stdin.read()
+        if not raw_input.strip():
+            print(json.dumps({}))
+            return
+        payload = json.loads(raw_input)
+        if not isinstance(payload, dict):
+            print(json.dumps({}))
+            return
+        response = _handle(payload)
+        if not isinstance(response, dict):
+            response = {}
+    except Exception:
+        # Fail-open: never block user prompt submission on internal/SQLite errors
+        response = {}
 
     print(json.dumps(response))
 

@@ -14,6 +14,7 @@ import urllib.error
 from typing import Optional, Dict, Any, Tuple
 from src.distiller_cache import DistillationCache
 from src.license_manager import LicenseManager
+from src.paths import resolve_data_dir
 
 class UniversalDistiller:
     """Multi-provider semantic intent compiler supporting DeepSeek, OpenAI, and Google Gemini."""
@@ -26,9 +27,7 @@ class UniversalDistiller:
 
     @classmethod
     def _failure_state_path(cls) -> str:
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        data_dir = os.environ.get("TOKENSAFE_DATA_DIR", os.path.join(base_dir, "data"))
-        return os.path.join(data_dir, "distill_failure_state.json")
+        return os.path.join(resolve_data_dir(), "distill_failure_state.json")
 
     @classmethod
     def _cooldown_active(cls) -> bool:
@@ -150,12 +149,13 @@ Rules:
             }
 
         config_file_data = {}
-        base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        config_path = os.path.join(base_dir, "data", "config.json")
+        config_path = os.path.join(resolve_data_dir(), "config.json")
         if os.path.exists(config_path):
             try:
                 with open(config_path, "r", encoding="utf-8") as f:
-                    config_file_data = json.load(f)
+                    loaded_cfg = json.load(f)
+                if isinstance(loaded_cfg, dict):
+                    config_file_data = loaded_cfg
             except Exception:
                 pass
 
@@ -165,12 +165,20 @@ Rules:
         for key, p_info in cls.PROVIDERS.items():
             api_key = os.environ.get(p_info["env_key"], "").strip()
             if not api_key and p_info["config_key"] in config_file_data:
-                api_key = str(config_file_data[p_info["config_key"]]).strip()
+                api_key = str(config_file_data[p_info["config_key"]] or "").strip()
 
             if api_key:
-                model = config_file_data.get(f"{key}_model", p_info["default_model"])
-                timeout = float(config_file_data.get(f"{key}_timeout", cls.DEFAULT_TIMEOUT))
-                max_tokens = int(config_file_data.get("distill_max_tokens", 60))
+                model = str(config_file_data.get(f"{key}_model") or p_info["default_model"])
+                try:
+                    raw_to = config_file_data.get(f"{key}_timeout")
+                    timeout = float(raw_to if raw_to is not None else cls.DEFAULT_TIMEOUT)
+                except (TypeError, ValueError):
+                    timeout = cls.DEFAULT_TIMEOUT
+                try:
+                    raw_mt = config_file_data.get("distill_max_tokens")
+                    max_tokens = int(raw_mt if raw_mt is not None else 60)
+                except (TypeError, ValueError):
+                    max_tokens = 60
                 available[key] = {
                     "provider": key,
                     "name": p_info["name"],
@@ -231,8 +239,7 @@ Rules:
         # Determine order
         pref = preferred_provider
         if not pref:
-            base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            config_path = os.path.join(base_dir, "data", "config.json")
+            config_path = os.path.join(resolve_data_dir(), "config.json")
             if os.path.exists(config_path):
                 try:
                     with open(config_path, "r", encoding="utf-8") as f:
@@ -345,10 +352,31 @@ Rules:
             lines = content.splitlines()
             content = " ".join([l for l in lines if not l.startswith("```")]).strip()
 
-        # Extract parenthesized S-Expression
-        match = re.search(r"\([A-Z]+[^\)]*\)", content)
-        if match:
-            return match.group(0).strip()
-        elif content.startswith("(") and content.endswith(")"):
+        # Balanced quote-aware extraction so parens inside "intent foo(x)" don't truncate
+        m_start = re.search(r"\([A-Z]+(?:\s|\))", content)
+        if m_start:
+            start = m_start.start()
+            depth = 0
+            in_quote = False
+            i = start
+            while i < len(content):
+                ch = content[i]
+                if in_quote:
+                    if ch == "\\" and i + 1 < len(content):
+                        i += 2
+                        continue
+                    if ch == '"':
+                        in_quote = False
+                else:
+                    if ch == '"':
+                        in_quote = True
+                    elif ch == "(":
+                        depth += 1
+                    elif ch == ")":
+                        depth -= 1
+                        if depth == 0:
+                            return content[start : i + 1].strip()
+                i += 1
+        if content.startswith("(") and content.endswith(")"):
             return content
         return None

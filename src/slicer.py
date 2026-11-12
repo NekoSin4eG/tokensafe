@@ -5,6 +5,7 @@ Prevents context window bloat from full-file reads (800+ lines) and noisy termin
 
 import os
 import re
+import stat
 from typing import Dict, Any, List, Optional, Tuple
 from src.tokenizer import count_tokens
 
@@ -82,10 +83,19 @@ class ToolSlicer:
         # Tolerant arg keys: hooks keep proto casing ("Path"), but the
         # view_file/lowercase variants may send "path"/"FilePath".
         path = args.get("Path") or args.get("path") or args.get("FilePath") or ""
-        start_line = args.get("StartLine") or args.get("startLine")
-        end_line = args.get("EndLine") or args.get("endLine")
+        start_line = args.get("StartLine")
+        if start_line is None:
+            start_line = args.get("startLine")
+        end_line = args.get("EndLine")
+        if end_line is None:
+            end_line = args.get("endLine")
 
         if not path or not os.path.isabs(path) or not os.path.exists(path):
+            return {}, {"saved_tokens": 0, "original_tokens": 0, "optimized_tokens": 0}
+        try:
+            if not stat.S_ISREG(os.stat(path).st_mode):
+                return {}, {"saved_tokens": 0, "original_tokens": 0, "optimized_tokens": 0}
+        except OSError:
             return {}, {"saved_tokens": 0, "original_tokens": 0, "optimized_tokens": 0}
 
         try:
@@ -157,8 +167,10 @@ class ToolSlicer:
 
         # If no symbol found and file is large (> 400 lines), apply safety window
         if not target_symbol and total_lines > 400 and (end_line is None or end_line > cls.DEFAULT_MAX_WINDOW):
-            new_start = start_line if start_line is not None else 1
+            new_start = max(1, min(int(start_line), total_lines)) if start_line is not None else 1
             new_end = min(total_lines, new_start + cls.DEFAULT_MAX_WINDOW)
+            if new_end < new_start:
+                new_end = new_start
 
         # Calculate tokens of sliced content
         sliced_content = "".join(lines[new_start - 1 : new_end])
