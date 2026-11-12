@@ -3,7 +3,7 @@
   "name": "dev.tokensafe/tokensafe",
   "title": "TokenSafe",
   "description": "Reduce your AI bills by up to 99% locally: focused code, warm prompt caches & zero secret leaks.",
-  "version": "2.7.2",
+  "version": "2.7.3",
   "websiteUrl": "https://tokensafe.dev",
   "repository": {
     "url": "https://github.com/tokensafe-dev/tokensafe",
@@ -30,7 +30,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "tokensafe",
-      "version": "2.7.2",
+      "version": "2.7.3",
       "runtimeHint": "npx",
       "transport": {
         "type": "stdio"
@@ -46,7 +46,7 @@
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "tokensafe",
-      "version": "2.7.2",
+      "version": "2.7.3",
       "runtimeHint": "uvx",
       "transport": {
         "type": "stdio"

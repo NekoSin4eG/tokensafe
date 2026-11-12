@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tokensafe"
-version = "2.7.2"
+version = "2.7.3"
 description = "Reduce your AI bills by up to 99% locally: focused code context, warm prompt caches, and zero secret leaks in git."
 readme = "README.md"
 authors = [
