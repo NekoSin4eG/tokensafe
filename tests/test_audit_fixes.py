@@ -1127,6 +1127,18 @@ class TestReleaseVersionConsistency(unittest.TestCase):
         ok, problems = mod.verify_version_consistency(expected)
         self.assertTrue(ok, f"version drift detected:\n" + "\n".join(problems))
 
+    def test_release_arg_parsing_and_notes_filter(self):
+        import importlib.util
+        script = os.path.join(PROJECT_ROOT, "scripts", "release.py")
+        spec = importlib.util.spec_from_file_location("release_tool", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        self.assertEqual(mod.parse_release_args(["--resume"]), ("patch", None, True))
+        self.assertEqual(mod.parse_release_args(["--otp=123456", "2.5.2", "--no-bump"]), ("2.5.2", "123456", True))
+        self.assertEqual(mod.parse_release_args(["minor", "--otp", "654321"]), ("minor", "654321", False))
+        notes = mod.generate_release_notes(mod.get_current_version())
+        self.assertNotIn("chore(release): bump version", notes)
+
 
 class TestContextBudgetHUD(unittest.TestCase):
     """Context Budget HUD: window resolution, estimate math, thresholds,

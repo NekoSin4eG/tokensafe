@@ -102,11 +102,12 @@ def clean_artifacts() -> int:
     return cleaned_count
 
 
-def replace_in_file(path: str, pattern: str, replacement: str) -> bool:
+def replace_in_file(path: str, pattern: str, replacement: str, optional: bool = False) -> bool:
     """Replaces regex pattern in file, returns True if changed."""
     full_path = os.path.join(PROJECT_ROOT, path)
     if not os.path.exists(full_path):
-        print(f"  ⚠️ File not found: {path}")
+        if not optional:
+            print(f"  ⚠️ File not found: {path}")
         return False
 
     with open(full_path, "r", encoding="utf-8") as f:
@@ -159,21 +160,24 @@ def bump_version(target: str) -> str:
         rf'\g<1>"{new_version}"'
     )
 
-    # 5. src/cloud/ package (post-split home of the backend version constants)
+    # 5. src/cloud/ package (optional post-split home of the backend version constants)
     replace_in_file(
         "src/cloud/config.py",
         r'(HARDCODED_VERSION\s*=\s*)"[^"]+"',
-        rf'\g<1>"{new_version}"'
+        rf'\g<1>"{new_version}"',
+        optional=True,
     )
     replace_in_file(
         "src/cloud/services.py",
         r'TokenSafe-Backend/[0-9]+\.[0-9]+\.[0-9]+',
-        f'TokenSafe-Backend/{new_version}'
+        f'TokenSafe-Backend/{new_version}',
+        optional=True,
     )
     replace_in_file(
         "src/cloud/stripe.py",
         r'TokenSafe-Backend/[0-9]+\.[0-9]+\.[0-9]+',
-        f'TokenSafe-Backend/{new_version}'
+        f'TokenSafe-Backend/{new_version}',
+        optional=True,
     )
 
     # 6. src/mcp_server.py
@@ -190,16 +194,18 @@ def bump_version(target: str) -> str:
         f'TokenSafe-Sync/{new_version}'
     )
 
-    # 8. tests/test_cloud_backend.py
+    # 8. tests/test_cloud_backend.py (optional post-split)
     replace_in_file(
         "tests/test_cloud_backend.py",
         re.escape(f'client_version="{old_version}"'),
-        f'client_version="{new_version}"'
+        f'client_version="{new_version}"',
+        optional=True,
     )
     replace_in_file(
         "tests/test_cloud_backend.py",
         re.escape(f'seats_after[0]["client_version"], "{old_version}"'),
-        f'seats_after[0]["client_version"], "{new_version}"'
+        f'seats_after[0]["client_version"], "{new_version}"',
+        optional=True,
     )
 
     # 9. server.json (Official MCP Registry manifest)
@@ -299,14 +305,14 @@ def verify_version_consistency(expected: Optional[str] = None) -> Tuple[bool, Li
 
 
 def generate_release_notes(new_version: str) -> str:
-    """Drafts release notes from conventional commits since the previous tag."""
-    try:
-        last_tag = subprocess.run(
-            ["git", "describe", "--tags", "--abbrev=0", "HEAD^"],
-            capture_output=True, text=True, cwd=PROJECT_ROOT, timeout=10
-        ).stdout.strip()
-    except Exception:
-        last_tag = ""
+    """Drafts release notes from conventional commits since the previous release tag."""
+    current_tag = f"v{new_version}"
+    tags_res = subprocess.run(
+        ["git", "tag", "--sort=-v:refname"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT, timeout=10
+    )
+    prev_tags = [t.strip() for t in tags_res.stdout.splitlines() if t.strip() and t.strip() != current_tag]
+    last_tag = prev_tags[0] if prev_tags else ""
     if not last_tag:
         last_tag = subprocess.run(
             ["git", "rev-list", "--max-parents=0", "HEAD"],
@@ -316,7 +322,10 @@ def generate_release_notes(new_version: str) -> str:
         ["git", "log", f"{last_tag}..HEAD", "--pretty=%s"],
         capture_output=True, text=True, cwd=PROJECT_ROOT, timeout=10
     )
-    subjects = [s.strip() for s in res.stdout.split("\n") if s.strip()]
+    subjects = [
+        s.strip() for s in res.stdout.split("\n")
+        if s.strip() and not s.strip().startswith("chore(release): bump version")
+    ]
     buckets: Dict[str, List[str]] = {}
     for s in reversed(subjects):  # chronological
         parts = s.split(":", 1)
@@ -612,26 +621,38 @@ def run_release(target: str, otp: Optional[str] = None, no_bump: bool = False):
 
     # Phase 9: rollout verification --------------------------------------------------
     print("── Phase 9: rollout verification")
-    health_ok = wait_for_prod_version(next_v, attempts=8, delay=15)
-    print(f"  {'✔' if health_ok else '⚠'} prod /health: "
-          f"{'v' + next_v if health_ok else 'still rolling — check https://api.tokensafe.dev/health'}")
+    # Post-split: tokensafe-cloud has its own repo/deploy pipeline; probe briefly without blocking 2 minutes.
+    health_ok = wait_for_prod_version(next_v, attempts=2, delay=2)
+    print(f"  {'✔' if health_ok else 'ℹ'} prod /health: "
+          f"{'v' + next_v if health_ok else 'cloud repo not updated to v' + next_v + ' yet (update tokensafe-cloud separately)'}")
     print(f"  {'✔' if pypi_version_published(next_v) else '⚠'} PyPI {next_v}")
     print(f"  {'✔' if npm_version_published(next_v) else '⚠'} npm {next_v}")
     print(f"  {'✔' if registry_version_published(next_v) else '⚠'} MCP Registry {next_v} active")
 
-    # Public repo CI (the release commit pushed main here)
+    # Public repo CI scoped strictly to the released commit SHA (never stale prior commit runs)
+    head_sha = _sh(["git", "rev-parse", "HEAD"])[1].strip()
     public_ci_ok = False
-    for _ in range(4):
+    concl = "pending"
+    for _ in range(6):
         code, out = _sh(["gh", "run", "list", "-R", "tokensafe-dev/tokensafe",
-                         "--limit", "10", "--json", "conclusion,workflowName",
-                         "-q", '[.[] | select(.workflowName == "Tests & Lint")][0].conclusion'], timeout=30)
-        concl = out.strip()
-        if concl in ("success", "failure"):
-            public_ci_ok = (concl == "success")
-            break
-        time.sleep(30)
-    print(f"  {'✔' if public_ci_ok else '⚠'} public repo CI: {concl if concl in ('success', 'failure') else 'pending'}")
-    if not public_ci_ok and concl == "failure":
+                         "--limit", "10", "--json", "conclusion,workflowName,headSha,status"], timeout=30)
+        if code == 0 and out.strip():
+            try:
+                runs = json.loads(out)
+                matched = [
+                    r for r in runs
+                    if r.get("workflowName") == "Tests & Lint" and r.get("headSha") == head_sha
+                ]
+                if matched:
+                    concl = matched[0].get("conclusion") or matched[0].get("status") or "pending"
+                    if concl in ("success", "failure", "cancelled"):
+                        public_ci_ok = (concl == "success")
+                        break
+            except Exception:
+                pass
+        time.sleep(20)
+    print(f"  {'✔' if public_ci_ok else '⚠'} public repo CI ({head_sha[:7]}): {concl}")
+    if concl in ("failure", "cancelled"):
         pending.append("public repo CI failed — inspect gh run logs (tokensafe-dev/tokensafe)")
 
     print("\n════════════════════════════════════════")
@@ -644,6 +665,28 @@ def run_release(target: str, otp: Optional[str] = None, no_bump: bool = False):
     print("════════════════════════════════════════")
 
 
+def parse_release_args(args: List[str]) -> Tuple[str, Optional[str], bool]:
+    """Parses `release` subcommand args in any order: `[target] [--otp=CODE|--otp CODE] [--no-bump|--resume]`."""
+    otp: Optional[str] = None
+    no_bump = False
+    positional: List[str] = []
+    i = 0
+    while i < len(args):
+        arg = args[i]
+        if arg.startswith("--otp="):
+            otp = arg.split("=", 1)[1].strip() or None
+        elif arg == "--otp" and i + 1 < len(args):
+            i += 1
+            otp = args[i].strip() or None
+        elif arg in ("--no-bump", "--resume"):
+            no_bump = True
+        elif not arg.startswith("-"):
+            positional.append(arg)
+        i += 1
+    target = positional[0] if positional else "patch"
+    return target, otp, no_bump
+
+
 def main():
     if len(sys.argv) < 2:
         print(__doc__)
@@ -654,7 +697,7 @@ def main():
         print("  python3 scripts/release.py bump [patch|minor|major|X.Y.Z]")
         print("  python3 scripts/release.py build")
         print("  python3 scripts/release.py verify [X.Y.Z]        # version consistency across files")
-        print("  python3 scripts/release.py release [patch|minor|major|X.Y.Z] [--otp=CODE]")
+        print("  python3 scripts/release.py release [patch|minor|major|X.Y.Z] [--otp=CODE] [--no-bump|--resume]")
         sys.exit(0)
 
     cmd = sys.argv[1].lower().strip()
@@ -678,13 +721,7 @@ def main():
                 print(f"❌ {p}")
             sys.exit(1)
     elif cmd == "release":
-        args = sys.argv[2:]
-        otp = None
-        if args and args[-1].startswith("--otp="):
-            otp = args[-1].split("=", 1)[1]
-            args = args[:-1]
-        target = args[0] if args else "patch"
-        no_bump = "--no-bump" in args
+        target, otp, no_bump = parse_release_args(sys.argv[2:])
         run_release(target, otp=otp, no_bump=no_bump)
     else:
         print(f"Unknown command: {cmd}")
