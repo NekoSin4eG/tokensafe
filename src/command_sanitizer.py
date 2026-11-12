@@ -279,6 +279,13 @@ class CommandSanitizer:
             subcmd = cmd_args[sub_idx] if sub_idx < len(cmd_args) else ""
             sub_args = cmd_args[sub_idx + 1 :]
 
+            # git status: compact porcelain format + bounded output (a long-lived
+            # monorepo branch can list hundreds of untracked files)
+            if subcmd == "status":
+                if "--porcelain" not in sub_args and "-s" not in sub_args and "-uno" not in sub_args and "--untracked-files" not in stage:
+                    new_stage = re.sub(r"\b(git(?:\s+-C\s+\S+)?\s+status)\b", r"\1 --porcelain", stage, count=1)
+                    return new_stage, 1500, "Switched git status to compact porcelain output, capped to 200 lines", cls._CAP_LINES_200
+
             # git diff: exclude lockfiles/bundles when diffing unscoped repository
             if subcmd == "diff":
                 if not any(a.startswith(":!") for a in sub_args) and ":!" not in stage:
@@ -362,6 +369,12 @@ class CommandSanitizer:
         if cmd_tok == "docker" and (cmd_args[:1] == ["logs"] or cmd_args[:2] == ["container", "logs"]):
             if "--tail" not in stage and not any(a == "-n" or a.startswith(("-n", "--tail=")) for a in cmd_args):
                 return f"{stage} --tail 100", 2000, "Capped docker logs to last 100 lines", None
+
+        # docker build / docker compose build: the failing step sits at the end
+        # of the log — keep only the tail instead of a full build dump
+        if cmd_tok == "docker" and (cmd_args[:1] == ["build"] or cmd_args[:2] == ["compose", "build"]):
+            if not cls._has_redirect(stage) and "|" not in stage:
+                return f"{stage} 2>&1 | tail -50", 2500, "Tailed docker build output to the last 50 lines (failing step is last)", None
 
         # kubectl logs
         if cmd_tok == "kubectl" and cmd_args[:1] == ["logs"]:

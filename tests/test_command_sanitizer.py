@@ -24,6 +24,41 @@ class TestCommandSanitizer(unittest.TestCase):
         self.assertIsNotNone(new_cmd)
         self.assertIn("-n 10", new_cmd)
 
+    def test_git_log_capping(self):
+        cmd = "git log"
+        new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
+        self.assertIsNotNone(new_cmd)
+        self.assertIn("-n 10", new_cmd)
+
+    def test_git_status_porcelain_and_cap(self):
+        cmd = "git status"
+        new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
+        self.assertIsNotNone(new_cmd)
+        self.assertIn("--porcelain", new_cmd)
+        self.assertGreater(saved, 500)
+
+    def test_git_status_already_porcelain_untouched(self):
+        cmd = "git status --porcelain"
+        new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
+        self.assertIsNone(new_cmd)
+
+    def test_docker_build_tailed(self):
+        cmd = "docker build -t myapp ."
+        new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
+        self.assertIsNotNone(new_cmd)
+        self.assertIn("tail -50", new_cmd)
+
+    def test_docker_compose_build_tailed(self):
+        cmd = "docker compose build api"
+        new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
+        self.assertIsNotNone(new_cmd)
+        self.assertIn("tail -50", new_cmd)
+
+    def test_docker_logs_tail_untouched(self):
+        cmd = "docker logs --tail 50 app"
+        new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
+        self.assertIsNone(new_cmd)
+
     def test_pytest_quiet_traceback(self):
         cmd = "pytest tests/"
         new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
