@@ -494,7 +494,7 @@ class CodeGraph:
 
         container_re = re.compile(
             r'^(?:export\s+(?:default\s+)?)?(?:pub(?:\([^)]*\))?\s+|public\s+|private\s+|protected\s+|internal\s+|abstract\s+|final\s+|sealed\s+|open\s+|data\s+)*'
-            r'(?:class|interface|struct|impl(?:\s+[A-Za-z0-9_<>,\s]+?\s+for)?|trait|enum|record|protocol|extension|namespace)\s+([A-Za-z0-9_]+)'
+            r'(?:class|interface|struct|impl(?:\s+[A-Za-z0-9_<>,\s]+?\s+for)?|trait|enum|record|protocol|extension|namespace|type)\s+([A-Za-z0-9_]+)'
         )
         go_struct_re = re.compile(r'^type\s+([A-Za-z0-9_]+)\s+(?:struct|interface)\b')
         ts_method_re = re.compile(

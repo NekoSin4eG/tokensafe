@@ -144,6 +144,7 @@ class Order:
         with open(ts_file, "w") as f:
             f.write('''import { helper } from "./util";
 const MAX_RETRIES = 3;
+export type Payload = { id: string };
 export class Handler {
   async process(id: string) {
     return helper(id);
@@ -177,6 +178,8 @@ func run() {
                 self.assertNotIn("MAX_RETRIES", ts_syms)
                 self.assertIn("Handler", ts_syms)
                 self.assertIn("process", ts_syms)
+                # TS type aliases must be indexed as symbols (parity: stdlib + treesitter)
+                self.assertIn("Payload", ts_syms)
                 # Resolved TS relative import edge
                 self.assertIn("file:util.ts", graph.edges.get("file:handler.ts", set()))
                 # Go block import parsed

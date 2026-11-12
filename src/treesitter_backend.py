@@ -48,6 +48,7 @@ _CONTAINER_NODE_TYPES = {
     "trait_item",
     "trait_declaration",
     "interface_declaration",
+    "type_alias_declaration",
     "record_declaration",
     "enum_declaration",
     "enum_item",
