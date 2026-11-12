@@ -156,6 +156,12 @@ def bump_version(target: str) -> str:
         r'("version"\s*:\s*)"[^"]+"',
         rf'\g<1>"{new_version}"'
     )
+    replace_in_file(
+        ".codex-plugin/plugin.json",
+        r'("version"\s*:\s*)"[^"]+"',
+        rf'\g<1>"{new_version}"',
+        optional=True,
+    )
 
     # 4. src/version_checker.py
     replace_in_file(
@@ -267,6 +273,7 @@ def verify_version_consistency(expected: Optional[str] = None) -> Tuple[bool, Li
     version = expected or get_current_version()
     problems: List[str] = []
     optional_files = {
+        ".codex-plugin/plugin.json",
         "src/cloud/config.py",
         "src/cloud/services.py",
         "src/cloud/stripe.py",
@@ -286,13 +293,14 @@ def verify_version_consistency(expected: Optional[str] = None) -> Tuple[bool, Li
     check("package.json", f'"version": "{version}"', "npm version")
     check("pyproject.toml", f'version = "{version}"', "python version")
     check("plugin.json", f'"version": "{version}"', "plugin version")
+    check(".codex-plugin/plugin.json", f'"version": "{version}"', "codex plugin version")
     check("src/version_checker.py", f'CURRENT_VERSION = "{version}"', "client version")
     check("src/cloud/config.py", f'HARDCODED_VERSION = "{version}"', "backend version")
-    check("src/cloud/services.py", f"TokenSafe-Backend/{version}", "services UA")
-    check("src/cloud/stripe.py", f"TokenSafe-Backend/{version}", "stripe UA")
+    check("src/cloud/services.py", "HARDCODED_VERSION", "services UA constant")
+    check("src/cloud/stripe.py", "HARDCODED_VERSION", "stripe UA constant")
     check("src/mcp_server.py", f'"version": "{version}"', "mcp server version")
     check("src/telemetry_sync.py", f"TokenSafe-Sync/{version}", "sync UA")
-    check("tests/test_cloud_backend.py", f'client_version="{version}"', "tests client_version")
+    check("tests/test_cloud_backend.py", "LATEST_VERSION", "tests client_version constant")
 
     try:
         with open(os.path.join(PROJECT_ROOT, "server.json"), "r", encoding="utf-8") as f:
@@ -458,7 +466,11 @@ def update_cloud_repo_version(cloud_root: str, next_v: str) -> None:
     )
     replace_in_file("package.json", r'("version"\s*:\s*)"[^"]+"', rf'\g<1>"{next_v}"', root_dir=cloud_root)
     replace_in_file("plugin.json", r'("version"\s*:\s*)"[^"]+"', rf'\g<1>"{next_v}"', root_dir=cloud_root)
+    replace_in_file(".codex-plugin/plugin.json", r'("version"\s*:\s*)"[^"]+"', rf'\g<1>"{next_v}"', root_dir=cloud_root, optional=True)
     replace_in_file("pyproject.toml", r'(version\s*=\s*)"[^"]+"', rf'\g<1>"{next_v}"', root_dir=cloud_root)
+    replace_in_file("src/version_checker.py", r'(CURRENT_VERSION\s*=\s*)"[^"]+"', rf'\g<1>"{next_v}"', root_dir=cloud_root, optional=True)
+    replace_in_file("src/mcp_server.py", r'("name"\s*:\s*"tokensafe-mcp",\s*"version"\s*:\s*)"[^"]+"', rf'\g<1>"{next_v}"', root_dir=cloud_root, optional=True)
+    replace_in_file("src/telemetry_sync.py", r'TokenSafe-Sync/[0-9]+\.[0-9]+\.[0-9]+', f'TokenSafe-Sync/{next_v}', root_dir=cloud_root, optional=True)
 
     server_json_path = os.path.join(cloud_root, "server.json")
     if os.path.exists(server_json_path):

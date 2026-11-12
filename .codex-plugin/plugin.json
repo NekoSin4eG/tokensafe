@@ -1,14 +1,14 @@
 {
-  "version": "1.3.0",
+  "version": "2.7.3",
   "name": "tokensafe",
-  "description": "Zero-Loss Token Economy & Context Optimizer for AI Agents. Compresses prompts, slices AST/tool outputs, and prevents stuck loops.",
+  "description": "Reduce your AI bills by up to 99% locally. Your agents read only needed code, keep prompt caches intact across turns, and keep secrets out of git.",
   "author": {
     "name": "Oleg Savelev",
     "url": "https://github.com/NekoSin4eG"
   },
-  "homepage": "https://github.com/tokensafe-dev/tokensafe-cloud",
-  "repository": "https://github.com/tokensafe-dev/tokensafe-cloud",
-  "license": "Apache-2.0",
+  "homepage": "https://tokensafe.dev",
+  "repository": "https://github.com/tokensafe-dev/tokensafe",
+  "license": "MIT",
   "keywords": [
     "tokensafe",
     "token-optimizer",
@@ -20,8 +20,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "TokenSafe",
-    "shortDescription": "Save 60-90% AI coding tokens without quality loss",
-    "longDescription": "TokenSafe provides autonomous token compression, AST code skeletonization, and stuck-loop prevention for AI coding agents.",
+    "shortDescription": "Reduce your AI bills by up to 99% locally with zero secret leaks",
+    "longDescription": "TokenSafe provides autonomous token compression, AST code skeletonization, prompt cache locking, and pre-commit secret leak prevention for AI coding agents.",
     "developerName": "TokenSafe",
     "category": "Engineering",
     "capabilities": [
