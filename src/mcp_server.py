@@ -508,10 +508,11 @@ def _team_cache_key(path: str, symbol: str, dep_mode: str = "signature") -> str:
 def _team_skeleton_lookup(path: str, symbol: str, dep_mode: str = "signature") -> Optional[str]:
     """Team cache pre-warm lookup: returns a teammate's cached skeleton or None.
 
-    Never blocks the caller for more than ~250ms: the network fetch runs in a
-    daemon thread with a short join. Non-team installs skip the network entirely."""
+    Never blocks the caller for more than ~450ms: the HTTP timeout matches
+    the thread join so discarded timeouts don't inflate cloud hit_count.
+    Non-team installs skip the network entirely."""
     try:
-        is_team, _ = TeamCache._is_team_tier()
+        is_team, lic_key = TeamCache._is_team_tier()
         if not is_team:
             return None
         cache_key = _team_cache_key(path, symbol, dep_mode=dep_mode)
@@ -519,13 +520,13 @@ def _team_skeleton_lookup(path: str, symbol: str, dep_mode: str = "signature") -
 
         def _fetch():
             try:
-                box["value"] = TeamCache.get("SKELETON", cache_key)
+                box["value"] = TeamCache.get("SKELETON", cache_key, timeout=0.45, lic_key=lic_key)
             except Exception:
                 pass
 
         t = threading.Thread(target=_fetch, daemon=True)
         t.start()
-        t.join(0.25)
+        t.join(0.45)
         return box.get("value")
     except Exception:
         return None

@@ -10,7 +10,7 @@ import threading
 import time
 import urllib.request
 import unittest
-from unittest.mock import patch
+from unittest.mock import patch, MagicMock
 
 
 class TestWave1McpProxyHooksInstaller(unittest.TestCase):
@@ -372,6 +372,43 @@ class TestWave3IntelligenceMetricsAndCli(unittest.TestCase):
         stats = WeeklyDigestGenerator.get_team_weekly_stats("dev@acme.com", now=now_ts, db_path=cloud_db, allow_any_tier=True)
         self.assertIsNotNone(stats)
         self.assertEqual(stats["total_saved_tokens"], 800)
+
+    def test_team_cache_client_cooldown_and_secret_scrubbing(self):
+        from src.team_cache import TeamCache
+
+        TeamCache._clear_cooldown("https://api.tokensafe.dev")
+        with patch.object(TeamCache, "_is_team_tier", return_value=(True, "TS2.key")), \
+             patch("urllib.request.urlopen") as mock_url:
+            mock_resp = MagicMock()
+            mock_resp.status = 200
+            mock_resp.read.return_value = json.dumps({"hit": True, "value": "def foo(): ..."}).encode("utf-8")
+            mock_resp.__enter__.return_value = mock_resp
+            mock_url.return_value = mock_resp
+
+            val = TeamCache.get("SKELETON", "some_key", timeout=0.5)
+            self.assertEqual(val, "def foo(): ...")
+
+        # Put must redact secrets before sending over network
+        fake_stripe = "sk_live_" + "1234567890abcdef12345678"
+        with patch.object(TeamCache, "_is_team_tier", return_value=(True, "TS2.key")), \
+             patch("urllib.request.urlopen") as mock_url:
+            TeamCache.put("PROMPT", "prompt", f'key = "{fake_stripe}"')
+            time.sleep(0.05)
+            self.assertTrue(mock_url.called)
+            req = mock_url.call_args[0][0]
+            body = json.loads(req.data.decode("utf-8"))
+            self.assertNotIn(fake_stripe, body["value"])
+            self.assertIn("mock_tokensafe_anchor", body["value"])
+
+        # Cooldown blocks both get() and put() without spawning network calls
+        TeamCache._trip_cooldown("https://api.tokensafe.dev")
+        with patch.object(TeamCache, "_is_team_tier", return_value=(True, "TS2.key")), \
+             patch("urllib.request.urlopen") as mock_url:
+            self.assertIsNone(TeamCache.get("SKELETON", "k2"))
+            TeamCache.put("SKELETON", "k2", "val2")
+            time.sleep(0.03)
+            self.assertFalse(mock_url.called)
+        TeamCache._clear_cooldown("https://api.tokensafe.dev")
 
     def test_cli_help_is_side_effect_free_and_digest_runs_without_mailer(self):
         repo_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

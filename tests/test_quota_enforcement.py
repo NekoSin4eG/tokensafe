@@ -30,7 +30,14 @@ class TestQuotaCountingAndAntiBypass(unittest.TestCase):
             os.environ.pop("TOKENSAFE_DATA_DIR", None)
         else:
             os.environ["TOKENSAFE_DATA_DIR"] = self._old_dir
-        self._tmp.cleanup()
+        try:
+            self._tmp.cleanup()
+        except Exception:
+            try:
+                import shutil
+                shutil.rmtree(self._tmp.name, ignore_errors=True)
+            except Exception:
+                pass
 
     def test_measured_only_quota_excludes_estimated_heuristics(self):
         # Estimated events must NOT burn the Community 500k allowance
@@ -116,7 +123,14 @@ class TestQuotaDegradationAndBanners(unittest.TestCase):
             os.environ.pop("TOKENSAFE_DATA_DIR", None)
         else:
             os.environ["TOKENSAFE_DATA_DIR"] = self._old_dir
-        self._tmp.cleanup()
+        try:
+            self._tmp.cleanup()
+        except Exception:
+            try:
+                import shutil
+                shutil.rmtree(self._tmp.name, ignore_errors=True)
+            except Exception:
+                pass
 
     def test_banner_cadence_emits_on_turn_1_and_every_5_turns(self):
         results = [

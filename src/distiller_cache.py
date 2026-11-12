@@ -278,7 +278,12 @@ class DistillationCache:
                 team_tmpl = TeamCache.get("PROMPT_TMPL", tmpl_prompt)
                 instantiated = cls._instantiate_template(team_tmpl, slots) if team_tmpl else None
                 if instantiated:
-                    cls.set(prompt_text, instantiated, provider="team_template_cache", sync_remote=False)
+                    with cls._lock:
+                        cls._template_memory_cache[tmpl_hash] = team_tmpl
+                        cls._template_memory_cache.move_to_end(tmpl_hash)
+                        if len(cls._template_memory_cache) > cls._MAX_MEMORY_ENTRIES:
+                            cls._template_memory_cache.popitem(last=False)
+                    cls.set(prompt_text, instantiated, provider="team_template_cache", sync_remote=False, store_template=False)
                     with cls._lock:
                         cls._hits += 1
                     return instantiated

@@ -21,6 +21,31 @@ class TeamCache:
     DEFAULT_TIMEOUT = float(os.environ.get("TOKENSAFE_CACHE_TIMEOUT", "1.2"))  # Fast 1.2s timeout to prevent blocking agent turns
     FAILURE_COOLDOWN_SECONDS = 120.0
     _cooldown_until: float = 0.0
+    _cooldowns: Dict[str, float] = {}
+    _cooldown_lock = threading.Lock()
+
+    @classmethod
+    def _is_in_cooldown(cls, cloud_url: Optional[str] = None) -> bool:
+        now = time.monotonic()
+        url = cloud_url or cls._get_cloud_url()
+        with cls._cooldown_lock:
+            if cls._cooldown_until > now:
+                return True
+            return cls._cooldowns.get(url, 0.0) > now
+
+    @classmethod
+    def _trip_cooldown(cls, cloud_url: Optional[str] = None) -> None:
+        url = cloud_url or cls._get_cloud_url()
+        until = time.monotonic() + cls.FAILURE_COOLDOWN_SECONDS
+        with cls._cooldown_lock:
+            cls._cooldowns[url] = until
+
+    @classmethod
+    def _clear_cooldown(cls, cloud_url: Optional[str] = None) -> None:
+        url = cloud_url or cls._get_cloud_url()
+        with cls._cooldown_lock:
+            cls._cooldown_until = 0.0
+            cls._cooldowns.pop(url, None)
 
     @classmethod
     def _get_cloud_url(cls) -> str:
@@ -45,19 +70,30 @@ class TeamCache:
         return hashlib.sha256(norm.encode("utf-8")).hexdigest()
 
     @classmethod
-    def get(cls, cache_type: str, key_text: str) -> Optional[str]:
+    def get(
+        cls,
+        cache_type: str,
+        key_text: str,
+        timeout: Optional[float] = None,
+        lic_key: Optional[str] = None,
+    ) -> Optional[str]:
         """
         Queries Shared Team Cache for compiled S-Expression or AST Skeleton.
         Returns cached value string or None if miss/disabled/timed out/in cooldown.
         """
-        if time.monotonic() < cls._cooldown_until:
+        cloud_url = cls._get_cloud_url()
+        if cls._is_in_cooldown(cloud_url):
             return None
-        is_team, lic_key = cls._is_team_tier()
-        if not is_team or not key_text:
+        if not lic_key:
+            is_team, resolved_key = cls._is_team_tier()
+            if not is_team:
+                return None
+            lic_key = resolved_key
+        if not cache_type or not key_text:
             return None
 
         h = cls.hash_key(key_text)
-        endpoint = f"{cls._get_cloud_url()}/api/team/cache?type={urllib.parse.quote(cache_type)}&hash={h}"
+        endpoint = f"{cloud_url}/api/team/cache?type={urllib.parse.quote(cache_type)}&hash={h}"
 
         req = urllib.request.Request(
             endpoint,
@@ -67,30 +103,57 @@ class TeamCache:
             }
         )
 
+        eff_timeout = cls.DEFAULT_TIMEOUT if timeout is None else max(0.05, float(timeout))
         try:
-            with urllib.request.urlopen(req, timeout=cls.DEFAULT_TIMEOUT) as resp:
+            with urllib.request.urlopen(req, timeout=eff_timeout) as resp:
                 if resp.status == 200:
                     data = json.loads(resp.read().decode("utf-8"))
                     val = data.get("value") or data.get("cached_value")
+                    cls._clear_cooldown(cloud_url)
                     if data.get("hit") and val:
-                        cls._cooldown_until = 0.0
                         return val
+        except urllib.error.HTTPError as he:
+            # Trip circuit breaker on auth rejection or server 5xx outage
+            if he.code in (401, 403) or he.code >= 500:
+                cls._trip_cooldown(cloud_url)
+            return None
         except Exception:
-            # Circuit-break offline/unreachable cloud calls for 120s so misses don't stall repeated prompts
-            cls._cooldown_until = time.monotonic() + cls.FAILURE_COOLDOWN_SECONDS
+            # Circuit-break offline/unreachable cloud calls so misses don't stall repeated prompts
+            cls._trip_cooldown(cloud_url)
             return None
 
         return None
 
     @classmethod
-    def put(cls, cache_type: str, key_text: str, value: str, tokens_saved: int = 0) -> None:
+    def put(
+        cls,
+        cache_type: str,
+        key_text: str,
+        value: str,
+        tokens_saved: int = 0,
+        lic_key: Optional[str] = None,
+    ) -> None:
         """
         Asynchronously broadcasts a freshly compiled distillation or skeleton to the Team Cache.
         Runs in a detached daemon thread so developer workflows never wait on network I/O.
         """
-        is_team, lic_key = cls._is_team_tier()
-        if not is_team or not key_text or not value:
+        cloud_url = cls._get_cloud_url()
+        if cls._is_in_cooldown(cloud_url):
             return
+        if not lic_key:
+            is_team, resolved_key = cls._is_team_tier()
+            if not is_team:
+                return
+            lic_key = resolved_key
+        if not cache_type or not key_text or not value:
+            return
+
+        safe_value = value
+        try:
+            from src.secret_redactor import SecretRedactor
+            safe_value, _, _ = SecretRedactor.redact_text(value)
+        except Exception:
+            pass
 
         h = cls.hash_key(key_text)
 
@@ -98,11 +161,11 @@ class TeamCache:
             payload = {
                 "type": cache_type,
                 "hash": h,
-                "value": value,
-                "tokens_saved": max(0, tokens_saved),
+                "value": safe_value,
+                "tokens_saved": max(0, int(tokens_saved or 0)),
                 "license_key": lic_key
             }
-            endpoint = f"{cls._get_cloud_url()}/api/team/cache"
+            endpoint = f"{cloud_url}/api/team/cache"
             req = urllib.request.Request(
                 endpoint,
                 data=json.dumps(payload).encode("utf-8"),
@@ -114,9 +177,12 @@ class TeamCache:
             )
             try:
                 with urllib.request.urlopen(req, timeout=1.5):
-                    pass
+                    cls._clear_cooldown(cloud_url)
+            except urllib.error.HTTPError as he:
+                if he.code in (401, 403) or he.code >= 500:
+                    cls._trip_cooldown(cloud_url)
             except Exception:
-                pass
+                cls._trip_cooldown(cloud_url)
 
         t = threading.Thread(target=_worker, daemon=True)
         t.start()
