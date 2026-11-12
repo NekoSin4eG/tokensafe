@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "tokensafe"
 version = "2.5.1"
-description = "Local-first AI coding guardrails: reduce AI bills by up to 99% via AST slicing, KV-cache prefix locking, and team ROI telemetry"
+description = "Reduce your AI bills by up to 99% locally: focused code context, warm prompt caches, and zero secret leaks in git."
 readme = "README.md"
 authors = [
     { name = "TokenSafe Team", email = "support@tokensafe.dev" }

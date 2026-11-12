@@ -6,10 +6,10 @@
 <!-- mcp-name: dev.tokensafe/tokensafe -->
 
 <p align="center">
-  <b>Local-First AI Guardrails, Focused Context &amp; Auditable Team ROI</b><br>
+  <b>Local-First Context Control, Prompt Caching &amp; Secret Guardrails for Coding Agents</b><br>
   Reduce your AI bills by up to 99%. Let your team ship clean code faster and cheaper.<br>
-  TokenSafe runs locally between your agents and your repos: AST slicing &amp; repeat-read pointers cut context up to 95–99%, append-only KV-cache prefix locking hits 90%+ cache reuse (0.1x cached reads), and secrets get blocked before commit (80–97% typical session bill reduction, measured / estimated).<br>
-  Built for teams using <b>Cursor, Claude Code, Codex, Windsurf, Google Antigravity, Gemini CLI, and ChatGPT</b>.
+  Your coding agents read only the code each task needs and keep prompt caches intact across turns. Everything runs locally on your machine, so your team fixes fewer broken edits and keeps secrets out of git.<br>
+  Works with <b>Cursor, Claude Code, Codex, Windsurf, Google Antigravity, Gemini CLI, and ChatGPT</b>.
 </p>
 
 <p align="center">

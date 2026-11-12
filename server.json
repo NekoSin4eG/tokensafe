@@ -2,7 +2,7 @@
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "dev.tokensafe/tokensafe",
   "title": "TokenSafe",
-  "description": "Reduce AI bills up to 99% via AST slicing, pointer dedup, KV-cache locking & security guards.",
+  "description": "Reduce your AI bills by up to 99% locally: focused code, warm prompt caches & zero secret leaks.",
   "version": "2.5.1",
   "websiteUrl": "https://tokensafe.dev",
   "repository": {
