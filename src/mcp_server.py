@@ -714,8 +714,6 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                         total_seen = idx
                         if idx <= cap:
                             raw_lines.append(line)
-                        elif idx == cap + 1:
-                            pass
                 raw_chunk = "".join(raw_lines)
                 if total_seen > cap:
                     raw_chunk += f"\n// [TokenSafe Community 500k limit reached: showing raw lines 1-{cap} of {total_seen}. AST/graph slicing & pointer dedup are paused.]\n"

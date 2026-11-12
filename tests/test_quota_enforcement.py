@@ -217,11 +217,14 @@ class TestQuotaDegradationAndBanners(unittest.TestCase):
 
         self.assertIn(("X-TokenSafe-Quota", "exceeded"), sent_headers)
         upstream = captured_payloads[0]
-        # Secret redactor STILL ran, while normalizer/compactor stayed bypassed
+        # Secret redactor STILL ran, while normalizer/compactor stayed bypassed.
+        # Anthropic upstream: the OpenAI body is translated in-flight — role=system
+        # moves to the top-level `system` field, user text stays a plain string.
+        self.assertIn("The current local time is:", upstream["system"])
         self.assertIsInstance(upstream["messages"][0]["content"], str)
-        self.assertIn("The current local time is:", upstream["messages"][0]["content"])
-        self.assertNotIn("AAAA", upstream["messages"][1]["content"])
-        self.assertIn("Hello!", upstream["messages"][1]["content"])
+        self.assertIn("Hello!", upstream["messages"][0]["content"])
+        self.assertIn("max_tokens", upstream)  # Anthropic requires it; translator defaults it
+        self.assertNotIn("AAAA", json.dumps(upstream))  # the API key never leaks anywhere
 
     def test_hooks_pause_optimization_and_show_cta_on_cadence(self):
         from hooks import claude_code_hook, pre_invocation

@@ -8,6 +8,7 @@ Endpoint: http://127.0.0.1:8765/v1
 import sys
 import os
 import json
+import time
 import queue
 import threading
 import urllib.request
@@ -62,6 +63,329 @@ class EventBroadcaster:
                 self._subscribers.remove(d)
 
 BROADCASTER = EventBroadcaster()
+
+
+# ---------------------------------------------------------------------------
+# OpenAI <-> Anthropic payload translation.
+# The proxy accepts OpenAI /v1/chat/completions bodies from any agent; when the
+# resolved upstream is Anthropic (/v1/messages) the body, response, SSE stream,
+# and error envelopes must be converted in-flight, otherwise the raw OpenAI
+# shape is rejected by the Anthropic API (missing max_tokens, system role, etc).
+# ---------------------------------------------------------------------------
+
+_ANTHROPIC_FINISH_MAP = {
+    "end_turn": "stop",
+    "stop_sequence": "stop",
+    "max_tokens": "length",
+    "tool_use": "tool_calls",
+    "refusal": "content_filter",
+}
+
+_OPENAI_ONLY_FIELDS = (
+    "frequency_penalty", "presence_penalty", "logprobs", "top_logprobs", "n",
+    "response_format", "seed", "stream_options", "user", "parallel_tool_calls",
+    "prompt_cache_key", "logit_bias", "service_tier",
+)
+
+
+def _blocks_from_content(content: Any, role: str = "user") -> List[Dict[str, Any]]:
+    """Converts one OpenAI message content (str or block list) into Anthropic content blocks."""
+    blocks: List[Dict[str, Any]] = []
+    if isinstance(content, str):
+        if content:
+            blocks.append({"type": "text", "text": content})
+        return blocks
+    if not isinstance(content, list):
+        return blocks
+    for blk in content:
+        if not isinstance(blk, dict):
+            continue
+        btype = blk.get("type")
+        if btype == "text" and isinstance(blk.get("text"), str):
+            nb = {"type": "text", "text": blk["text"]}
+            if isinstance(blk.get("cache_control"), dict):
+                nb["cache_control"] = blk["cache_control"]
+            blocks.append(nb)
+        elif btype == "image_url":
+            url = (blk.get("image_url") or {}).get("url", "") if isinstance(blk.get("image_url"), dict) else ""
+            if url.startswith("data:"):
+                head, _, b64 = url.partition(",")
+                media = head[5:].split(";", 1)[0] or "image/png"
+                if b64:
+                    blocks.append({"type": "image", "source": {"type": "base64", "media_type": media, "data": b64}})
+            elif url:
+                blocks.append({"type": "image", "source": {"type": "url", "url": url}})
+    return blocks
+
+
+def _collapse_plain_text(blocks: List[Dict[str, Any]]) -> Any:
+    """Collapses pure-text blocks (no cache_control) back into a plain string —
+    Anthropic accepts string content, and it keeps payloads closest to the client's shape."""
+    if not blocks or any(b.get("type") != "text" or "cache_control" in b for b in blocks):
+        return blocks
+    texts = [b.get("text", "") for b in blocks]
+    return texts[0] if len(texts) == 1 else "\n\n".join(texts)
+
+
+def _merge_same_role(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Anthropic requires alternating roles; folds consecutive same-role messages."""
+    merged: List[Dict[str, Any]] = []
+    for msg in messages:
+        if merged and merged[-1].get("role") == msg.get("role"):
+            prev = merged[-1]
+            prev_c = prev.get("content")
+            cur_c = msg.get("content")
+            prev_blocks = prev_c if isinstance(prev_c, list) else ([{"type": "text", "text": prev_c}] if prev_c else [])
+            cur_blocks = cur_c if isinstance(cur_c, list) else ([{"type": "text", "text": cur_c}] if cur_c else [])
+            prev["content"] = prev_blocks + cur_blocks
+        else:
+            merged.append(msg)
+    return merged
+
+
+def _translate_openai_payload_to_anthropic(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Converts an OpenAI chat-completions payload into an Anthropic /v1/messages payload."""
+    src_messages = payload.get("messages") if isinstance(payload.get("messages"), list) else []
+
+    system_parts: List[Dict[str, Any]] = []
+    out_messages: List[Dict[str, Any]] = []
+    for msg in src_messages:
+        if not isinstance(msg, dict):
+            continue
+        role = msg.get("role")
+        if role in ("system", "developer"):
+            for blk in _blocks_from_content(msg.get("content"), role):
+                system_parts.append(blk)
+            continue
+
+        if role == "assistant":
+            blocks: List[Dict[str, Any]] = _blocks_from_content(msg.get("content"), "assistant")
+            for tc in (msg.get("tool_calls") or []):
+                if not isinstance(tc, dict):
+                    continue
+                fn = tc.get("function") or {}
+                try:
+                    tool_input = json.loads(fn.get("arguments") or "{}")
+                    if not isinstance(tool_input, dict):
+                        tool_input = {"_raw": tool_input}
+                except Exception:
+                    tool_input = {}
+                blocks.append({
+                    "type": "tool_use",
+                    "id": tc.get("id") or "toolu_call",
+                    "name": fn.get("name") or "unknown",
+                    "input": tool_input,
+                })
+            if not blocks:
+                blocks = [{"type": "text", "text": ""}]
+            out_messages.append({"role": "assistant", "content": _collapse_plain_text(blocks) if len(blocks) == 1 and blocks[0].get("type") == "text" else blocks})
+        elif role == "tool":
+            tc_content = msg.get("content")
+            text = tc_content if isinstance(tc_content, str) else json.dumps(tc_content, ensure_ascii=False)
+            out_messages.append({
+                "role": "user",
+                "content": [{"type": "tool_result", "tool_use_id": msg.get("tool_call_id") or "toolu_call", "content": [{"type": "text", "text": text}]}],
+            })
+        elif role == "user":
+            out_messages.append({"role": "user", "content": _collapse_plain_text(_blocks_from_content(msg.get("content"), "user")) or [{"type": "text", "text": ""}]})
+
+    out: Dict[str, Any] = {
+        "model": payload.get("model") or "claude-3-5-sonnet-latest",
+        "max_tokens": payload.get("max_tokens") if isinstance(payload.get("max_tokens"), int) and payload["max_tokens"] > 0 else 4096,
+        "messages": _merge_same_role(out_messages),
+    }
+    if system_parts:
+        out["system"] = system_parts if len(system_parts) > 1 or system_parts[0].get("cache_control") else system_parts[0]["text"]
+    if isinstance(payload.get("temperature"), (int, float)):
+        out["temperature"] = payload["temperature"]
+    if isinstance(payload.get("top_p"), (int, float)):
+        out["top_p"] = payload["top_p"]
+    if payload.get("stop"):
+        out["stop_sequences"] = payload["stop"] if isinstance(payload["stop"], list) else [payload["stop"]]
+    if isinstance(payload.get("stream"), bool):
+        out["stream"] = payload["stream"]
+
+    # Tools: OpenAI {type:function, function:{...}} -> Anthropic schema.
+    # Tools already in Anthropic shape ({name, input_schema}) pass through untouched.
+    tools = payload.get("tools")
+    if isinstance(tools, list) and tools:
+        ant_tools = []
+        for t in tools:
+            if not isinstance(t, dict):
+                continue
+            if isinstance(t.get("input_schema"), dict) and t.get("name"):
+                at = dict(t)
+            else:
+                fn = t.get("function") if isinstance(t.get("function"), dict) else t
+                name = fn.get("name")
+                if not name:
+                    continue
+                at = {
+                    "name": name,
+                    "description": fn.get("description") or "",
+                    "input_schema": fn.get("parameters") if isinstance(fn.get("parameters"), dict) else {"type": "object", "properties": {}},
+                }
+                if isinstance(t.get("cache_control"), dict):
+                    at["cache_control"] = t["cache_control"]
+            ant_tools.append(at)
+        if ant_tools:
+            out["tools"] = ant_tools
+            tc = payload.get("tool_choice")
+            if tc == "auto" or (isinstance(tc, dict) and tc.get("type") == "auto"):
+                out["tool_choice"] = {"type": "auto"}
+            elif tc == "required" or (isinstance(tc, dict) and tc.get("type") == "required"):
+                out["tool_choice"] = {"type": "any"}
+            elif isinstance(tc, dict) and tc.get("type") == "function":
+                fname = (tc.get("function") or {}).get("name")
+                if fname:
+                    out["tool_choice"] = {"type": "tool", "name": fname}
+
+    for k in _OPENAI_ONLY_FIELDS:
+        out.pop(k, None)
+    return out
+
+
+def _translate_anthropic_json_to_openai(resp_json: Dict[str, Any], fallback_model: str = "") -> Dict[str, Any]:
+    """Converts a non-streaming Anthropic /v1/messages response into an OpenAI chat.completion."""
+    if not isinstance(resp_json, dict) or resp_json.get("type") not in (None, "message"):
+        return resp_json  # already OpenAI-shaped or unknown envelope: pass through
+    blocks = resp_json.get("content") if isinstance(resp_json.get("content"), list) else []
+    text_parts: List[str] = []
+    tool_calls = []
+    for blk in blocks:
+        if not isinstance(blk, dict):
+            continue
+        if blk.get("type") == "text" and isinstance(blk.get("text"), str):
+            text_parts.append(blk["text"])
+        elif blk.get("type") == "tool_use":
+            tool_calls.append({
+                "id": blk.get("id") or f"call_{blk.get('name', 'tool')}",
+                "type": "function",
+                "function": {
+                    "name": blk.get("name") or "unknown",
+                    "arguments": json.dumps(blk.get("input") or {}, ensure_ascii=False),
+                },
+            })
+    usage = resp_json.get("usage") or {}
+    in_tok = int(usage.get("input_tokens") or 0)
+    out_tok = int(usage.get("output_tokens") or 0)
+    cache_read = int(usage.get("cache_read_input_tokens") or 0)
+    finish = _ANTHROPIC_FINISH_MAP.get(resp_json.get("stop_reason"), "stop" if resp_json.get("stop_reason") else None)
+    message: Dict[str, Any] = {"role": "assistant", "content": "\n\n".join(text_parts) if text_parts else None}
+    if tool_calls:
+        message["tool_calls"] = tool_calls
+    translated = {
+        "id": resp_json.get("id") or f"chatcmpl-{int(time.time() * 1000)}",
+        "object": "chat.completion",
+        "created": int(time.time()),
+        "model": resp_json.get("model") or fallback_model,
+        "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+        "usage": {
+            "prompt_tokens": in_tok,
+            "completion_tokens": out_tok,
+            "total_tokens": in_tok + out_tok,
+            "prompt_tokens_details": {"cached_tokens": cache_read},
+        },
+    }
+    return translated
+
+
+def _translate_anthropic_error_body(err_bytes: bytes) -> bytes:
+    """Maps an Anthropic error envelope {type:error,error:{type,message}} onto the OpenAI one."""
+    try:
+        data = json.loads(err_bytes.decode("utf-8"))
+        if isinstance(data, dict) and isinstance(data.get("error"), dict) and data.get("type") == "error":
+            inner = data["error"]
+            return json.dumps({"error": {"message": inner.get("message", "Upstream error"), "type": inner.get("type", "api_error"), "code": None}}).encode("utf-8")
+    except Exception:
+        pass
+    return err_bytes
+
+
+class _AnthropicSSETranslator:
+    """Converts an Anthropic /v1/messages SSE event stream into OpenAI chat.completion.chunk SSE lines."""
+
+    def __init__(self, model: str = ""):
+        self.model = model or "claude"
+        self._buf = b""
+        self._tool_blocks: Dict[int, Dict[str, Any]] = {}
+        self._chunk_id = f"chatcmpl-{int(time.time() * 1000)}"
+        self._done = False
+        self._usage_in = 0
+
+    def _chunk(self, delta: Dict[str, Any], finish: Any = None) -> bytes:
+        payload = {
+            "id": self._chunk_id,
+            "object": "chat.completion.chunk",
+            "created": int(time.time()),
+            "model": self.model,
+            "choices": [{"index": 0, "delta": delta, "finish_reason": finish}],
+        }
+        return (b"data: " + json.dumps(payload, ensure_ascii=False).encode("utf-8") + b"\n\n")
+
+    def _handle_event(self, event: str, data: Dict[str, Any]) -> bytes:
+        out = b""
+        if event == "message_start":
+            msg = data.get("message") or {}
+            if msg.get("model"):
+                self.model = msg["model"]
+            self._usage_in = int((msg.get("usage") or {}).get("input_tokens") or 0)
+            out += self._chunk({"role": "assistant", "content": ""})
+        elif event == "content_block_start":
+            blk = data.get("content_block") or {}
+            if blk.get("type") == "tool_use":
+                idx = int(data.get("index") or 0)
+                self._tool_blocks[idx] = {"id": blk.get("id") or "toolu_call", "name": blk.get("name") or "unknown"}
+                out += self._chunk({"tool_calls": [{"index": idx, "id": self._tool_blocks[idx]["id"], "type": "function", "function": {"name": self._tool_blocks[idx]["name"], "arguments": ""}}]})
+        elif event == "content_block_delta":
+            delta = data.get("delta") or {}
+            if delta.get("type") == "text_delta" and isinstance(delta.get("text"), str):
+                out += self._chunk({"content": delta["text"]})
+            elif delta.get("type") == "input_json_delta":
+                idx = int(data.get("index") or 0)
+                out += self._chunk({"tool_calls": [{"index": idx, "function": {"arguments": delta.get("partial_json") or ""}}]})
+        elif event == "message_delta":
+            delta = data.get("delta") or {}
+            finish = _ANTHROPIC_FINISH_MAP.get(delta.get("stop_reason"))
+            if finish or data.get("usage"):
+                out += self._chunk({}, finish=finish)
+        elif event == "message_stop" and not self._done:
+            self._done = True
+            out += b"data: [DONE]\n\n"
+        return out
+
+    def feed(self, chunk: bytes) -> bytes:
+        """Feeds raw upstream bytes; returns translated OpenAI SSE bytes (may be empty)."""
+        if not chunk:
+            return b""
+        self._buf += chunk
+        out = b""
+        while True:
+            nl = self._buf.find(b"\n")
+            if nl < 0:
+                break
+            line = self._buf[:nl].rstrip(b"\r")
+            self._buf = self._buf[nl + 1:]
+            if not line:
+                continue
+            if line.startswith(b"event:"):
+                self._pending_event = line[6:].strip().decode("utf-8", "replace")
+            elif line.startswith(b"data:"):
+                try:
+                    data = json.loads(line[5:].strip().decode("utf-8"))
+                except Exception:
+                    continue
+                if isinstance(data, dict):
+                    out += self._handle_event(getattr(self, "_pending_event", ""), data)
+        return out
+
+    def flush(self) -> bytes:
+        """Emits a final [DONE] if the upstream stream ended without message_stop."""
+        if self._done:
+            return b""
+        self._done = True
+        return self._chunk({}, finish="stop") + b"data: [DONE]\n\n"
+
 
 class TokenSafeProxyHandler(BaseHTTPRequestHandler):
     """Handles HTTP requests and proxies /v1/chat/completions with token optimization."""
@@ -324,6 +648,9 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                     payload["tools"], provider=provider, inject_cache_control=False
                 )
 
+        if provider == "anthropic":
+            payload = _translate_openai_payload_to_anthropic(payload)
+
         headers = {"Content-Type": "application/json"}
         if provider == "anthropic":
             x_api_key = self.headers.get("x-api-key", "") if hasattr(self.headers, "get") else ""
@@ -357,6 +684,7 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                 if is_stream:
                     self.send_header("Cache-Control", "no-cache")
                     self.end_headers()
+                    sse_t = _AnthropicSSETranslator(str(payload.get("model") or "")) if provider == "anthropic" else None
                     reader = getattr(resp, "read1", None) or resp.read
                     while True:
                         try:
@@ -364,15 +692,33 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                         except TypeError:
                             chunk = resp.read()
                             if chunk:
-                                self.wfile.write(chunk)
-                                self.wfile.flush()
+                                out = sse_t.feed(chunk) if sse_t else chunk
+                                if out:
+                                    self.wfile.write(out)
+                                    self.wfile.flush()
                             break
                         if not chunk:
                             break
-                        self.wfile.write(chunk)
-                        self.wfile.flush()
+                        out = sse_t.feed(chunk) if sse_t else chunk
+                        if out:
+                            self.wfile.write(out)
+                            self.wfile.flush()
+                    if sse_t:
+                        tail = sse_t.flush()
+                        if tail:
+                            self.wfile.write(tail)
+                            self.wfile.flush()
                 else:
                     resp_data = resp.read()
+                    if provider == "anthropic":
+                        try:
+                            raw_json = json.loads(resp_data.decode("utf-8"))
+                            resp_data = json.dumps(
+                                _translate_anthropic_json_to_openai(raw_json, str(payload.get("model") or "")),
+                                ensure_ascii=False,
+                            ).encode("utf-8")
+                        except Exception:
+                            pass
                     self.send_header("Content-Length", str(len(resp_data)))
                     self.end_headers()
                     self.wfile.write(resp_data)
@@ -401,6 +747,8 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             with e:
                 err_body = e.read()
                 ctype = e.headers.get("Content-Type", "application/json") if e.headers else "application/json"
+            if provider == "anthropic":
+                err_body = _translate_anthropic_error_body(err_body)
             self.send_response(e.code)
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(err_body)))

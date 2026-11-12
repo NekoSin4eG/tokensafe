@@ -137,14 +137,15 @@ class TestEpochGovernor(unittest.TestCase):
 
         self.assertEqual(len(captured_payloads), 2)
         p1, p2 = captured_payloads
-        # Tools sorted deterministically + cache_control on last tool
+        # Tools sorted deterministically + cache_control on last tool (anthropic shape passes through)
         self.assertEqual([t["name"] for t in p1["tools"]], ["a_tool", "b_tool"])
         self.assertEqual(p1["tools"][-1]["cache_control"], {"type": "ephemeral"})
-        # System prefix bytes identical across turns (KV-cache preserved)
+        # System prefix bytes identical across turns (KV-cache preserved);
+        # Anthropic translation moved role=system to the top-level `system` field.
+        self.assertEqual(p1["system"], p2["system"])
         self.assertEqual(p1["messages"][0], p2["messages"][0])
-        self.assertEqual(p1["messages"][1], p2["messages"][1])
-        # Rolling breakpoint placed on penultimate turn in p2
-        self.assertEqual(p2["messages"][2]["content"][0]["cache_control"], {"type": "ephemeral"})
+        # Rolling breakpoint placed on penultimate turn in p2 (assistant, now messages[1])
+        self.assertEqual(p2["messages"][1]["content"][0]["cache_control"], {"type": "ephemeral"})
 
     def test_epoch_short_history_edge_case_and_openai_proxy_route(self):
         from src.proxy import TokenSafeProxyHandler

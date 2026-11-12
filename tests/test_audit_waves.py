@@ -425,5 +425,85 @@ class TestWave3IntelligenceMetricsAndCli(unittest.TestCase):
         self.assertFalse(os.path.exists(non_existent))
 
 
+class TestAnthropicTranslation(unittest.TestCase):
+    """OpenAI <-> Anthropic in-flight translation (proxy routes /v1/messages upstream)."""
+
+    def test_request_translation(self):
+        from src.proxy import _translate_openai_payload_to_anthropic
+        payload = {
+            "model": "claude-sonnet-4",
+            "messages": [
+                {"role": "system", "content": "You are helpful."},
+                {"role": "user", "content": [{"type": "text", "text": "hi", "cache_control": {"type": "ephemeral"}}]},
+                {"role": "assistant", "content": "working", "tool_calls": [{"id": "call_1", "type": "function", "function": {"name": "get", "arguments": "{\"q\": 1}"}}]},
+                {"role": "tool", "tool_call_id": "call_1", "content": "result text"},
+            ],
+            "tools": [{"type": "function", "function": {"name": "get", "description": "d", "parameters": {"type": "object", "properties": {}}}}],
+            "tool_choice": "auto",
+            "max_tokens": 512,
+            "frequency_penalty": 0.5,
+            "user": "u1",
+        }
+        out = _translate_openai_payload_to_anthropic(payload)
+        self.assertEqual(out["max_tokens"], 512)
+        self.assertEqual(out["system"], "You are helpful.")
+        self.assertNotIn("frequency_penalty", out)
+        self.assertNotIn("user", out)
+        self.assertEqual(out["tool_choice"], {"type": "auto"})
+        self.assertEqual(out["tools"][0]["name"], "get")
+        msgs = out["messages"]
+        self.assertEqual([m["role"] for m in msgs], ["user", "assistant", "user"])
+        self.assertEqual(msgs[0]["content"][0]["cache_control"], {"type": "ephemeral"})
+        self.assertEqual(msgs[1]["content"][1]["type"], "tool_use")
+        self.assertEqual(msgs[1]["content"][1]["input"], {"q": 1})
+        self.assertEqual(msgs[2]["content"][0]["type"], "tool_result")
+        self.assertEqual(msgs[2]["content"][0]["tool_use_id"], "call_1")
+        # Consecutive same-role messages must be merged (Anthropic alternation rule)
+        merged = _translate_openai_payload_to_anthropic({"messages": [{"role": "user", "content": "a"}, {"role": "user", "content": "b"}]})
+        self.assertEqual(len(merged["messages"]), 1)
+        # max_tokens defaults when absent (Anthropic requires it)
+        self.assertEqual(_translate_openai_payload_to_anthropic({"messages": [{"role": "user", "content": "x"}]})["max_tokens"], 4096)
+
+    def test_response_and_error_translation(self):
+        from src.proxy import _translate_anthropic_json_to_openai, _translate_anthropic_error_body
+        resp = _translate_anthropic_json_to_openai({
+            "id": "msg_1", "type": "message", "model": "claude-sonnet-4",
+            "content": [{"type": "text", "text": "part1"}, {"type": "text", "text": "part2"}, {"type": "tool_use", "id": "tu1", "name": "get", "input": {"q": 1}}],
+            "stop_reason": "tool_use", "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 7},
+        })
+        ch = resp["choices"][0]
+        self.assertEqual(ch["message"]["content"], "part1\n\npart2")
+        self.assertEqual(ch["finish_reason"], "tool_calls")
+        self.assertEqual(ch["message"]["tool_calls"][0]["function"]["name"], "get")
+        self.assertEqual(resp["usage"]["prompt_tokens_details"]["cached_tokens"], 7)
+        self.assertEqual(resp["usage"]["total_tokens"], 15)
+        err = json.loads(_translate_anthropic_error_body(b'{"type":"error","error":{"type":"invalid_request_error","message":"bad"}}'))
+        self.assertEqual(err["error"]["message"], "bad")
+        # Non-anthropic envelope passes through untouched
+        self.assertEqual(_translate_anthropic_json_to_openai({"object": "chat.completion"})["object"], "chat.completion")
+
+    def test_sse_stream_translation(self):
+        from src.proxy import _AnthropicSSETranslator
+        t = _AnthropicSSETranslator("claude-sonnet-4")
+        raw = (
+            b'event: message_start\ndata: {"type":"message_start","message":{"id":"m1","model":"claude-sonnet-4","usage":{"input_tokens":9}}}\n\n'
+            b'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"He"}}\n'
+            b'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"llo"}}\n\n'
+            b'event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}\n\n'
+            b'event: message_stop\ndata: {"type":"message_stop"}\n\n'
+        )
+        out = t.feed(raw[:60]) + t.feed(raw[60:])  # split across chunk boundary
+        chunks = [json.loads(ln[6:]) for ln in out.decode("utf-8").splitlines() if ln.startswith("data: ") and ln != "data: [DONE]"]
+        deltas = [c["choices"][0]["delta"] for c in chunks]
+        self.assertEqual([d.get("content") for d in deltas if "content" in d][1:], ["He", "llo"])
+        self.assertEqual([c["choices"][0]["finish_reason"] for c in chunks if c["choices"][0]["finish_reason"]], ["stop"])
+        self.assertIn("data: [DONE]", out.decode("utf-8"))
+        self.assertEqual(t.flush(), b"")  # [DONE] already emitted
+        # Unfinished stream still terminates cleanly
+        t2 = _AnthropicSSETranslator()
+        t2.feed(b'event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"x"}}\n\n')
+        self.assertIn("data: [DONE]", t2.flush().decode("utf-8"))
+
+
 if __name__ == "__main__":
     unittest.main()
