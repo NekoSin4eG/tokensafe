@@ -502,6 +502,10 @@ def sync_and_push_cloud_repo(cloud_root: str, next_v: str) -> Tuple[bool, str, O
                 else:
                     shutil.copy2(s_path, d_path)
         shutil.copytree(os.path.join(cloud_root, "tests"), os.path.join(overlay_dir, "tests"))
+        for dname in ("hooks", "rules", "skills"):
+            d_src = os.path.join(cloud_root, dname)
+            if os.path.isdir(d_src):
+                shutil.copytree(d_src, os.path.join(overlay_dir, dname))
         for fname in ("package.json", "plugin.json", "pyproject.toml", "server.json", "Dockerfile.cloud"):
             fpath = os.path.join(cloud_root, fname)
             if os.path.exists(fpath):
@@ -756,8 +760,15 @@ def run_release(target: str, otp: Optional[str] = None, no_bump: bool = False, s
         print(f"  ℹ {next_v} already on npm")
     else:
         code, out, mode = npm_publish_with_auth(otp=otp)
-        if code == 0:
+        if code == 0 and ("staged" in out.lower() or "waiting for" in out.lower()):
+            print("  ⏳ npm staged (waiting for 2FA/publish confirmation in browser or email)")
+            pending.append("npm publish staged — approve in npmjs.com, then re-run --resume")
+        elif code == 0:
             print(f"  ✔ npm published ({mode})")
+        elif "previously staged version" in out or "E409" in out:
+            print("  ⏳ npm version is already STAGED and waiting for your 2FA confirmation on npmjs.com (or email link).")
+            print("     Approve the staged publish on npmjs.com, then re-run: python3 scripts/release.py release --resume")
+            pending.append("npm publish (staged — approve 2FA on npmjs.com)")
         elif "EOTP" in out:
             import re as _re
             m = _re.search(r"(https://www\.npmjs\.com/auth/cli/\S+)", out)
