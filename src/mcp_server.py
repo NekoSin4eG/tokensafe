@@ -40,7 +40,7 @@ from src.license_manager import LicenseManager
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
-    "version": "2.6.1"
+    "version": "2.7.0"
 }
 
 # MCP client attribution: the initialize handshake carries clientInfo, which

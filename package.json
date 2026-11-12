@@ -1,7 +1,7 @@
 {
   "name": "tokensafe",
   "mcpName": "dev.tokensafe/tokensafe",
-  "version": "2.6.1",
+  "version": "2.7.0",
   "description": "Reduce your AI bills by up to 99% locally. Your agents read only needed code, keep prompt caches intact across turns, and keep secrets out of git.",
   "main": "bin/tokensafe.js",
   "bin": {
