@@ -57,6 +57,7 @@ treesitter = [
     "tree-sitter-c",
     "tree-sitter-cpp",
     "tree-sitter-php",
+    "tree-sitter-ruby",
     "tree-sitter-kotlin",
     "tree-sitter-swift",
 ]

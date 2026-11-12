@@ -35,6 +35,7 @@ _LANGUAGE_SPECS: Dict[str, Tuple[str, str]] = {
     ".kt": ("tree_sitter_kotlin", "language"),
     ".kts": ("tree_sitter_kotlin", "language"),
     ".swift": ("tree_sitter_swift", "language"),
+    ".rb": ("tree_sitter_ruby", "language"),
 }
 
 _CONTAINER_NODE_TYPES = {
@@ -56,6 +57,9 @@ _CONTAINER_NODE_TYPES = {
     "extension_declaration",
     "namespace_definition",
     "namespace_declaration",
+    # Ruby: keyword-named container nodes
+    "class",
+    "module",
 }
 
 _FUNC_NODE_TYPES = {
@@ -74,6 +78,9 @@ _FUNC_NODE_TYPES = {
     "deinit_declaration",
     "secondary_constructor",
     "anonymous_function",
+    # Ruby: keyword-named function nodes
+    "method",
+    "singleton_method",
 }
 
 _IMPORT_NODE_TYPES = {
@@ -107,6 +114,7 @@ _SKIP_CALL_NAMES = {
     "dict", "set", "tuple", "div", "span", "button", "input", "label",
     "form", "svg", "path", "true", "false", "null", "undefined", "None",
     "True", "False",
+    "require_relative",
 }
 
 
@@ -177,7 +185,7 @@ class TreeSitterBackend:
             return None
         if node.type in (
             "identifier", "type_identifier", "field_identifier",
-            "property_identifier", "simple_identifier", "name",
+            "property_identifier", "simple_identifier", "name", "constant",
         ):
             return cls._node_text(node, code_bytes)
         if node.type == "qualified_identifier":
@@ -194,7 +202,7 @@ class TreeSitterBackend:
         for child in node.children:
             if child.type in (
                 "identifier", "type_identifier", "field_identifier",
-                "property_identifier", "simple_identifier", "name",
+                "property_identifier", "simple_identifier", "name", "constant",
                 "function_declarator", "qualified_identifier",
             ):
                 res = cls._find_identifier_in_declarator(child, code_bytes)
@@ -250,7 +258,7 @@ class TreeSitterBackend:
         for child in node.children:
             if child.type in (
                 "identifier", "type_identifier", "field_identifier",
-                "property_identifier", "simple_identifier", "name",
+                "property_identifier", "simple_identifier", "name", "constant",
             ):
                 return cls._node_text(child, code_bytes)
         return None
@@ -278,6 +286,12 @@ class TreeSitterBackend:
             name_n = node.child_by_field_name("name")
             if name_n is not None:
                 return cls._node_text(name_n, code_bytes)
+        if node.type == "call":
+            # Ruby `call` nodes: the callee lives in the 'method' field when the
+            # grammar exposes it; otherwise the children[0] fallback below applies.
+            m_n = node.child_by_field_name("method")
+            if m_n is not None:
+                return cls._node_text(m_n, code_bytes).strip()
 
         fn_node = node.child_by_field_name("function") or node.child_by_field_name("name")
         if fn_node is None and node.children:
@@ -330,6 +344,10 @@ class TreeSitterBackend:
             m = re.search(r'[<"]([^>"]+)[>"]', raw)
             if m:
                 mods.append(m.group(1))
+        elif ext == ".rb":
+            m = re.match(r"^(?:require|require_relative)\s+['\"]([^'\"]+)['\"]", raw)
+            if m:
+                mods.append(m.group(1))
         else:
             # Rust use, Java/Kotlin import, C# using, PHP use, Swift import
             cleaned = re.sub(r"^(?:pub\s+)?(?:use|import|using|namespace)\s+", "", raw)
@@ -360,7 +378,13 @@ class TreeSitterBackend:
         def walk(node: Any, container_stack: List[str], current_fn_key: Optional[str]):
             ntype = node.type
 
-            if ntype in _IMPORT_NODE_TYPES:
+            # Ruby `require`/`require_relative` are call nodes: divert them to the
+            # import branch so file->file edges can be resolved from them.
+            is_ruby_require = (
+                ext == ".rb" and ntype == "call"
+                and cls._node_text(node, code_bytes).lstrip().startswith(("require", "require_relative"))
+            )
+            if ntype in _IMPORT_NODE_TYPES or is_ruby_require:
                 mods, syms = cls._extract_imports_from_node(node, code_bytes, ext)
                 imports.extend(mods)
                 imported_symbols.extend(syms)

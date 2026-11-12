@@ -1,7 +1,7 @@
 """
 TokenSafe Graph Engine: Dependency-Aware Graph Analysis & Skeletonization.
 Builds a zero-LLM deterministic code graph for Python, TypeScript/JavaScript, Go,
-Rust, Java, C#, C/C++, PHP, Kotlin, and Swift.
+Rust, Java, C#, C/C++, PHP, Kotlin, Ruby, and Swift.
 
 Uses the optional Tree-sitter backend when available (`src.treesitter_backend`)
 and falls back seamlessly to the Python standard library `ast` and `BraceLexer`
@@ -38,7 +38,7 @@ SUPPORTED_EXTS = {
     ".py", ".ts", ".js", ".tsx", ".jsx", ".mjs", ".cjs",
     ".go", ".rs", ".java", ".cs",
     ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp",
-    ".php", ".kt", ".kts", ".swift",
+    ".php", ".kt", ".kts", ".swift", ".rb",
 }
 
 _SKIP_CALLS = {
@@ -344,6 +344,8 @@ class CodeGraph:
 
         if ext == ".py":
             self._parse_python(content, rel_path, file_node)
+        elif ext == ".rb":
+            self._parse_ruby(content, rel_path, file_node)
         elif ext in SUPPORTED_EXTS:
             self._parse_braces(content, rel_path, file_node, ext)
 
@@ -570,6 +572,83 @@ class CodeGraph:
                 finished_key, _, _ = sym_stack.pop()
                 if finished_key in self.symbols:
                     self.symbols[finished_key].line_end = idx
+
+    def _parse_ruby(self, code: str, rel_path: str, file_node: str):
+        """Stdlib Ruby parser: keyword-delimited blocks (`def`/`class`/`module` ...
+        `end`) instead of braces. Mirrors the brace-parser conventions (kinds,
+        quals, call edges) so both backends stay in parity."""
+        lines = code.splitlines()
+        require_re = re.compile(r'^\s*require(?:_relative)?\s+["\']([^"\']+)["\']')
+        opener_re = re.compile(
+            r'^\s*(?:def|class|module|if|unless|while|until|case|for|begin)\b|\bdo\s*(?:\|[^|]*\|)?\s*$'
+        )
+        container_re = re.compile(r'^\s*(?:class|module)\s+([A-Z][A-Za-z0-9_:]*)')
+        method_re = re.compile(r'^\s*def\s+(?:self\.)?([a-zA-Z_][a-zA-Z0-9_]*[?!]?)')
+        call_re = re.compile(r'\b([a-zA-Z_][a-zA-Z0-9_]*[?!]?)\s*\(')
+        end_re = re.compile(r'\bend\b')
+
+        # Stack items: (sym_key|None, kind|None, qual|None). None entries track
+        # non-symbol keyword blocks (if/while/do/...) so `end` counting balances.
+        stack: List[Tuple[Optional[str], Optional[str], Optional[str]]] = []
+
+        for idx, raw in enumerate(lines, 1):
+            no_comment = raw.split("#", 1)[0]
+            # Blank out string literals so `end`-like words inside strings never count
+            no_str = re.sub(r'"[^"]*"', '""', no_comment)
+            no_str = re.sub(r"'[^']*'", "''", no_str)
+            if not no_str.strip():
+                continue
+
+            rm = require_re.match(raw)
+            if rm:
+                self.file_imports[rel_path].add(rm.group(1))
+                self.add_edge(file_node, f"mod:{rm.group(1)}")
+
+            opens = len(opener_re.findall(no_str))
+            closes = len(end_re.findall(no_str))
+
+            matched_name: Optional[str] = None
+            matched_kind: Optional[str] = None
+            cm = container_re.match(no_str)
+            if cm:
+                matched_kind, matched_name = "class", cm.group(1)
+            else:
+                mm = method_re.match(no_str)
+                if mm:
+                    matched_kind, matched_name = "function", mm.group(1)
+
+            if matched_name and matched_kind:
+                class_ctx = [e[2] for e in stack if e[1] == "class"]
+                qual = f"{class_ctx[-1]}::{matched_name}" if class_ctx else matched_name
+                sym_key = f"{rel_path}::{qual}"
+                symbol = CodeSymbol(
+                    name=matched_name,
+                    kind=matched_kind,
+                    file_path=rel_path,
+                    line_start=idx,
+                    line_end=idx,
+                    signature=raw.strip(),
+                )
+                self._register_symbol(rel_path, file_node, symbol, sym_key)
+                stack.append((sym_key, matched_kind, qual))
+            elif opens:
+                stack.append((None, None, None))
+
+            active_fn = next((e for e in reversed(stack) if e[1] == "function"), None)
+            if active_fn and active_fn[0]:
+                for cmm in call_re.finditer(no_str):
+                    callee = cmm.group(1)
+                    if callee != matched_name and callee not in _SKIP_CALLS:
+                        self.add_edge(active_fn[0], f"call:{callee}")
+
+            for _ in range(closes):
+                if not stack:
+                    break
+                entry = stack.pop()
+                if entry[0]:
+                    sym = self.symbols.get(entry[0])
+                    if sym:
+                        sym.line_end = idx
 
     def _resolve_local_imports(self) -> None:
         """Resolves raw `file_imports` strings to real `file:<rel_path>` edges."""

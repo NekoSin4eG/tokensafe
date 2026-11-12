@@ -201,6 +201,7 @@ func run() {
             "Service.cs": "public class Service { public void Exec() { Run(); } }\n",
             "ctrl.php": "<?php\nclass Ctrl { public function index() { view(); } }\n",
             "engine.cpp": "class Engine { public: void tick() { step(); } };\n",
+            "app.rb": "class Greeter\n  def greet(name)\n    shout(name)\n  end\nend\n",
         }
         for name, body in files.items():
             with open(os.path.join(self.test_dir, name), "w") as f:
@@ -220,6 +221,48 @@ func run() {
         nb = graph.get_neighborhood("a", target_file="chain.py", include_two_hop=True)
         self.assertIn("chain.py::b", nb["one_hop"])
         self.assertIn("chain.py::c", nb["two_hop"])
+
+    def test_ruby_graph_parity_both_backends(self):
+        rb = os.path.join(self.test_dir, "app.rb")
+        with open(rb, "w") as f:
+            f.write(
+                "require 'json'\n"
+                "require_relative 'helper'\n\n"
+                "module Greetings\n"
+                "  class Greeter\n"
+                "    def greet(name)\n"
+                "      shout(name)\n"
+                "    end\n\n"
+                "    def self.default\n"
+                "      new\n"
+                "    end\n"
+                "  end\n"
+                "end\n"
+            )
+        for env_val in ("0", "auto"):
+            prev = os.environ.get("TOKENSAFE_TREESITTER")
+            os.environ["TOKENSAFE_TREESITTER"] = env_val
+            try:
+                graph = CodeGraph(self.test_dir)
+                graph.scan()
+                syms = set(graph.file_symbols.get("app.rb", []))
+                quals = {s.split("app.rb::", 1)[-1] for s in syms}
+                self.assertIn("Greetings", quals, f"backend={env_val}")
+                self.assertIn("Greetings::Greeter", quals, f"backend={env_val}")
+                self.assertIn("Greetings::Greeter::greet", quals, f"backend={env_val}")
+                self.assertIn("Greetings::Greeter::default", quals, f"backend={env_val}")
+                self.assertIn("mod:json", graph.edges.get("file:app.rb", set()), f"backend={env_val}")
+                self.assertIn("mod:helper", graph.edges.get("file:app.rb", set()), f"backend={env_val}")
+                self.assertIn(
+                    "call:shout",
+                    graph.edges.get("app.rb::Greetings::Greeter::greet", set()),
+                    f"backend={env_val}",
+                )
+            finally:
+                if prev is None:
+                    os.environ.pop("TOKENSAFE_TREESITTER", None)
+                else:
+                    os.environ["TOKENSAFE_TREESITTER"] = prev
 
     def test_god_nodes_downweight_tests_and_cli_commands(self):
         tests_dir = os.path.join(self.test_dir, "tests")
