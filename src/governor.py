@@ -234,7 +234,7 @@ class ContextGovernor:
                     if msg.get("role") == "user" and isinstance(msg.get("content"), str):
                         raw_user = msg["content"]
                         if len(raw_user.strip()) > 15 and "[TOCP Intent]" not in raw_user:
-                            comp = PromptCompactor.compact(raw_user, enable_deepseek=False)
+                            comp = PromptCompactor.compact(raw_user, enable_distill=False)
                             if comp["saved_tokens"] >= 5:
                                 msg["content"] = f"[TOCP Intent]: {comp['compact_text']}"
                                 compacted_any = True

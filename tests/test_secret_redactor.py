@@ -88,7 +88,7 @@ MIIEowIBAAKCAQEA0Y2X9w8s7d6f5g4h3j2k1l0m9n8b7v6c5x4z3a2s1d0f
 
     def test_compactor_secret_scrubbing(self):
         raw_prompt = "Пожалуйста, проверь подключение к базе данных postgres://admin:VerySecretPass99@db:5432/prod в файле server.ts и почини ошибку"
-        res = PromptCompactor.compact(raw_prompt, enable_deepseek=False)
+        res = PromptCompactor.compact(raw_prompt, enable_distill=False)
         self.assertNotIn("VerySecretPass99", res["compact_text"])
         self.assertIn("REDACTED_DB_PWD", res["compact_text"])
 

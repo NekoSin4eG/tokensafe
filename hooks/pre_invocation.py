@@ -92,7 +92,7 @@ def _handle(payload: dict) -> dict:
                 }
             })
     elif last_user_input and len(last_user_input.strip()) >= 5 and not _proxy_is_active():
-        compaction = PromptCompactor.compact(last_user_input, enable_deepseek=True)
+        compaction = PromptCompactor.compact(last_user_input, enable_distill=True)
         saved_tokens = compaction["saved_tokens"]
         reduction_pct = compaction["reduction_pct"]
 

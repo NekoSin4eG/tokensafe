@@ -158,13 +158,13 @@ class GoldenCorpusMeasured(unittest.TestCase):
         self.assertEqual(skel, Skeletonizer.skeletonize_code(GOLDEN_PY_SOURCE, "py"))
 
     def test_prompt_compactor_measured_bound(self):
-        r1 = PromptCompactor.compact(GOLDEN_VERBOSE_PROMPT, enable_deepseek=False)
+        r1 = PromptCompactor.compact(GOLDEN_VERBOSE_PROMPT, enable_distill=False)
         base = count_tokens(GOLDEN_VERBOSE_PROMPT)
         pct = r1["saved_tokens"] / base * 100.0 if base else 0.0
         self.assertGreaterEqual(pct, 20.0, f"prompt compaction regressed: {pct:.1f}%")
         self.assertLessEqual(pct, 95.0, "compactor output suspiciously empty")
         # Regex tier must be deterministic
-        r2 = PromptCompactor.compact(GOLDEN_VERBOSE_PROMPT, enable_deepseek=False)
+        r2 = PromptCompactor.compact(GOLDEN_VERBOSE_PROMPT, enable_distill=False)
         self.assertEqual(r1["compact_text"], r2["compact_text"])
 
     def test_sanitizer_prunes_lockfile_diff(self):

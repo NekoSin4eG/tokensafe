@@ -105,7 +105,7 @@ def compact_for_injection(prompt: str, agent: str, session_id: str) -> Tuple[str
     try:
         from src.compactor import PromptCompactor
         from src.tokenizer import count_tokens
-        compaction = PromptCompactor.compact(prompt, enable_deepseek=False)
+        compaction = PromptCompactor.compact(prompt, enable_distill=False)
         saved = compaction.get("saved_tokens", 0)
         if saved < 5:
             return "", meta

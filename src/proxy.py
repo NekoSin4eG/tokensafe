@@ -574,7 +574,7 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                 msg = messages[idx]
                 if msg.get("role") == "user" and isinstance(msg.get("content"), str):
                     raw_user = msg["content"]
-                    compaction = PromptCompactor.compact(raw_user, enable_deepseek=False)
+                    compaction = PromptCompactor.compact(raw_user, enable_distill=False)
                     if compaction["saved_tokens"] > 5:
                         msg["content"] = compaction["compact_text"]
                         try:

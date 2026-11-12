@@ -83,10 +83,10 @@ class LicenseManager:
     _QUOTA_TURN_COUNTERS: Dict[str, int] = {}
 
     TIERS = {
-        "free": {"max_tokens_monthly": 500_000, "deepseek_cloud": False, "team_analytics": False},
-        "solo": {"max_tokens_monthly": None, "deepseek_cloud": True, "team_analytics": False},
-        "team": {"max_tokens_monthly": None, "deepseek_cloud": True, "team_analytics": True},
-        "enterprise": {"max_tokens_monthly": None, "deepseek_cloud": True, "team_analytics": True, "self_hosted": True}
+        "free": {"max_tokens_monthly": 500_000, "team_analytics": False},
+        "solo": {"max_tokens_monthly": None, "team_analytics": False},
+        "team": {"max_tokens_monthly": None, "team_analytics": True},
+        "enterprise": {"max_tokens_monthly": None, "team_analytics": True, "self_hosted": True}
     }
 
     @classmethod

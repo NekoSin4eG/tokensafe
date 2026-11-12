@@ -1,7 +1,8 @@
 """
-Universal Multi-Provider Intent Distiller:
+Managed-Cloud-First Intent Distiller:
 Translates verbose, conversational developer prompts into ultra-dense TOCP S-Expressions.
-Supports DeepSeek-V3, OpenAI ChatGPT (gpt-4o-mini), and Google Gemini (2.0 Flash / 1.5 Flash).
+Paid tiers use the TokenSafe Cloud Distiller out of the box (zero API keys, license-key auth).
+Self-hosted/Enterprise optionally supports BYOK: DeepSeek, OpenAI ChatGPT, and Google Gemini.
 Implemented with pure standard-library urllib (zero dependencies, strict timeout).
 """
 
@@ -17,7 +18,7 @@ from src.license_manager import LicenseManager
 from src.paths import resolve_data_dir
 
 class UniversalDistiller:
-    """Multi-provider semantic intent compiler supporting DeepSeek, OpenAI, and Google Gemini."""
+    """Managed-cloud-first semantic intent compiler: TokenSafe Cloud (zero keys) with optional BYOK DeepSeek, OpenAI, and Google Gemini."""
 
     DEFAULT_TIMEOUT = 2.5
     # After a failed roundtrip, skip all remote distillation for this long.
@@ -195,7 +196,7 @@ Rules:
     def distill(cls, raw_text: str, preferred_provider: Optional[str] = None) -> Optional[str]:
         """
         Distills raw conversational text into an S-Expression using the best available provider.
-        Priority: Explicit preferred -> Gemini -> OpenAI -> DeepSeek.
+        Priority: Managed Cloud (license-auth, zero keys) -> Explicit preferred -> Gemini -> OpenAI -> DeepSeek.
         Requires active TokenSafe Solo or Team subscription.
         """
         tier, _ = LicenseManager.get_active_license()

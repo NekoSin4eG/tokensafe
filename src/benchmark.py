@@ -413,9 +413,9 @@ class BenchmarkSuite:
                             sync_remote=False,
                         )
                         distilled_hit = DistillationCache.get(raw_prompt)
-                        compaction_text = distilled_hit or PromptCompactor.compact(raw_prompt, enable_deepseek=True)["compact_text"]
+                        compaction_text = distilled_hit or PromptCompactor.compact(raw_prompt, enable_distill=True)["compact_text"]
                     else:
-                        compaction_text = PromptCompactor.compact(raw_prompt, enable_deepseek=True)["compact_text"]
+                        compaction_text = PromptCompactor.compact(raw_prompt, enable_distill=True)["compact_text"]
                     p_base_tokens = count_tokens(raw_prompt)
                     p_opt_tokens = count_tokens(compaction_text)
 

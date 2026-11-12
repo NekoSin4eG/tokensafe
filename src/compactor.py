@@ -360,14 +360,14 @@ class PromptCompactor:
     def compact(
         cls,
         raw_text: str,
-        enable_deepseek: bool = True,
+        enable_distill: bool = True,
         min_distill_tokens: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Compresses input prompt via 3-Tier Architecture:
         - Tier 0: Pass-through for very short inputs (< 6 tokens)
         - Tier 1: Multilingual Regex Compactor (0ms, 0 external tokens) for inputs < 100 tokens
-        - Tier 2: Universal Distiller (DeepSeek / Gemini / OpenAI) for long/complex prompts (>= 100 tokens)
+        - Tier 2: Managed Cloud Distiller (license-authenticated; BYOK Gemini/OpenAI/DeepSeek for self-hosted) for long/complex prompts (>= 100 tokens)
         """
         if not raw_text or not raw_text.strip():
             return {
@@ -407,10 +407,10 @@ class PromptCompactor:
                 "tier": "PASS_THROUGH"
             }
 
-        # Tier 2: Neural LLM Intent Distiller (Gemini / OpenAI / DeepSeek)
+        # Tier 2: Managed Cloud Intent Distiller (BYOK Gemini / OpenAI / DeepSeek for self-hosted)
         # Exclusive to TokenSafe Solo, Team, and Enterprise (or active trials)
         min_distill = min_distill_tokens if min_distill_tokens is not None else cls._get_min_distill_tokens()
-        if enable_deepseek and original_tokens >= min_distill:
+        if enable_distill and original_tokens >= min_distill:
             active_tier, _ = LicenseManager.get_active_license()
             if active_tier != "free":
                 distilled = UniversalDistiller.distill(raw_text)
@@ -446,7 +446,7 @@ class PromptCompactor:
                             "target_file": target_file,
                             "symbol": symbol,
                             "traits": traits,
-                            "tier": "DEEPSEEK_V3"
+                            "tier": "DISTILLER"
                         }
 
         # Tier 1: Multilingual Local Regex Compactor

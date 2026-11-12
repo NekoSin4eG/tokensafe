@@ -470,9 +470,9 @@ def main():
         print("\n\033[1m\033[36m⚡ TOKENSAFE LLM DISTILLATION PROVIDERS ⚡\033[0m\n")
         if tier == "free":
             print("  \033[33mTier: Free Community Edition\033[0m")
-            print("  Neural Semantic Distillation (Gemini / OpenAI / DeepSeek) is reserved for Solo & Team tiers.")
+            print("  Managed Cloud Distillation (zero API keys) is reserved for Solo, Team, and Enterprise tiers.")
             print("  Free Community Edition operates with the zero-latency, zero-cost Local Regex Compactor.\n")
-            print("  \033[1mTo unlock Neural LLM Distillation:\033[0m")
+            print("  \033[1mTo unlock Cloud Distillation:\033[0m")
             print("  1. Start 7-day free trial or upgrade at: \033[36mhttps://tokensafe.dev\033[0m")
             print("  2. Activate your key: \033[32mtokensafe activate <KEY>\033[0m\n")
         elif not UniversalDistiller.is_self_hosted():

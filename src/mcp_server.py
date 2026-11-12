@@ -1045,7 +1045,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                 "warning": quota.get("warning") if emit_warn else "Community 500k monthly limit reached; prompt compaction paused.",
             }
             return {"content": [{"type": "text", "text": json.dumps(payload, indent=2, ensure_ascii=False)}]}
-        res = PromptCompactor.compact(prompt, enable_deepseek=True)
+        res = PromptCompactor.compact(prompt, enable_distill=True)
         return {"content": [{"type": "text", "text": json.dumps(res, indent=2, ensure_ascii=False)}]}
 
     elif name == "context_budget":
