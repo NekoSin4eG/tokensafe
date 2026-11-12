@@ -26,6 +26,8 @@ folds multi-turn conversation history, slices verbose tool outputs, and guards a
    - When locating or reading any function, component, class, or handler (e.g. `<LuckyWheelTab>`, `areSectorEqual`, `useWallet`), ALWAYS call `tokensafe:smart_read_file` with `path` and `symbol`.
    - **1-Hop Dependency Modes (`dep_mode` & `include_deps`)**: By default (`dep_mode="signature"`), `smart_read_file` returns the full target implementation plus compact 1-line 1-hop dependency signatures and collapsed imports (-95%+ tokens). Pass `"dep_mode": "full"` when full 1-hop dependency bodies are required, or `"include_deps": false` for 0-hop surgical isolation.
    - **Cache Pointer Recovery (`force_full`)**: When repeating an unchanged read in the same MCP session, `smart_read_file` may return a compact pointer referencing the prior output. Reuse that earlier output; only pass `"force_full": true` if your context was compacted or you are a fresh subagent lacking prior turns.
+   - **Multi-Symbol Bundles (`smart_bundle`)**: When you need 3+ related symbols across several files, call `tokensafe:smart_bundle(targets=[{path, symbol}])` ONCE instead of chained `smart_read_file` calls (max 8 targets). It merges per-file skeletons, deduplicates shared import/type lines into one block, and unifies 1-hop dependency signatures — one roundtrip instead of many.
+   - **Schema Auto-Slicing**: OpenAPI/Swagger, Prisma, GraphQL and SQL files bypass AST skeletonization. Pass the spec path (`/users/{id}`), Prisma model, GraphQL type, or SQL table as `symbol` for a targeted slice with 1-hop references; an empty `symbol` returns a compact overview (paths/models/types/tables index) instead of a 20k-50k token dump.
    - **Result**: Preserves the exact target definition while folding surrounding inert code into clean 1-line signatures without docstrings (-85% to -98% tokens).
 
 3. **ARCHITECTURE SURVEY BEFORE BROWSING (`get_architecture_graph`)**:
@@ -59,6 +61,7 @@ Quick pointers:
 
 - Search: `tokensafe:scoped_search(query, scope)` — never raw grep.
 - Inspect: `tokensafe:smart_read_file(path, symbol)` — definition + 1-hop deps.
+- Bundle: `tokensafe:smart_bundle(targets=[{path, symbol}])` — 3-8 related symbols across files in one call, shared imports deduplicated.
 - Navigate: `tokensafe:get_architecture_graph(project_path)` / `tokensafe:get_api_surface(project_path)`.
 - Directory: `tokensafe:list_dir(path, depth=2)` — clean tree, never verbose `ls -la`.
 - Terminal: `tokensafe:sanitize_command(command, cwd)` — bounded logs/diffs, test runner guards.

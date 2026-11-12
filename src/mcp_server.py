@@ -79,7 +79,7 @@ def _client_supports_pointers() -> bool:
 TOOLS = [
     {
         "name": "smart_read_file",
-        "description": "Reads a code file using AST skeletonization and graph-guided slicing to save 90-99% context tokens.",
+        "description": "Reads a code file using AST skeletonization and graph-guided slicing to save 90-99% context tokens. OpenAPI/Swagger, Prisma, GraphQL and SQL files are auto-sliced instead: pass the spec path/model/type/table as 'symbol', or omit it for a compact overview. For 3+ related symbols across files prefer smart_bundle.",
         "inputSchema": {
             "type": "object",
             "properties": {
