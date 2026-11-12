@@ -479,7 +479,7 @@ def update_cloud_repo_version(cloud_root: str, next_v: str) -> None:
 
 
 def sync_and_push_cloud_repo(cloud_root: str, next_v: str) -> Tuple[bool, str, Optional[str]]:
-    """Aligns tokensafe-cloud to `next_v`, runs its unit tests, commits, and pushes to origin/main."""
+    """Aligns tokensafe-cloud to `next_v`, runs cloud tests over fresh client overlay, commits, and pushes."""
     update_cloud_repo_version(cloud_root, next_v)
     code, status_out = _sh(["git", "status", "--porcelain"], cwd=cloud_root)
     dirty = [line for line in status_out.splitlines() if line.strip() and not line.startswith("?? data/")]
@@ -487,7 +487,26 @@ def sync_and_push_cloud_repo(cloud_root: str, next_v: str) -> Tuple[bool, str, O
         sha = _sh(["git", "rev-parse", "HEAD"], cwd=cloud_root)[1].strip()
         return True, "already synced", sha
 
-    code, out = _sh([sys.executable, "-m", "unittest", "discover", "tests"], timeout=300, cwd=cloud_root)
+    # Mirror cloud CI (checkout src/ + fresh client src/*.py) in an isolated temp dir
+    # so stale untracked copies inside cloud_root cannot mask client/cloud compatibility issues.
+    with tempfile.TemporaryDirectory(prefix="ts_cloud_ci_") as overlay_dir:
+        overlay_src = os.path.join(overlay_dir, "src")
+        shutil.copytree(os.path.join(PROJECT_ROOT, "src"), overlay_src)
+        cloud_src = os.path.join(cloud_root, "src")
+        for item in os.listdir(cloud_src):
+            s_path = os.path.join(cloud_src, item)
+            d_path = os.path.join(overlay_src, item)
+            if item in ("cloud", "cloud_backend.py", "mailer.py"):
+                if os.path.isdir(s_path):
+                    shutil.copytree(s_path, d_path, dirs_exist_ok=True)
+                else:
+                    shutil.copy2(s_path, d_path)
+        shutil.copytree(os.path.join(cloud_root, "tests"), os.path.join(overlay_dir, "tests"))
+        for fname in ("package.json", "plugin.json", "pyproject.toml", "server.json", "Dockerfile.cloud"):
+            fpath = os.path.join(cloud_root, fname)
+            if os.path.exists(fpath):
+                shutil.copy2(fpath, os.path.join(overlay_dir, fname))
+        code, out = _sh([sys.executable, "-m", "unittest", "discover", "tests"], timeout=300, cwd=overlay_dir)
     if code != 0:
         print(out[-1500:])
         return False, "tokensafe-cloud tests failed", None
