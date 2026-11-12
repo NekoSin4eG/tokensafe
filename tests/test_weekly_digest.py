@@ -7,6 +7,8 @@ import sqlite3
 import unittest
 from unittest.mock import patch
 import time
+from src import license_manager as _lm
+_lm.DEFAULT_ED25519_PUBLIC_KEY = os.environ["TOKENSAFE_PUBLIC_KEY"]
 from src.weekly_digest import WeeklyDigestGenerator, format_token_number
 
 try:

@@ -4,7 +4,10 @@ os.environ["TOKENSAFE_PUBLIC_KEY"] = "8a2c9d550180ab5b00a06174cb6aecfd712740c59d
 
 import unittest
 import time
+from src import license_manager as _lm
 from src.license_manager import LicenseManager
+
+_lm.DEFAULT_ED25519_PUBLIC_KEY = os.environ["TOKENSAFE_PUBLIC_KEY"]
 
 class TestLicenseManager(unittest.TestCase):
     def test_generate_and_validate_solo_license(self):

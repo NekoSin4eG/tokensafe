@@ -36,6 +36,7 @@ from src.agent_firewall import AgentFirewall
 from src.diff_slicer import DiffSlicer
 from src.guard import TokenSafeGuard
 from src.scoped_search import ScopedSearch
+from src.license_manager import LicenseManager
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
@@ -46,25 +47,46 @@ SERVER_INFO = {
 # lets every session-scoped metric name the REAL agent instead of a shared
 # anonymous bucket (see METRICS.md by_agent).
 _MCP_CLIENT_NAME = ""
+_TOOLS_LISTED = False
+_EPOCH_GEN = 0
+_IN_PROCESS_DELIVERED = {}
+_KNOWN_POINTER_CLIENTS = (
+    "antigravity", "claude", "cursor", "windsurf", "cline", "roo",
+    "codex", "zcode", "copilot", "gemini", "zed", "vscode",
+)
+
 
 def _set_mcp_client(name: str):
     global _MCP_CLIENT_NAME
     clean = re.sub(r"[^a-z0-9_-]", "", str(name or "").lower())[:30]
     _MCP_CLIENT_NAME = clean
 
+
 def _mcp_session_id() -> str:
     return f"mcp:{_MCP_CLIENT_NAME}" if _MCP_CLIENT_NAME else "mcp_session"
+
+
+def _client_supports_pointers() -> bool:
+    """Out-of-the-box capability detection (zero env vars): returns True once the
+    MCP client has fetched tools/list (seeing force_full) or identified as an
+    interactive AI coding host."""
+    if _TOOLS_LISTED:
+        return True
+    return bool(_MCP_CLIENT_NAME and any(k in _MCP_CLIENT_NAME for k in _KNOWN_POINTER_CLIENTS))
+
 
 TOOLS = [
     {
         "name": "smart_read_file",
-        "description": "Reads a code file using AST skeletonization and predictive dependency prefetching to save up to 90% context tokens.",
+        "description": "Reads a code file using AST skeletonization and graph-guided slicing to save 90-99% context tokens.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "path": {"type": "string", "description": "Absolute path to the code file"},
                 "symbol": {"type": "string", "description": "Optional: targeted function or class name for graph-guided skeletonization"},
-                "include_deps": {"type": "boolean", "description": "Optional: whether to include 1-hop dependencies in full (default: true). Set false for single-symbol surgical isolation."},
+                "include_deps": {"type": "boolean", "description": "Optional: whether to include 1-hop dependencies (default: true). Set false for 0-hop surgical isolation."},
+                "dep_mode": {"type": "string", "enum": ["signature", "full"], "description": "Optional: how 1-hop dependencies are returned when include_deps is true. 'signature' (default, -95%+ tokens) returns compact 1-line signatures; 'full' inlines full dependency bodies."},
+                "force_full": {"type": "boolean", "description": "Optional: bypass session pointer deduplication and return the full skeleton directly (use only if your context was compacted or you are a fresh subagent lacking earlier reads)."},
                 "start_line": {"type": "integer", "description": "Optional: starting line number"},
                 "end_line": {"type": "integer", "description": "Optional: ending line number"}
             },
@@ -426,7 +448,19 @@ def _get_safe_tracker():
         return _NoOpTracker()
 
 
-def _team_skeleton_lookup(path: str, symbol: str) -> Optional[str]:
+def _team_cache_key(path: str, symbol: str, dep_mode: str = "signature") -> str:
+    """Builds a portable, content-hash-validated key shared across machines."""
+    abs_path = os.path.abspath(path)
+    repo_root = GraphEngine.find_project_root(abs_path)
+    try:
+        rel_path = os.path.relpath(abs_path, repo_root).replace("\\", "/")
+    except ValueError:
+        rel_path = os.path.basename(abs_path)
+    content_hash = AgentFirewall._file_content_hash(abs_path)[:16]
+    return f"{rel_path}::{symbol or ''}::{dep_mode}::{content_hash}"
+
+
+def _team_skeleton_lookup(path: str, symbol: str, dep_mode: str = "signature") -> Optional[str]:
     """Team cache pre-warm lookup: returns a teammate's cached skeleton or None.
 
     Never blocks the caller for more than ~250ms: the network fetch runs in a
@@ -435,11 +469,12 @@ def _team_skeleton_lookup(path: str, symbol: str) -> Optional[str]:
         is_team, _ = TeamCache._is_team_tier()
         if not is_team:
             return None
+        cache_key = _team_cache_key(path, symbol, dep_mode=dep_mode)
         box: dict = {}
 
         def _fetch():
             try:
-                box["value"] = TeamCache.get("SKELETON", f"{path}::{symbol or ''}")
+                box["value"] = TeamCache.get("SKELETON", cache_key)
             except Exception:
                 pass
 
@@ -451,15 +486,32 @@ def _team_skeleton_lookup(path: str, symbol: str) -> Optional[str]:
         return None
 
 
-def _team_skeleton_prewarm(path: str, symbol: str, skeleton_text: str, tokens_saved: int):
+def _team_skeleton_prewarm(
+    path: str,
+    symbol: str,
+    skeleton_text: str,
+    tokens_saved: int,
+    dep_mode: str = "signature",
+):
     """Publishes a freshly built skeleton to the team cache (async, team tier only).
 
     Teammate B's later smart_read_file on the same symbol hits the cache instead
     of re-reading and re-skeletonizing the file."""
     try:
-        TeamCache.put("SKELETON", f"{path}::{symbol or ''}", skeleton_text, tokens_saved=tokens_saved)
+        cache_key = _team_cache_key(path, symbol, dep_mode=dep_mode)
+        TeamCache.put("SKELETON", cache_key, skeleton_text, tokens_saved=tokens_saved)
     except Exception:
         pass
+
+
+def _resolve_dep_mode(args: dict) -> Tuple[bool, str]:
+    inc_deps = bool(args.get("include_deps", True))
+    if not inc_deps:
+        return False, "none"
+    raw_mode = str(args.get("dep_mode") or "").strip().lower()
+    if raw_mode in ("signature", "full"):
+        return True, raw_mode
+    return True, "signature"
 
 
 def handle_tool_call(name: str, args: dict) -> dict:
@@ -467,33 +519,55 @@ def handle_tool_call(name: str, args: dict) -> dict:
         args = {}
     try:
         result = _dispatch_tool_call(name, args)
-        # Populate the Subagent Firewall dedup cache with what we actually returned,
-        # so repeated reads of the same file within a session can be served from cache.
         if name == "smart_read_file" and isinstance(result, dict) and not result.get("isError"):
             content_parts = result.get("content") or []
             text_out = "".join(p.get("text", "") for p in content_parts if isinstance(p, dict))
-            if text_out:
-                try:
-                    AgentFirewall.record_cache(
-                        session_id=_mcp_session_id(),
-                        file_path=args.get("path", ""),
-                        content=text_out,
-                        symbol=(args.get("symbol") or "").strip(),
-                        tracker=_get_safe_tracker()
-                    )
-                except Exception:
-                    pass
+            path = args.get("path", "")
+            symbol = (args.get("symbol") or "").strip()
+            _, eff_dep_mode = _resolve_dep_mode(args)
+            cache_sym = f"{symbol}@{eff_dep_mode}" if (symbol and eff_dep_mode != "signature") else symbol
+            if text_out and path:
+                abs_path = os.path.abspath(path)
+                cur_hash = AgentFirewall._file_content_hash(abs_path)
+                if cur_hash and args.get("start_line") is None and args.get("end_line") is None:
+                    _IN_PROCESS_DELIVERED[(abs_path, symbol, eff_dep_mode)] = (cur_hash, _EPOCH_GEN)
+                # Never overwrite cached skeleton with a firewall header or pointer hit
+                if not text_out.startswith("// [TokenSafe Subagent Firewall:"):
+                    try:
+                        AgentFirewall.record_cache(
+                            session_id=_mcp_session_id(),
+                            file_path=path,
+                            content=text_out,
+                            symbol=cache_sym,
+                            tracker=_get_safe_tracker()
+                        )
+                    except Exception:
+                        pass
         return result
     except Exception as e:
         return _fallback_error(name, f"{type(e).__name__}: {str(e)}")
 
 
+def _quota_banner_if_due(quota: dict, tracker, session_id: str) -> str:
+    """Emits a concise Community 500k quota CTA on turn #1 of exceedance and every 5 turns."""
+    if not quota.get("is_quota_exceeded"):
+        return ""
+    if LicenseManager.should_emit_quota_banner(tracker, session_id=session_id, every_n_turns=5):
+        return f"// {quota.get('warning', '')}\n"
+    return ""
+
+
 def _dispatch_tool_call(name: str, args: dict) -> dict:
+    global _EPOCH_GEN
     tracker = _get_safe_tracker()
+    quota = LicenseManager.check_quota(tracker)
+    is_quota_exceeded = bool(quota.get("is_quota_exceeded", False))
 
     if name == "smart_read_file":
         path = args.get("path", "")
         symbol = args.get("symbol", "")
+        inc_deps, eff_dep_mode = _resolve_dep_mode(args)
+        force_full = bool(args.get("force_full", False))
         start_line = args.get("start_line")
         end_line = args.get("end_line")
         # Clamp explicit line ranges to sane bounds so bad indices can never produce
@@ -514,18 +588,52 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         except OSError as e:
             return _fallback_error("smart_read_file", f"cannot stat path: {e}")
 
-        # Check Subagent Firewall dedup cache
-        is_hit, cached_text, saved_dedup = AgentFirewall.check_cache(_mcp_session_id(), path, symbol=symbol or "", tracker=tracker)
-        if is_hit and cached_text:
-            return {"content": [{"type": "text", "text": cached_text}]}
+        # Community 500k quota reached: soft-degrade to bounded raw read (disable Graph/AST/Pointer/Team Cache)
+        if is_quota_exceeded:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                lines = f.readlines()
+            if start_line is not None and end_line is not None:
+                e_line = min(end_line, len(lines))
+                if start_line > e_line:
+                    return _fallback_error("smart_read_file", f"start_line {start_line} is beyond end of file ({len(lines)} lines)")
+                raw_chunk = "".join(lines[start_line - 1 : e_line])
+            else:
+                cap = min(250, len(lines))
+                raw_chunk = "".join(lines[:cap])
+                if len(lines) > cap:
+                    raw_chunk += f"\n// [TokenSafe Community 500k limit reached: showing raw lines 1-{cap} of {len(lines)}. AST/graph slicing & pointer dedup are paused.]\n"
+            banner = _quota_banner_if_due(quota, tracker, _mcp_session_id())
+            return {"content": [{"type": "text", "text": banner + raw_chunk}]}
 
-        # Check loop detector
-        is_loop, repeats, msg = LoopDetector.check_loop(_mcp_session_id(), "smart_read_file", args)
-        if is_loop:
-            return {"isError": True, "content": [{"type": "text", "text": f"⚠️ {msg}"}]}
+        abs_path = os.path.abspath(path)
+        sym_clean = (symbol or "").strip()
+        cache_sym = f"{sym_clean}@{eff_dep_mode}" if (sym_clean and eff_dep_mode != "signature") else sym_clean
 
-        # Check prefetcher
-        prefetch_block, saved_dep = DependencyPrefetcher.prefetch_for_file(path)
+        if start_line is None and end_line is None:
+            cur_hash = AgentFirewall._file_content_hash(abs_path)
+            delivered = _IN_PROCESS_DELIVERED.get((abs_path, sym_clean, eff_dep_mode))
+            already_here = bool(delivered and cur_hash and delivered == (cur_hash, _EPOCH_GEN))
+            allow_pointer = (not force_full) and _client_supports_pointers() and already_here
+            is_hit, cached_text, saved_dedup = AgentFirewall.check_cache(
+                _mcp_session_id(),
+                path,
+                symbol=cache_sym,
+                tracker=tracker,
+                allow_pointer=allow_pointer,
+            )
+            if is_hit and cached_text:
+                return {"content": [{"type": "text", "text": cached_text}]}
+
+        # Check loop detector (skip when force_full explicitly recovers from a pointer)
+        if not force_full:
+            is_loop, repeats, msg = LoopDetector.check_loop(_mcp_session_id(), "smart_read_file", args)
+            if is_loop:
+                return {"isError": True, "content": [{"type": "text", "text": f"⚠️ {msg}"}]}
+
+        # Only inline extra DependencyPrefetcher stubs when full deps or whole-file mode requested
+        prefetch_block = ""
+        if not sym_clean or eff_dep_mode == "full":
+            prefetch_block, _ = DependencyPrefetcher.prefetch_for_file(path)
 
         # Check targeted symbol or skeleton
         if start_line is not None and end_line is not None:
@@ -539,7 +647,7 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
 
         if symbol:
             # Team pre-warm hit: a teammate already skeletonized this symbol
-            team_skel = _team_skeleton_lookup(path, symbol)
+            team_skel = _team_skeleton_lookup(path, symbol, dep_mode=eff_dep_mode)
             if team_skel:
                 with open(path, "r", encoding="utf-8", errors="replace") as f:
                     raw_code = f.read()
@@ -550,15 +658,20 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                     event_type="TEAM_CACHE_HIT",
                     original_tokens=orig_t,
                     optimized_tokens=skel_t,
-                    details={"file": os.path.basename(path), "symbol": symbol, "source": "team_cache"}
+                    details={"file": os.path.basename(path), "symbol": symbol, "dep_mode": eff_dep_mode, "source": "team_cache"}
                 )
                 header = f"// [TokenSafe Team-Cached Skeleton for '{symbol}' | shared by a teammate]\n"
                 return {"content": [{"type": "text", "text": (prefetch_block or "") + header + team_skel}]}
 
             try:
                 graph, rel_path = GraphEngine.for_file(path)
-                inc_deps = bool(args.get("include_deps", True))
-                graph_skel = graph.graph_guided_skeletonize(path, target_symbol=symbol, include_deps=inc_deps)
+                graph_skel = graph.graph_guided_skeletonize(
+                    path,
+                    target_symbol=symbol,
+                    include_deps=inc_deps,
+                    dep_mode=eff_dep_mode,
+                    collapse_imports=(eff_dep_mode != "full"),
+                )
                 if graph_skel:
                     with open(path, "r", encoding="utf-8", errors="replace") as f:
                         raw_code = f.read()
@@ -570,11 +683,22 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                         event_type="GRAPH_SKELETON",
                         original_tokens=orig_t,
                         optimized_tokens=skel_t,
-                        details={"file": os.path.basename(path), "symbol": symbol, "saved_tokens": saved, "include_deps": inc_deps}
+                        details={
+                            "file": os.path.basename(path),
+                            "symbol": symbol,
+                            "saved_tokens": saved,
+                            "include_deps": inc_deps,
+                            "dep_mode": eff_dep_mode,
+                        }
                     )
-                    dep_label = "Full body + 1-hop dependencies" if inc_deps else "Surgical single-symbol isolation"
+                    if not inc_deps:
+                        dep_label = "Surgical single-symbol isolation"
+                    elif eff_dep_mode == "full":
+                        dep_label = "Full body + 1-hop dependencies"
+                    else:
+                        dep_label = "Full body + 1-hop signature deps"
                     header = f"// [TokenSafe Graph-Guided Skeleton for '{symbol}' | {dep_label}]\n"
-                    _team_skeleton_prewarm(path, symbol, graph_skel, saved)
+                    _team_skeleton_prewarm(path, symbol, graph_skel, saved, dep_mode=eff_dep_mode)
                     return {"content": [{"type": "text", "text": (prefetch_block or "") + header + graph_skel}]}
             except Exception:
                 pass
@@ -603,6 +727,17 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
 
     elif name == "compress_prompt":
         prompt = args.get("prompt", "")
+        if is_quota_exceeded:
+            emit_warn = LicenseManager.should_emit_quota_banner(tracker, session_id=_mcp_session_id(), every_n_turns=5)
+            payload = {
+                "original_text": prompt,
+                "compact_text": prompt,
+                "saved_tokens": 0,
+                "tier": "QUOTA_EXCEEDED",
+                "quota_exceeded": True,
+                "warning": quota.get("warning") if emit_warn else "Community 500k monthly limit reached; prompt compaction paused.",
+            }
+            return {"content": [{"type": "text", "text": json.dumps(payload, indent=2, ensure_ascii=False)}]}
         res = PromptCompactor.compact(prompt, enable_deepseek=True)
         return {"content": [{"type": "text", "text": json.dumps(res, indent=2, ensure_ascii=False)}]}
 
@@ -630,12 +765,22 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             invocation_num = 3
         if not transcript_path or not os.path.exists(transcript_path):
             return {"isError": True, "content": [{"type": "text", "text": f"Transcript not found: {transcript_path}"}]}
+        if is_quota_exceeded:
+            LicenseManager.should_emit_quota_banner(tracker, session_id=_mcp_session_id(), every_n_turns=5)
+            return {"content": [{"type": "text", "text": json.dumps({
+                "compactable": False,
+                "quota_exceeded": True,
+                "monthly_saved": quota.get("monthly_saved"),
+                "monthly_limit": quota.get("monthly_limit"),
+                "reason": quota.get("warning"),
+            }, indent=2, ensure_ascii=False)}]}
         ledger, orig_t, folded_t, stats = HistoryCompactor.fold_transcript(transcript_path, invocation_num)
         if not ledger:
             return {"content": [{"type": "text", "text": json.dumps({
                 "compactable": False,
                 "reason": "Transcript too short to fold (needs >= 4 steps and >= 1000 history tokens)"
             }, indent=2)}]}
+        _EPOCH_GEN += 1
         saved = max(0, orig_t - folded_t)
         # Incremental metrics guard (same policy as the PreInvocation hook):
         # repeated compaction of the SAME transcript must not re-record the
@@ -689,8 +834,21 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             }
             return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
 
-        # Step 2: Command sanitization (cwd unlocks the package.json peek for
-        # opaque yarn/npm test scripts; None keeps the conservative fallback)
+        # Step 2: Command sanitization (paused at Community 500k quota while Security Guard stays active)
+        if is_quota_exceeded:
+            emit_note = LicenseManager.should_emit_quota_banner(tracker, session_id=_mcp_session_id(), every_n_turns=5)
+            result = {
+                "original_command": cmd,
+                "sanitized_command": cmd,
+                "blocked": False,
+                "tokens_saved": 0,
+                "quota_exceeded": True,
+                "reason": quota.get("warning") if emit_note else "Community 500k monthly limit reached; command output compression paused (Security Guard active).",
+            }
+            if guard_res.warning_only:
+                result["warning"] = guard_res.reason
+            return {"content": [{"type": "text", "text": json.dumps(result, indent=2)}]}
+
         new_cmd, saved, reason = CommandSanitizer.sanitize(cmd, cwd=args.get("cwd") or None)
         result = {
             "original_command": cmd,
@@ -825,6 +983,9 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
 
     elif name == "slice_diff":
         raw_diff = args.get("diff", "")
+        if is_quota_exceeded:
+            banner = _quota_banner_if_due(quota, tracker, _mcp_session_id())
+            return {"content": [{"type": "text", "text": banner + raw_diff}]}
         max_ctx = int(args.get("max_context", 2))
         sliced, orig_t, opt_t = DiffSlicer.slice_diff(raw_diff, max_context_lines=max_ctx)
         saved = max(0, orig_t - opt_t)
@@ -849,6 +1010,15 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                 "isError": True,
                 "content": [{"type": "text", "text": err or "Error: Invalid project_path."}]
             }
+        if is_quota_exceeded:
+            LicenseManager.should_emit_quota_banner(tracker, session_id=_mcp_session_id(), every_n_turns=5)
+            return {"content": [{"type": "text", "text": json.dumps({
+                "quota_exceeded": True,
+                "monthly_saved": quota.get("monthly_saved"),
+                "monthly_limit": quota.get("monthly_limit"),
+                "fallback": "Use free list_dir / scoped_search or activate a Solo/Team license: tokensafe activate <key>",
+                "warning": quota.get("warning"),
+            }, indent=2, ensure_ascii=False)}]}
         graph = GraphEngine.get_instance(target_abs)
         god_nodes = graph.get_god_nodes(7)
         banner = graph.format_topology_banner()
@@ -879,6 +1049,9 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                 "isError": True,
                 "content": [{"type": "text", "text": err or "Error: Invalid project_path."}]
             }
+        if is_quota_exceeded:
+            LicenseManager.should_emit_quota_banner(tracker, session_id=_mcp_session_id(), every_n_turns=5)
+            return {"content": [{"type": "text", "text": f"{quota.get('warning', '')}\n\nAPI surface map generation is paused over the 500k Community limit. Use scoped_search or list_dir, or activate a subscription at https://tokensafe.dev/#pricing."}]}
         graph = GraphEngine.get_instance(target_abs)
         surface_md = graph.generate_api_surface()
         surface_tokens = count_tokens(surface_md)
@@ -1014,6 +1187,11 @@ def _get_watched_mtimes() -> Tuple[Optional[float], ...]:
 
 def run_mcp_server():
     """Runs stdio JSON-RPC 2.0 loop with per-call timeout, resilient recovery & auto-reload on upgrade."""
+    global _MCP_CLIENT_NAME, _TOOLS_LISTED, _EPOCH_GEN
+    _MCP_CLIENT_NAME = ""
+    _TOOLS_LISTED = False
+    _EPOCH_GEN = 0
+    _IN_PROCESS_DELIVERED.clear()
     initial_mtimes = _get_watched_mtimes()
     auto_reload = os.environ.get("TOKENSAFE_MCP_AUTORELOAD", "1").strip().lower() not in ("0", "false", "no")
 
@@ -1060,6 +1238,7 @@ def run_mcp_server():
                 "serverInfo": SERVER_INFO
             }
         elif method == "tools/list":
+            _TOOLS_LISTED = True
             response["result"] = {"tools": TOOLS}
         elif method == "tools/call":
             tool_name = params.get("name", "")

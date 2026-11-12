@@ -134,18 +134,18 @@ class TestLicenseValidationCache(unittest.TestCase):
         self.priv_hex = priv_bytes.hex()
         self.pub_hex = pub_bytes.hex()
         self._old_priv = os.environ.get("TOKENSAFE_PRIVATE_KEY")
-        self._old_pub = os.environ.get("TOKENSAFE_PUBLIC_KEY")
+        self._old_pub = self.lm.DEFAULT_ED25519_PUBLIC_KEY
         os.environ["TOKENSAFE_PRIVATE_KEY"] = self.priv_hex
-        os.environ["TOKENSAFE_PUBLIC_KEY"] = self.pub_hex
+        self.lm.DEFAULT_ED25519_PUBLIC_KEY = self.pub_hex
         with self.lm.LicenseManager._VALIDATION_CACHE_LOCK:
             self.lm.LicenseManager._VALIDATION_CACHE.clear()
 
     def tearDown(self):
-        for key, val in (("TOKENSAFE_PRIVATE_KEY", self._old_priv), ("TOKENSAFE_PUBLIC_KEY", self._old_pub)):
-            if val is None:
-                os.environ.pop(key, None)
-            else:
-                os.environ[key] = val
+        if self._old_priv is None:
+            os.environ.pop("TOKENSAFE_PRIVATE_KEY", None)
+        else:
+            os.environ["TOKENSAFE_PRIVATE_KEY"] = self._old_priv
+        self.lm.DEFAULT_ED25519_PUBLIC_KEY = self._old_pub
         with self.lm.LicenseManager._VALIDATION_CACHE_LOCK:
             self.lm.LicenseManager._VALIDATION_CACHE.clear()
 
@@ -394,18 +394,18 @@ class TestCloudAuthRegressions(unittest.TestCase):
             cb._CLERK_RESOLVE_FAILURES.pop("user_outage_1", None)
 
     def test_forged_ts1_license_rejected_server_side(self):
-        """H1: locally-forged TS1 keys (valid HMAC, public salt) fail the issuance check."""
+        """H1: locally-forged TS1 keys fail both offline validation and the server issuance check."""
         cb = self._import_cb()
-        from src.license_manager import LicenseManager, ROTATED_HMAC_SALT
+        from src.license_manager import LicenseManager
         forged = LicenseManager.generate_license(
-            tier="enterprise", email="owner@bigco.com", version=1
+            tier="enterprise", email="owner@bigco.com", version=1, signing_key="test-legacy-hmac-salt"
         )
-        # Signature is valid offline (salt is public)…
-        ok, _, _ = LicenseManager.validate_license(forged)
-        self.assertTrue(ok)
-        # …but the server-side issuance gate must reject unknown TS1 keys.
-        # (Test DB is a real SQLite cloud DB via init_cloud_db in other tests; a key
-        # we just fabricated locally was never issued.)
+        # Offline client validation now rejects legacy TS1 keys altogether
+        ok_offline, _, _ = LicenseManager.validate_license(forged)
+        self.assertFalse(ok_offline)
+        # Server-side issuance gate also rejects unknown TS1 keys even when allow_legacy_ts1=True
+        ok_srv, _, _ = LicenseManager.validate_license(forged, public_key="test-legacy-hmac-salt", allow_legacy_ts1=True)
+        self.assertTrue(ok_srv)
         self.assertFalse(cb.CloudBackendService.is_issued_license(forged))
         self.assertTrue(cb.CloudBackendService.is_issued_license("TS2." + "a" * 40))
 
@@ -708,7 +708,8 @@ class TestTS1SunsetMigration(unittest.TestCase):
     def test_ts1_key_reissued_as_ts2(self):
         from src.license_manager import LicenseManager
         email = "legacy@ts1-migrate.com"
-        old_key = LicenseManager.generate_license(tier="solo", email=email, duration_days=45, version=1)
+        test_salt = "test-legacy-ts1-migration-salt"
+        old_key = LicenseManager.generate_license(tier="solo", email=email, duration_days=45, version=1, signing_key=test_salt)
         self.assertTrue(old_key.startswith("TS1."))
         now = int(time.time())
         with self._conn_ctx() as conn:
@@ -719,7 +720,8 @@ class TestTS1SunsetMigration(unittest.TestCase):
             )
             conn.commit()
 
-        resp = self.svc.check_version(client_version="1.4.15", license_key=old_key)
+        with patch.dict(os.environ, {"TOKENSAFE_HMAC_SALT": test_salt}):
+            resp = self.svc.check_version(client_version="1.4.15", license_key=old_key)
         self.assertTrue(resp.get("ts1_deprecated"))
         new_key = resp.get("reissued_license_key", "")
         self.assertTrue(new_key.startswith("TS2."))
@@ -874,6 +876,12 @@ class TestTeamCachePrewarm(unittest.TestCase):
     def setUp(self):
         self._tmp = tempfile.mkdtemp(prefix="tokensafe_prewarm_")
         self.addCleanup(shutil.rmtree, self._tmp, ignore_errors=True)
+        old_dir = os.environ.get("TOKENSAFE_DATA_DIR")
+        old_db = os.environ.get("TOKENSAFE_DB_PATH")
+        os.environ["TOKENSAFE_DATA_DIR"] = self._tmp
+        os.environ["TOKENSAFE_DB_PATH"] = os.path.join(self._tmp, "metrics.db")
+        self.addCleanup(lambda: os.environ.update({"TOKENSAFE_DATA_DIR": old_dir}) if old_dir is not None else os.environ.pop("TOKENSAFE_DATA_DIR", None))
+        self.addCleanup(lambda: os.environ.update({"TOKENSAFE_DB_PATH": old_db}) if old_db is not None else os.environ.pop("TOKENSAFE_DB_PATH", None))
         self.py_file = os.path.join(self._tmp, "svc.py")
         with open(self.py_file, "w", encoding="utf-8") as f:
             f.write("def alpha(x):\n" + "    y = x + 1\n" * 30 + "    return y\n\n\ndef beta():\n    return alpha(1)\n")

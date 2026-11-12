@@ -81,10 +81,10 @@ class Dashboard:
             limit = 500_000
             q_pct = min(100.0, (monthly_saved / limit * 100.0))
             if monthly_saved >= limit:
-                out.append(f"  {BOLD}Subscription Tier:{RESET}   {YELLOW}COMMUNITY (Free){RESET} • {RED}{BOLD}500k Monthly Quota Reached{RESET}")
-                out.append(f"  {BOLD}Quota Usage:{RESET}         {RED}{render_bar(q_pct)}{RESET} (Upgrade to Solo for Unlimited: {CYAN}https://tokensafe.dev/#pricing{RESET})")
+                out.append(f"  {BOLD}Subscription Tier:{RESET}   {YELLOW}COMMUNITY (Free){RESET} • {RED}{BOLD}500k Monthly Measured Quota Reached ({monthly_saved:,}/{limit:,}){RESET}")
+                out.append(f"  {BOLD}Quota Usage:{RESET}         {RED}{render_bar(q_pct)}{RESET} (Pro optimizations paused · Upgrade: tokensafe activate <key> | {CYAN}https://tokensafe.dev/#pricing{RESET})")
             else:
-                out.append(f"  {BOLD}Subscription Tier:{RESET}   {YELLOW}COMMUNITY (Free){RESET} • {monthly_saved:,} / {limit:,} tokens this month")
+                out.append(f"  {BOLD}Subscription Tier:{RESET}   {YELLOW}COMMUNITY (Free){RESET} • {monthly_saved:,} / {limit:,} measured tokens this month")
                 out.append(f"  {BOLD}Quota Usage:{RESET}         {YELLOW}{render_bar(q_pct)}{RESET} (Upgrade to Solo for Unlimited)")
         else:
             email_info = f" ({payload.get('email', '')})" if payload.get('email') else ""
@@ -161,6 +161,12 @@ class Dashboard:
 
         md = []
         md.append("# ⚡ TokenSafe Context & Token Optimizer Report\n")
+        quota = LicenseManager.check_quota(self.tracker)
+        if quota.get("tier") == "free":
+            m_saved = int(quota.get("monthly_saved", 0))
+            m_limit = int(quota.get("monthly_limit") or 500_000)
+            status_tag = "QUOTA REACHED — Pro optimizers paused" if quota.get("is_quota_exceeded") else "Active"
+            md.append(f"> **Plan:** Community (`{m_saved:,} / {m_limit:,}` measured tokens/mo · **{status_tag}**)\n")
         md.append(f"> **Cumulative Resource Efficiency:** **{pct:.1f}% Reduction** across {summary['total_events']} events.\n")
         md.append("| Metric | Value |")
         md.append("| :--- | :--- |")
@@ -242,7 +248,7 @@ class Dashboard:
             banner_html = f"""
     <div style="background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); border-radius: 12px; padding: 14px 18px; margin-bottom: 24px; display: flex; justify-content: space-between; align-items: center; font-size: 13px;">
       <div>
-        <strong style="color: #eab308;">⚡ Community Edition:</strong> {monthly_saved:,} / {limit:,} free tokens saved this month ({q_pct}%).
+        <strong style="color: #eab308;">⚡ Community Edition:</strong> {monthly_saved:,} / {limit:,} free measured tokens saved this month ({q_pct}%).
       </div>
       <a href="https://tokensafe.dev/#pricing" target="_blank" style="background: #10b981; color: #090a0f; font-weight: 700; padding: 6px 14px; border-radius: 8px; text-decoration: none; font-size: 12px;">Upgrade to Solo (Unlimited)</a>
     </div>

@@ -11,6 +11,8 @@ import time
 import hmac
 import hashlib
 import base64
+import platform
+import uuid
 import threading
 from typing import Dict, Any, Tuple, Optional, List
 
@@ -24,14 +26,16 @@ GLOBAL_LICENSE_FILE = os.path.join(GLOBAL_DATA_DIR, "license.json")
 _DEFAULT_LICENSE_FILE = LICENSE_FILE
 _DEFAULT_GLOBAL_LICENSE_FILE = GLOBAL_LICENSE_FILE
 
-# Master Public Key for client-side offline verification (RFC 8032 Ed25519)
-DEFAULT_ED25519_PUBLIC_KEY = os.environ.get("TOKENSAFE_PUBLIC_KEY", "3911e2ffe5ad07ee23be392b88f238af302f9d3a0bf51881de8b5e0e6af71430")
-# Pre-rotation public keys accepted for backwards compatibility
-LEGACY_ED25519_PUBLIC_KEYS = ("8a2c9d550180ab5b00a06174cb6aecfd712740c59d0bdcff66a56515348c855e",)
+# Master Public Key for client-side offline verification (RFC 8032 Ed25519).
+# Hardcoded intentionally so environment overrides cannot substitute an attacker key.
+EMBEDDED_ED25519_PUBLIC_KEY = "3911e2ffe5ad07ee23be392b88f238af302f9d3a0bf51881de8b5e0e6af71430"
+DEFAULT_ED25519_PUBLIC_KEY = EMBEDDED_ED25519_PUBLIC_KEY
+# Retired keys (never include unit-test public keys here)
+LEGACY_ED25519_PUBLIC_KEYS: Tuple[str, ...] = ()
 # Private key for cloud server signing (never distributed to client, loaded strictly from environment)
 DEFAULT_ED25519_PRIVATE_KEY = os.environ.get("TOKENSAFE_PRIVATE_KEY", "")
-# Rotated HMAC salt for backward compatibility with TS1 legacy licenses
-ROTATED_HMAC_SALT = os.environ.get("TOKENSAFE_HMAC_SALT", "ts-sec-rotated-7b3f9c2d1e0a4f5b6829e1c3a70428e5")
+# Server-only HMAC salt for legacy TS1 migration (never hardcoded in clients)
+ROTATED_HMAC_SALT = os.environ.get("TOKENSAFE_HMAC_SALT", "")
 DEFAULT_SIGNING_SALT = ROTATED_HMAC_SALT
 
 # ---------------------------------------------------------------------------
@@ -145,6 +149,7 @@ class LicenseManager:
     _VALIDATION_CACHE_LOCK = threading.Lock()
     _VALIDATION_CACHE_TTL = 3600.0  # 1 hour
     _VALIDATION_CACHE_MAX = 64
+    _QUOTA_TURN_COUNTERS: Dict[str, int] = {}
 
     TIERS = {
         "free": {"max_tokens_monthly": 500_000, "deepseek_cloud": False, "team_analytics": False},
@@ -152,6 +157,12 @@ class LicenseManager:
         "team": {"max_tokens_monthly": None, "deepseek_cloud": True, "team_analytics": True},
         "enterprise": {"max_tokens_monthly": None, "deepseek_cloud": True, "team_analytics": True, "self_hosted": True}
     }
+
+    @classmethod
+    def get_machine_fingerprint(cls) -> str:
+        """One-way anonymized machine identifier for server-side free-tier quota continuity."""
+        raw = f"ts:{platform.system()}:{platform.node()}:{uuid.getnode()}:{os.path.expanduser('~')}"
+        return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
     @classmethod
     def generate_license(
@@ -200,8 +211,10 @@ class LicenseManager:
             sig_b64 = base64.urlsafe_b64encode(sig_raw).decode("ascii").rstrip("=")
             return f"TS2.{payload_b64}.{sig_b64}"
 
-        # Fallback to TS1 HMAC format
-        hmac_key = signing_key or ROTATED_HMAC_SALT
+        # Fallback to TS1 HMAC format (server/test explicit signing_key only)
+        hmac_key = signing_key or ROTATED_HMAC_SALT or os.environ.get("TOKENSAFE_HMAC_SALT", "")
+        if not hmac_key:
+            raise ValueError("TOKENSAFE_HMAC_SALT is required to sign legacy TS1 licenses.")
         sig = hmac.new(hmac_key.encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()[:32]
         return f"TS1.{payload_b64}.{sig}"
 
@@ -209,13 +222,14 @@ class LicenseManager:
     def validate_license(
         cls,
         license_key: str,
-        public_key: Optional[str] = None
+        public_key: Optional[str] = None,
+        allow_legacy_ts1: bool = False,
     ) -> Tuple[bool, Dict[str, Any], str]:
         """
         Validates the license key signature and expiration.
         Supports:
-        - TS2: Asymmetric Ed25519 verification using public key (Offline-safe, impossible to forge)
-        - TS1: Legacy HMAC-SHA256 verification with rotated salt
+        - TS2: Asymmetric Ed25519 verification using embedded public key (Offline-safe, impossible to forge)
+        - TS1: Legacy HMAC-SHA256 rejected offline (server-side migration only when allow_legacy_ts1=True)
         Returns (is_valid, payload_dict, reason_str).
         """
         if not license_key or not isinstance(license_key, str):
@@ -226,7 +240,8 @@ class LicenseManager:
         # Fast path: recently verified signature (avoids ~0.6s pure-Python Ed25519
         # verification on every hook invocation when the 'cryptography' package is absent)
         now = time.time()
-        cache_key = f"{public_key or ''}|{license_key}"
+        effective_pub = public_key or DEFAULT_ED25519_PUBLIC_KEY
+        cache_key = f"{effective_pub}|{int(bool(allow_legacy_ts1))}|{license_key}"
         with cls._VALIDATION_CACHE_LOCK:
             cached = cls._VALIDATION_CACHE.get(cache_key)
             if cached and now < cached[1]:
@@ -246,7 +261,7 @@ class LicenseManager:
 
         # 1. Asymmetric Ed25519 Verification (TS2)
         if schema_ver == "TS2":
-            pub_hex = public_key or os.environ.get("TOKENSAFE_PUBLIC_KEY") or DEFAULT_ED25519_PUBLIC_KEY
+            pub_hex = public_key or DEFAULT_ED25519_PUBLIC_KEY
             try:
                 pub_bytes = bytes.fromhex(pub_hex)
                 padded_sig = sig_part + "=" * (-len(sig_part) % 4)
@@ -267,16 +282,20 @@ class LicenseManager:
                 if not verified:
                     return False, {}, "Invalid digital signature: license key has been tampered with or is counterfeit"
 
-        # 2. Legacy TS1 Verification
+        # 2. Legacy TS1 Verification (disabled offline to eliminate public-salt forgery)
         else:
-            hmac_key = public_key or ROTATED_HMAC_SALT
+            if not allow_legacy_ts1:
+                return (
+                    False,
+                    {},
+                    "Legacy TS1 offline verification is disabled; reconnect to upgrade to a TS2 Ed25519 license.",
+                )
+            hmac_key = public_key or ROTATED_HMAC_SALT or os.environ.get("TOKENSAFE_HMAC_SALT", "")
+            if not hmac_key:
+                return False, {}, "Legacy TS1 verification requires server-side HMAC salt configuration"
             expected_sig = hmac.new(hmac_key.encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()[:32]
             if not hmac.compare_digest(sig_part, expected_sig):
-                # Try fallback default salt if user had old key
-                old_salt = "ts-core-sec-9a4f8b2c1e7d3a506198fbcde40231aa"
-                fallback_sig = hmac.new(old_salt.encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()[:32]
-                if not hmac.compare_digest(sig_part, fallback_sig):
-                    return False, {}, "Invalid signature: legacy license key has been tampered with"
+                return False, {}, "Invalid signature: legacy license key has been tampered with"
 
         # Check expiration
         now = int(time.time())
@@ -448,14 +467,16 @@ class LicenseManager:
         if exceeded:
             warning = (
                 f"⚡ **TokenSafe Quota Alert**: Community Edition limit reached "
-                f"({monthly_saved:,}/{max_tokens:,} tokens saved this month). "
-                f"Advanced optimization is throttled. Upgrade to Solo for unlimited optimization: `tokensafe activate <key>` or visit https://tokensafe.dev."
+                f"({monthly_saved:,}/{max_tokens:,} measured tokens saved this month). "
+                f"Graph/signature AST slicing, pointer dedup, history compaction & KV-cache prefix locking are paused "
+                f"(Security Guard stays active). Upgrade to Solo ($9/mo) or 7-Day Team Trial: "
+                f"`tokensafe activate <key>` or visit https://tokensafe.dev/#pricing"
             )
         elif monthly_saved >= int(max_tokens * 0.85):
             warning = (
                 f"⚡ **TokenSafe Quota Notice**: Community Edition is at {int(monthly_saved / max_tokens * 100)}% of monthly limit "
-                f"({monthly_saved:,}/{max_tokens:,} tokens). "
-                f"Upgrade to Solo for unlimited optimization: `tokensafe activate <key>` or https://tokensafe.dev."
+                f"({monthly_saved:,}/{max_tokens:,} measured tokens). "
+                f"Upgrade to Solo for unlimited optimization: `tokensafe activate <key>` or https://tokensafe.dev/#pricing"
             )
 
         return {
@@ -463,5 +484,46 @@ class LicenseManager:
             "is_quota_exceeded": exceeded,
             "monthly_limit": max_tokens,
             "monthly_saved": monthly_saved,
+            "remaining_tokens": max(0, max_tokens - monthly_saved),
             "warning": warning
         }
+
+    @classmethod
+    def should_emit_quota_banner(
+        cls,
+        tracker: Optional[Any] = None,
+        session_id: str = "default_session",
+        every_n_turns: int = 5,
+    ) -> bool:
+        """Returns True on turn #1 of quota exceedance per session and every N turns thereafter."""
+        sid = session_id or "default_session"
+        n = max(1, int(every_n_turns or 5))
+        if tracker is not None and hasattr(tracker, "_get_connection"):
+            try:
+                with tracker._get_connection() as conn:
+                    conn.execute("""
+                        CREATE TABLE IF NOT EXISTS quota_banner_state (
+                            session_id TEXT PRIMARY KEY,
+                            turns INTEGER NOT NULL DEFAULT 0,
+                            updated_at INTEGER NOT NULL
+                        )
+                    """)
+                    row = conn.execute(
+                        "SELECT turns FROM quota_banner_state WHERE session_id = ?",
+                        (sid,),
+                    ).fetchone()
+                    turn_no = (int(row["turns"]) if row else 0) + 1
+                    conn.execute("""
+                        INSERT INTO quota_banner_state (session_id, turns, updated_at)
+                        VALUES (?, ?, ?)
+                        ON CONFLICT(session_id) DO UPDATE SET
+                            turns = excluded.turns,
+                            updated_at = excluded.updated_at
+                    """, (sid, turn_no, int(time.time())))
+                return turn_no == 1 or (turn_no % n == 0)
+            except Exception:
+                pass
+        with cls._VALIDATION_CACHE_LOCK:
+            turn_no = cls._QUOTA_TURN_COUNTERS.get(sid, 0) + 1
+            cls._QUOTA_TURN_COUNTERS[sid] = turn_no
+        return turn_no == 1 or (turn_no % n == 0)

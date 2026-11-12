@@ -27,7 +27,10 @@ except ImportError:
     init_cloud_db = None
     get_db_connection = None
 
+from src import license_manager as _lm
 from src.license_manager import LicenseManager
+
+_lm.DEFAULT_ED25519_PUBLIC_KEY = os.environ["TOKENSAFE_PUBLIC_KEY"]
 from src.distiller import UniversalDistiller
 
 @unittest.skipIf(CloudBackendService is None, "src.cloud_backend is a server-side component not distributed in client repo")

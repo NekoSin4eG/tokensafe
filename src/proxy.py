@@ -183,8 +183,11 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             return
 
         proxy_tracker = MetricsTracker()
+        from src.license_manager import LicenseManager
+        quota = LicenseManager.check_quota(proxy_tracker)
+        is_quota_exceeded = bool(quota.get("is_quota_exceeded", False))
 
-        # 1. Local Secret Redaction: Scrub credentials across all messages before dispatch
+        # 1. Local Secret Redaction: Scrub credentials across all messages before dispatch (always active)
         messages = payload.get("messages", [])
         if messages:
             messages, secrets_scrubbed = SecretRedactor.redact_messages(messages)
@@ -192,10 +195,9 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                 print(f"[TokenSafe] Scrubbed {secrets_scrubbed} sensitive secret(s) from payload before transmission.")
 
         # 2. Ingress Optimization: REPLACE the last user message with its TOCP form.
-        #    This is the real replace-mode: the upstream model never sees the verbose
-        #    original, so the delta is literally measured (see METRICS.md).
+        #    Paused when Community 500k monthly measured quota is exceeded.
         target_symbol = None
-        if messages:
+        if messages and not is_quota_exceeded:
             for idx in reversed(range(len(messages))):
                 msg = messages[idx]
                 if msg.get("role") == "user" and isinstance(msg.get("content"), str):
@@ -223,7 +225,7 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                     break
 
         # 3. Automatic Architecture Awareness (God Nodes Injection)
-        if messages:
+        if messages and not is_quota_exceeded:
             try:
                 graph = GraphEngine.get_instance(os.getcwd())
                 banner = graph.format_topology_banner()
@@ -234,23 +236,10 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-        # 4. Prompt Cache Prefix Normalization (100% Cache Hits)
-        if messages:
-            messages, cache_meta = PromptCacheNormalizer.normalize_messages(messages)
-            payload["messages"] = messages
-
-        # 5. Context Window Governor (Budget Autothrottle)
-        if messages:
-            messages, gov_stats = ContextGovernor.govern_messages(messages, session_id="proxy_session")
-            payload["messages"] = messages
-            if gov_stats.get("throttled"):
-                BROADCASTER.publish("governor_throttle", gov_stats)
-
-        # 6. Resolve Multi-Provider Upstream & API Key
+        # 4. Resolve Multi-Provider Upstream & API Key (needed before provider-aware cache breakpoints)
         auth_header = self.headers.get("Authorization", "")
         custom_url = os.environ.get("TOKENSAFE_UPSTREAM_URL", "")
 
-        # Supported keys from environment or config
         data_dir = resolve_data_dir()
         conf_keys = {}
         config_path = os.path.join(data_dir, "config.json")
@@ -261,37 +250,38 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             except Exception:
                 pass
 
-        deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "") or conf_keys.get("deepseek_api_key", "")
-        openai_key = os.environ.get("OPENAI_API_KEY", "") or conf_keys.get("openai_api_key", "")
-        gemini_key = os.environ.get("GEMINI_API_KEY", "") or conf_keys.get("gemini_api_key", "")
-        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "") or conf_keys.get("anthropic_api_key", "")
-        generic_upstream_key = os.environ.get("TOKENSAFE_UPSTREAM_KEY", "")
+        upstream_url, resolved_key = self._resolve_upstream(conf_keys, custom_url)
+        provider = self._detect_provider(upstream_url)
 
-        # Infer upstream URL if not provided
-        pref = conf_keys.get("preferred_provider", "").lower()
-        if not custom_url:
-            if (pref == "gemini" and gemini_key) or (gemini_key and not deepseek_key and not openai_key):
-                upstream_url = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
-                resolved_key = gemini_key
-            elif openai_key and not deepseek_key:
-                upstream_url = "https://api.openai.com/v1/chat/completions"
-                resolved_key = openai_key
-            elif anthropic_key and not deepseek_key:
-                upstream_url = "https://api.anthropic.com/v1/messages"
-                resolved_key = anthropic_key
-            else:
-                upstream_url = "https://api.deepseek.com/chat/completions"
-                resolved_key = deepseek_key or generic_upstream_key
-        else:
-            upstream_url = custom_url
-            if "openai.com" in upstream_url:
-                resolved_key = openai_key or generic_upstream_key or deepseek_key
-            elif "anthropic.com" in upstream_url:
-                resolved_key = anthropic_key or generic_upstream_key
-            elif "googleapis.com" in upstream_url:
-                resolved_key = gemini_key or generic_upstream_key
-            else:
-                resolved_key = deepseek_key or generic_upstream_key or openai_key
+        # 5. Epoch-Aware Context Governor (runs BEFORE cache normalization so breakpoints stay valid)
+        if messages and not is_quota_exceeded:
+            messages, gov_stats = ContextGovernor.govern_messages(
+                messages,
+                session_id="proxy_session",
+                model=str(payload.get("model") or ""),
+                append_only=True,
+            )
+            payload["messages"] = messages
+            if gov_stats.get("throttled"):
+                BROADCASTER.publish("governor_throttle", gov_stats)
+
+        # 6. Prompt Cache Prefix & Tool Normalization (multi-breakpoint + deterministic ordering)
+        if not is_quota_exceeded:
+            if "tools" in payload and isinstance(payload["tools"], list):
+                payload["tools"] = PromptCacheNormalizer.normalize_tools(
+                    payload["tools"], provider=provider, inject_cache_control=False
+                )
+            if messages:
+                messages, cache_meta = PromptCacheNormalizer.normalize_messages(
+                    messages,
+                    provider=provider,
+                    tools=payload.get("tools") if isinstance(payload.get("tools"), list) else None,
+                )
+                payload["messages"] = messages
+                if cache_meta.get("normalized_tools") is not None:
+                    payload["tools"] = cache_meta["normalized_tools"]
+                if provider == "openai" and cache_meta.get("prompt_cache_key"):
+                    payload.setdefault("prompt_cache_key", cache_meta["prompt_cache_key"])
 
         headers = {"Content-Type": "application/json"}
         if auth_header:
@@ -305,7 +295,7 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
 
         req = urllib.request.Request(
             upstream_url,
-            data=json.dumps(payload).encode("utf-8"),
+            data=json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8"),
             headers=headers
         )
 
@@ -316,8 +306,25 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                 for k, v in resp.getheaders():
                     if k.lower() in ("content-type", "content-encoding"):
                         self.send_header(k, v)
+                if is_quota_exceeded:
+                    self.send_header("X-TokenSafe-Quota", "exceeded")
+                    LicenseManager.should_emit_quota_banner(proxy_tracker, session_id="proxy_session", every_n_turns=5)
                 self.end_headers()
                 self.wfile.write(resp_data)
+
+                try:
+                    resp_json = json.loads(resp_data.decode("utf-8"))
+                    usage = resp_json.get("usage") or {}
+                    cached = (
+                        (usage.get("prompt_tokens_details") or {}).get("cached_tokens")
+                        or usage.get("cache_read_input_tokens")
+                        or usage.get("prompt_cache_hit_tokens")
+                        or 0
+                    )
+                    if cached:
+                        BROADCASTER.publish("cache_stats", {"provider": provider, "cached_tokens": int(cached)})
+                except Exception:
+                    pass
 
                 # Broadcast live telemetry update to SSE dashboard subscribers
                 try:
@@ -334,6 +341,45 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             self.send_response(502)
             self.end_headers()
             self.wfile.write(json.dumps({"error": f"Upstream proxy error: {str(e)}"}).encode("utf-8"))
+
+    @staticmethod
+    def _detect_provider(upstream_url: str) -> str:
+        url = (upstream_url or "").lower()
+        if "anthropic.com" in url:
+            return "anthropic"
+        if "openai.com" in url:
+            return "openai"
+        if "googleapis.com" in url or "generativelanguage" in url:
+            return "gemini"
+        if "deepseek.com" in url:
+            return "deepseek"
+        return "generic"
+
+    @staticmethod
+    def _resolve_upstream(conf_keys: Dict[str, Any], custom_url: str):
+        deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "") or conf_keys.get("deepseek_api_key", "")
+        openai_key = os.environ.get("OPENAI_API_KEY", "") or conf_keys.get("openai_api_key", "")
+        gemini_key = os.environ.get("GEMINI_API_KEY", "") or conf_keys.get("gemini_api_key", "")
+        anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "") or conf_keys.get("anthropic_api_key", "")
+        generic_upstream_key = os.environ.get("TOKENSAFE_UPSTREAM_KEY", "")
+
+        pref = str(conf_keys.get("preferred_provider", "")).lower()
+        if not custom_url:
+            if (pref == "gemini" and gemini_key) or (gemini_key and not deepseek_key and not openai_key):
+                return "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions", gemini_key
+            if openai_key and not deepseek_key:
+                return "https://api.openai.com/v1/chat/completions", openai_key
+            if anthropic_key and not deepseek_key:
+                return "https://api.anthropic.com/v1/messages", anthropic_key
+            return "https://api.deepseek.com/chat/completions", (deepseek_key or generic_upstream_key)
+
+        if "openai.com" in custom_url:
+            return custom_url, (openai_key or generic_upstream_key or deepseek_key)
+        if "anthropic.com" in custom_url:
+            return custom_url, (anthropic_key or generic_upstream_key)
+        if "googleapis.com" in custom_url:
+            return custom_url, (gemini_key or generic_upstream_key)
+        return custom_url, (deepseek_key or generic_upstream_key or openai_key)
 
 def run_proxy(port: int = DEFAULT_PORT, host: str = DEFAULT_HOST):
     # Auto-initialize Knowledge Graph & API Surface on startup

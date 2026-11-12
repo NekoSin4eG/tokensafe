@@ -385,8 +385,12 @@ def main():
             else:
                 print(f"  Expires:    Never (Lifetime)")
         else:
-            print("  Status:     Free Tier (up to 500,000 tokens/mo)")
-            print("  Upgrade:    https://tokensafe.dev ($9/mo Solo with 7-Day Free Trial)\n")
+            quota = LicenseManager.check_quota()
+            q_saved = int(quota.get("monthly_saved", 0))
+            q_limit = int(quota.get("monthly_limit") or 500_000)
+            q_state = "\033[31mQUOTA REACHED (Pro optimizations paused)\033[0m" if quota.get("is_quota_exceeded") else "\033[32mActive\033[0m"
+            print(f"  Status:     Free Tier ({q_saved:,} / {q_limit:,} measured tokens this month · {q_state})")
+            print("  Upgrade:    https://tokensafe.dev/#pricing ($9/mo Solo with 7-Day Free Trial)\n")
         print()
 
     elif command in ("providers", "models", "keys"):

@@ -212,17 +212,27 @@ class TelemetrySync:
                     "error": f"Failed to read local metrics database: {str(e)}"
                 }
 
-            if not rows and not synthetic_events:
-                return {
-                    "success": True,
-                    "synced_events": 0,
-                    "total_synced": state.get("total_synced_events", 0),
-                    "message": "All metrics are already up to date."
-                }
+            try:
+                from src.metrics import MetricsTracker
+                local_monthly_measured = MetricsTracker(db_path=METRICS_DB_PATH).get_monthly_saved_tokens(measured_only=True)
+            except Exception:
+                local_monthly_measured = 0
+            machine_fp = "" if os.environ.get("TOKENSAFE_TELEMETRY_DISABLED") in ("1", "true", "yes") else LicenseManager.get_machine_fingerprint()
 
-            formatted_items: List[Tuple[Optional[int], Dict[str, Any]]] = [
-                (None, ev) for ev in synthetic_events
-            ]
+            if not rows and not synthetic_events:
+                last_q_sync = float(state.get("last_quota_sync_at", 0) or 0)
+                if not (machine_fp and active_key == "community" and (time.time() - last_q_sync > 3600)):
+                    return {
+                        "success": True,
+                        "synced_events": 0,
+                        "total_synced": state.get("total_synced_events", 0),
+                        "message": "All metrics are already up to date."
+                    }
+                formatted_items = [(None, None)]  # quota-only probe for community tier
+            else:
+                formatted_items = [
+                    (None, ev) for ev in synthetic_events
+                ]
             current_last_id = last_id
 
             for r in rows:
@@ -288,24 +298,35 @@ class TelemetrySync:
 
             for i in range(0, len(formatted_items), batch_size):
                 batch_items = formatted_items[i:i + batch_size]
-                chunk = [item[1] for item in batch_items]
+                chunk = [item[1] for item in batch_items if item[1] is not None]
                 body_dict = {
                     "email": target_email,
                     "license_key": active_key,
-                    "events": chunk
+                    "events": chunk,
                 }
+                if machine_fp and active_key == "community":
+                    body_dict["machine_id"] = machine_fp
+                    body_dict["monthly_measured_saved"] = local_monthly_measured
                 body_bytes = json.dumps(body_dict).encode("utf-8")
 
                 req = urllib.request.Request(target_url, data=body_bytes, headers=headers, method="POST")
                 try:
                     with urllib.request.urlopen(req, timeout=timeout) as resp:
                         if resp.status == 200:
+                            try:
+                                resp_body = json.loads(resp.read().decode("utf-8") or "{}")
+                                srv_measured = int(resp_body.get("server_monthly_measured_saved") or 0)
+                                if srv_measured > 0:
+                                    from src.metrics import MetricsTracker
+                                    MetricsTracker(db_path=METRICS_DB_PATH).record_server_quota_floor(srv_measured)
+                            except Exception:
+                                pass
                             total_sent += len(chunk)
                             cumulative_synced += len(chunk)
                             for ev_id, ev_payload in batch_items:
                                 if ev_id is not None and ev_id > current_last_id:
                                     current_last_id = ev_id
-                                if ev_payload.get("event_type") == "ROLLUP_LIFETIME":
+                                if ev_payload and ev_payload.get("event_type") == "ROLLUP_LIFETIME":
                                     rollup_synced = True
                             if not synthetic_events:
                                 rollup_synced = True
@@ -313,6 +334,7 @@ class TelemetrySync:
                                 "last_synced_event_id": current_last_id,
                                 "last_synced_at": int(time.time()),
                                 "last_attempt_at": int(time.time()),
+                                "last_quota_sync_at": int(time.time()),
                                 "total_synced_events": cumulative_synced,
                                 "lifetime_rollup_synced": rollup_synced
                             })

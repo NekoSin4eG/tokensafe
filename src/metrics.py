@@ -36,6 +36,8 @@ ESTIMATED_EVENT_TYPES = frozenset({
     "ROLLUP_LIFETIME",
     "COMMAND_FILTER",
     "LOOP_GUARD",
+    "SCOPED_SEARCH",
+    "DIR_LIST",
     "GUARD_SECRET",
     "GUARD_DESTRUCTIVE",
     "GUARD_TLS_VERIFY_BYPASS",
@@ -174,10 +176,9 @@ class MetricsTracker:
                     "UPDATE events SET measurement = 'estimated' "
                     "WHERE measurement = 'measured' AND event_type IN "
                     "('GRAPH_TOPOLOGY', 'HISTORY_FOLD', 'PROMPT', 'ROLLUP_LIFETIME', "
-                    "'COMMAND_FILTER', 'LOOP_GUARD', 'GUARD_SECRET', "
-                    "'GUARD_DESTRUCTIVE', 'GUARD_TLS_VERIFY_BYPASS', "
-                    "'GUARD_JUNK_READ', 'GUARD_INFINITE', "
-                    "'GUARD_RAW_CODE_SEARCH');"
+                    "'COMMAND_FILTER', 'LOOP_GUARD', 'SCOPED_SEARCH', 'DIR_LIST', "
+                    "'GUARD_SECRET', 'GUARD_DESTRUCTIVE', 'GUARD_TLS_VERIFY_BYPASS', "
+                    "'GUARD_JUNK_READ', 'GUARD_INFINITE', 'GUARD_RAW_CODE_SEARCH');"
                 )
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS lifetime_aggregates (
@@ -198,7 +199,98 @@ class MetricsTracker:
                 """)
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp)")
                 cursor.execute("CREATE INDEX IF NOT EXISTS idx_events_session_id ON events(session_id)")
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS quota_daily (
+                        day_key TEXT PRIMARY KEY,
+                        measured_saved INTEGER NOT NULL DEFAULT 0,
+                        updated_at TEXT NOT NULL
+                    )
+                """)
+                # One-time backfill for existing DBs so pre-upgrade 30d measured usage is captured
+                row_qd = cursor.execute("SELECT COUNT(*) FROM quota_daily").fetchone()
+                if row_qd and int(row_qd[0]) == 0:
+                    cutoff_30 = (datetime.now() - timedelta(days=30)).isoformat()
+                    cursor.execute("""
+                        INSERT OR IGNORE INTO quota_daily (day_key, measured_saved, updated_at)
+                        SELECT substr(timestamp, 1, 10), COALESCE(SUM(saved_tokens), 0), MAX(timestamp)
+                        FROM events
+                        WHERE timestamp >= ? AND measurement = 'measured' AND saved_tokens > 0
+                        GROUP BY substr(timestamp, 1, 10)
+                    """, (cutoff_30,))
             _INITIALIZED_METRICS_DBS.add(self.db_path)
+
+    def _quota_mirror_path(self) -> str:
+        """Returns persistent sidecar ledger path (kept outside data/metrics.db for default installs)."""
+        if os.environ.get("TOKENSAFE_DB_PATH") or os.environ.get("TOKENSAFE_DATA_DIR"):
+            return os.path.join(os.path.dirname(self.db_path), ".qledger.json")
+        default_data = os.path.abspath(resolve_data_dir())
+        if os.path.abspath(os.path.dirname(self.db_path)) == default_data:
+            return os.path.join(os.path.dirname(default_data), ".qledger.json")
+        return os.path.join(os.path.dirname(self.db_path), ".qledger.json")
+
+    def _sync_quota_mirror(self, day_key: str, delta_measured: int = 0) -> int:
+        """Merges quota_daily with a sidecar ledger so deleting metrics.db or pruning >5k rows cannot reset quota."""
+        mirror_path = self._quota_mirror_path()
+        cutoff_day = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+        data: Dict[str, Any] = {"days": {}, "server_floor": 0, "server_floor_ts": 0}
+        try:
+            if os.path.exists(mirror_path):
+                with open(mirror_path, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    data.update(loaded)
+        except Exception:
+            pass
+        days = {
+            str(k): int(v)
+            for k, v in (data.get("days") or {}).items()
+            if str(k) >= cutoff_day and int(v or 0) > 0
+        }
+        if delta_measured > 0 and day_key >= cutoff_day:
+            days[day_key] = days.get(day_key, 0) + int(delta_measured)
+        data["days"] = days
+        if delta_measured > 0:
+            try:
+                os.makedirs(os.path.dirname(mirror_path), exist_ok=True)
+                tmp_p = mirror_path + ".tmp"
+                with open(tmp_p, "w", encoding="utf-8") as f:
+                    json.dump(data, f)
+                os.replace(tmp_p, mirror_path)
+            except Exception:
+                pass
+        local_sum = sum(days.values())
+        srv_floor = 0
+        try:
+            if time.time() - float(data.get("server_floor_ts", 0)) <= 30 * 86400:
+                srv_floor = int(data.get("server_floor", 0) or 0)
+        except Exception:
+            srv_floor = 0
+        return max(local_sum, srv_floor)
+
+    def record_server_quota_floor(self, server_monthly_measured: int) -> None:
+        """Persists a server-verified 30-day measured quota floor so client resets cannot roll back usage."""
+        if int(server_monthly_measured or 0) <= 0:
+            return
+        mirror_path = self._quota_mirror_path()
+        data: Dict[str, Any] = {"days": {}, "server_floor": 0, "server_floor_ts": 0}
+        try:
+            if os.path.exists(mirror_path):
+                with open(mirror_path, "r", encoding="utf-8") as f:
+                    loaded = json.load(f)
+                if isinstance(loaded, dict):
+                    data.update(loaded)
+        except Exception:
+            pass
+        data["server_floor"] = max(int(data.get("server_floor", 0) or 0), int(server_monthly_measured))
+        data["server_floor_ts"] = int(time.time())
+        try:
+            os.makedirs(os.path.dirname(mirror_path), exist_ok=True)
+            tmp_p = mirror_path + ".tmp"
+            with open(tmp_p, "w", encoding="utf-8") as f:
+                json.dump(data, f)
+            os.replace(tmp_p, mirror_path)
+        except Exception:
+            pass
 
     def record_event(
         self,
@@ -250,6 +342,20 @@ class MetricsTracker:
                     total_usd_saved = total_usd_saved + excluded.total_usd_saved
             """, (session_id, now_iso, now_iso, original_tokens,
                   optimized_tokens, saved_tokens, est_usd))
+
+            # 3. Monotonic 30-day measured quota ledger (never eroded by >5k event pruning)
+            if measurement_label == "measured" and saved_tokens > 0:
+                day_key = now_iso[:10]
+                cursor.execute("""
+                    INSERT INTO quota_daily (day_key, measured_saved, updated_at)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(day_key) DO UPDATE SET
+                        measured_saved = quota_daily.measured_saved + excluded.measured_saved,
+                        updated_at = excluded.updated_at
+                """, (day_key, saved_tokens, now_iso))
+
+        if measurement_label == "measured" and saved_tokens > 0:
+            self._sync_quota_mirror(now_iso[:10], saved_tokens)
 
         # Wall-clock auto-retention (marker-file gated, cross-process safe)
         self._maybe_autoprune(self.db_path)
@@ -398,20 +504,40 @@ class MetricsTracker:
             "breakdown": combined_breakdown
         }
 
-    def get_monthly_saved_tokens(self) -> int:
-        """Returns total tokens saved in the trailing 30 days for quota calculations."""
-        # Events are written with local-time now(); compute the cutoff the same way
-        # (previously utcnow vs now mixed naive clocks and skewed the quota window).
+    def get_monthly_saved_tokens(self, measured_only: bool = True) -> int:
+        """Returns trailing 30-day tokens saved for quota calculations (measured-only by default).
+
+        Reconciles live `events`, the un-prunable `quota_daily` table, and the
+        persistent sidecar ledger so neither >5,000-row auto-pruning nor deleting
+        `metrics.db` drops counted Community usage.
+        """
         thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
+        thirty_days_day = thirty_days_ago[:10]
         with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COALESCE(SUM(saved_tokens), 0) as monthly_saved
-                FROM events
-                WHERE timestamp >= ?
-            """, (thirty_days_ago,))
-            row = cursor.fetchone()
-            return int(row["monthly_saved"]) if row else 0
+            if measured_only:
+                cursor.execute("""
+                    SELECT COALESCE(SUM(saved_tokens), 0) as monthly_saved
+                    FROM events
+                    WHERE timestamp >= ? AND measurement = 'measured'
+                """, (thirty_days_ago,))
+                ev_sum = int(cursor.fetchone()["monthly_saved"])
+                cursor.execute("""
+                    SELECT COALESCE(SUM(measured_saved), 0) as daily_saved
+                    FROM quota_daily
+                    WHERE day_key >= ?
+                """, (thirty_days_day,))
+                daily_sum = int(cursor.fetchone()["daily_saved"])
+                mirror_sum = self._sync_quota_mirror(thirty_days_day, 0)
+                return max(ev_sum, daily_sum, mirror_sum)
+            else:
+                cursor.execute("""
+                    SELECT COALESCE(SUM(saved_tokens), 0) as monthly_saved
+                    FROM events
+                    WHERE timestamp >= ?
+                """, (thirty_days_ago,))
+                row = cursor.fetchone()
+                return int(row["monthly_saved"]) if row else 0
 
     def get_recent_events(self, limit: int = 10) -> List[Dict[str, Any]]:
         """Returns the most recent optimization events."""
@@ -588,6 +714,10 @@ class MetricsTracker:
 
                 # 5. Delete pruned events
                 cursor.execute(f"DELETE FROM events WHERE {combined_where}", params)
+
+        cutoff_qd = (datetime.now() - timedelta(days=45)).strftime("%Y-%m-%d")
+        with self._get_connection() as conn:
+            conn.execute("DELETE FROM quota_daily WHERE day_key < ?", (cutoff_qd,))
 
         if vacuum and prune_count > 0:
             self.vacuum()
