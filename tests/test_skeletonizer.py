@@ -309,5 +309,44 @@ def inert_fn():
         self.assertIn("def _check_raw_code_search", skel_no_deps)
         self.assertIn("def _check_raw_code_search", skel_deps)
 
+    def test_allman_multiline_kts_and_sass_safety(self):
+        cs_allman = """
+public class Repo
+{
+    public async Task<string> FetchData(
+        string id,
+        bool strict
+    )
+    {
+        var row = await db.Get(id);
+        return row;
+    }
+}
+"""
+        for env_val in ("0", "auto"):
+            prev = os.environ.get("TOKENSAFE_TREESITTER")
+            os.environ["TOKENSAFE_TREESITTER"] = env_val
+            try:
+                skel_cs = Skeletonizer.skeletonize_code(cs_allman, ".cs")
+                self.assertIn("public class Repo", skel_cs)
+                self.assertIn("/* ... */", skel_cs)
+                self.assertNotIn("db.Get(id)", skel_cs)
+
+                kt_code = "class Svc {\n  private suspend fun loadUser(id: String) {\n    val x = 1\n  }\n}\n"
+                skel_kts = Skeletonizer.skeletonize_code(kt_code, ".kts")
+                self.assertIn("private suspend fun loadUser(id: String)", skel_kts)
+                self.assertIn("/* ... */", skel_kts)
+                self.assertNotIn("val x = 1", skel_kts)
+            finally:
+                if prev is None:
+                    os.environ.pop("TOKENSAFE_TREESITTER", None)
+                else:
+                    os.environ["TOKENSAFE_TREESITTER"] = prev
+
+        # Indented .sass must not drop lines on EOF
+        sass_code = "$primary: #3b82f6\n.btn\n  color: $primary\n  padding: 8px\n"
+        skel_sass = Skeletonizer.skeletonize_code(sass_code, ".sass")
+        self.assertIn("padding: 8px", skel_sass)
+
 if __name__ == "__main__":
     unittest.main()

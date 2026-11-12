@@ -1,29 +1,68 @@
 """
 TokenSafe Graph Engine: Dependency-Aware Graph Analysis & Skeletonization.
-Builds a zero-LLM deterministic code graph (AST-based) for Python, TypeScript, and Go.
+Builds a zero-LLM deterministic code graph for Python, TypeScript/JavaScript, Go,
+Rust, Java, C#, C/C++, PHP, Kotlin, and Swift.
+
+Uses the optional Tree-sitter backend when available (`src.treesitter_backend`)
+and falls back seamlessly to the Python standard library `ast` and `BraceLexer`
+state-machine parsers with zero extra required runtime dependencies.
+
 Powers:
-1. Graph-Guided Skeletonization (target + 1-hop full, 2-hop signature, 0-hop pruned).
-2. God Nodes Detection (architectural hubs via Degree Centrality).
+1. Graph-Guided Skeletonization (target + 1-hop full/signature, 0-hop isolated).
+2. God Nodes Detection (architectural hubs via import- & call-aware centrality).
 3. API Surface Map Generation (tokensafe-out/API_SURFACE.md).
-4. Subtree Cache Invalidation & Instant Retrieval via incremental mtime tracking.
+4. Incremental `(mtime, size)` scanning & optional persistent disk cache.
 """
 
-import os
 import ast
-import re
+import hashlib
 import json
+import os
+import re
 import stat
+import tempfile
 import time
 from typing import Dict, Set, List, Optional, Tuple, Any
+
+from src.paths import resolve_data_dir
 
 IGNORED_DIRS = {
     ".git", ".hg", ".svn", "node_modules", "dist", "build", "venv", ".venv",
     "__pycache__", ".idea", ".vscode", "data", "coverage", ".pytest_cache",
     "Library", "Applications", "Pictures", "Movies", "Music", "Downloads",
-    ".cache", ".npm", ".bun", ".rustup", ".cargo", ".local", ".system_generated"
+    ".cache", ".npm", ".bun", ".rustup", ".cargo", ".local", ".system_generated",
+    "target", "tokensafe-out",
 }
 
-SUPPORTED_EXTS = {".py", ".ts", ".js", ".tsx", ".jsx", ".go"}
+SUPPORTED_EXTS = {
+    ".py", ".ts", ".js", ".tsx", ".jsx", ".mjs", ".cjs",
+    ".go", ".rs", ".java", ".cs",
+    ".c", ".cpp", ".cc", ".cxx", ".h", ".hpp",
+    ".php", ".kt", ".kts", ".swift",
+}
+
+_SKIP_CALLS = {
+    "if", "else", "for", "while", "do", "switch", "case", "catch", "try",
+    "return", "throw", "yield", "await", "sizeof", "typeof", "instanceof",
+    "new", "delete", "import", "export", "require", "print", "len", "str",
+    "int", "float", "bool", "list", "dict", "set", "tuple", "range",
+    "div", "span", "button", "input", "label", "form", "svg", "path",
+    "true", "false", "null", "undefined", "None", "True", "False",
+}
+
+_CACHE_SCHEMA_VERSION = 2
+
+
+def _is_test_file(rel_path: str) -> bool:
+    norm = rel_path.replace("\\", "/").lower()
+    base = os.path.basename(norm)
+    parts = norm.split("/")
+    if any(p in ("test", "tests", "__tests__", "spec", "specs") for p in parts[:-1]):
+        return True
+    return (
+        base.startswith("test_")
+        or base.endswith(("_test.py", "_test.go", ".test.ts", ".test.tsx", ".test.js", ".test.jsx", ".spec.ts", ".spec.tsx", ".spec.js"))
+    )
 
 class CodeSymbol:
     """Represents a structural code entity (file, class, or function)."""
@@ -57,21 +96,124 @@ class CodeSymbol:
             "signature": self.signature
         }
 
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> "CodeSymbol":
+        return cls(
+            name=data.get("name", ""),
+            kind=data.get("kind", "function"),
+            file_path=data.get("file_path", ""),
+            line_start=int(data.get("line_start", 0)),
+            line_end=int(data.get("line_end", 0)),
+            signature=data.get("signature", ""),
+        )
+
+
 class CodeGraph:
     """
     Deterministic In-Memory Knowledge Graph of a software repository.
-    Nodes: File and Symbol identifiers.
-    Edges: Directed dependencies (CALLS, IMPORTS, CONTAINS).
+    Nodes: File (`file:...`), Module (`mod:...`), Symbol (`rel_path::qual_name`), Call (`call:...`).
+    Edges: Directed dependencies (`CALLS`, `IMPORTS`, `CONTAINS`, resolved `file -> file`).
     """
 
-    def __init__(self, root_dir: str = "."):
+    def __init__(self, root_dir: str = ".", use_disk_cache: bool = False):
         self.root_dir = os.path.abspath(root_dir)
+        self.use_disk_cache = use_disk_cache
         self.symbols: Dict[str, CodeSymbol] = {}
-        self.file_symbols: Dict[str, List[str]] = {}  # file_rel_path -> [symbol_keys]
-        self.edges: Dict[str, Set[str]] = {}          # caller/importer -> set(callees/imported)
-        self.rev_edges: Dict[str, Set[str]] = {}      # callee/imported -> set(callers/importers)
-        self.file_mtimes: Dict[str, float] = {}       # file_rel_path -> mtime
+        self.file_symbols: Dict[str, List[str]] = {}       # file_rel_path -> [symbol_keys]
+        self.edges: Dict[str, Set[str]] = {}               # caller/importer -> set(callees/imported)
+        self.rev_edges: Dict[str, Set[str]] = {}           # callee/imported -> set(callers/importers)
+        self.file_mtimes: Dict[str, float] = {}            # file_rel_path -> mtime
+        self.file_stats: Dict[str, Tuple[float, int]] = {} # file_rel_path -> (mtime, size)
+        self.file_imports: Dict[str, Set[str]] = {}        # file_rel_path -> raw imported modules
         self.last_scanned: float = 0.0
+        self.backend: str = self._detect_backend()
+
+        if self.use_disk_cache and os.environ.get("TOKENSAFE_GRAPH_DISK_CACHE", "1") != "0":
+            self._load_disk_cache()
+
+    @staticmethod
+    def _detect_backend() -> str:
+        try:
+            from src.treesitter_backend import TreeSitterBackend
+            if TreeSitterBackend.is_available():
+                return "treesitter"
+        except Exception:
+            pass
+        return "stdlib"
+
+    def _cache_path(self) -> str:
+        cache_dir = os.path.join(resolve_data_dir(), "graph_cache")
+        key = hashlib.md5(self.root_dir.encode("utf-8")).hexdigest()[:12]
+        return os.path.join(cache_dir, f"{key}.json")
+
+    def _load_disk_cache(self) -> bool:
+        path = self._cache_path()
+        if not os.path.exists(path):
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if (
+                data.get("version") != _CACHE_SCHEMA_VERSION
+                or data.get("root_dir") != self.root_dir
+                or data.get("backend") != self.backend
+            ):
+                return False
+
+            self.symbols = {k: CodeSymbol.from_dict(v) for k, v in data.get("symbols", {}).items()}
+            self.file_symbols = {k: list(v) for k, v in data.get("file_symbols", {}).items()}
+            self.edges = {k: set(v) for k, v in data.get("edges", {}).items()}
+            self.rev_edges = {k: set(v) for k, v in data.get("rev_edges", {}).items()}
+            self.file_stats = {
+                k: (float(v[0]), int(v[1]))
+                for k, v in data.get("file_stats", {}).items()
+                if isinstance(v, (list, tuple)) and len(v) == 2
+            }
+            self.file_mtimes = {k: v[0] for k, v in self.file_stats.items()}
+            self.file_imports = {k: set(v) for k, v in data.get("file_imports", {}).items()}
+            self.last_scanned = float(data.get("last_scanned", 0.0))
+            return True
+        except Exception:
+            self.symbols.clear()
+            self.file_symbols.clear()
+            self.edges.clear()
+            self.rev_edges.clear()
+            self.file_stats.clear()
+            self.file_mtimes.clear()
+            self.file_imports.clear()
+            return False
+
+    def _save_disk_cache(self) -> None:
+        if not self.use_disk_cache or os.environ.get("TOKENSAFE_GRAPH_DISK_CACHE", "1") == "0":
+            return
+        path = self._cache_path()
+        cache_dir = os.path.dirname(path)
+        try:
+            os.makedirs(cache_dir, exist_ok=True)
+            payload = {
+                "version": _CACHE_SCHEMA_VERSION,
+                "root_dir": self.root_dir,
+                "backend": self.backend,
+                "last_scanned": self.last_scanned,
+                "file_stats": {k: [v[0], v[1]] for k, v in self.file_stats.items()},
+                "file_symbols": self.file_symbols,
+                "file_imports": {k: sorted(v) for k, v in self.file_imports.items()},
+                "symbols": {k: v.to_dict() for k, v in self.symbols.items()},
+                "edges": {k: sorted(v) for k, v in self.edges.items()},
+                "rev_edges": {k: sorted(v) for k, v in self.rev_edges.items()},
+            }
+            fd, tmp_path = tempfile.mkstemp(prefix="graph_", suffix=".tmp", dir=cache_dir)
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as f:
+                    json.dump(payload, f)
+                os.replace(tmp_path, path)
+            except Exception:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+        except OSError:
+            pass
 
     def add_edge(self, source: str, target: str):
         if not source or not target or source == target:
@@ -84,14 +226,25 @@ class CodeGraph:
             self.rev_edges[target] = set()
         self.rev_edges[target].add(source)
 
+    def _remove_edge(self, source: str, target: str):
+        if source in self.edges:
+            self.edges[source].discard(target)
+        if target in self.rev_edges:
+            self.rev_edges[target].discard(source)
+
     def scan(self, force: bool = False) -> int:
         """
         Fast incremental scan of the workspace.
-        Parses modified files only; returns number of files re-indexed.
+        Parses modified files only (checked via `(mtime, size)`); returns number of files re-indexed.
         """
         system_roots = {"/", "/Users", "/home", "/root", os.path.expanduser("~")}
         if self.root_dir in system_roots:
             return 0
+
+        current_backend = self._detect_backend()
+        if current_backend != self.backend:
+            self.backend = current_backend
+            force = True
 
         reindexed = 0
         current_files = set()
@@ -106,27 +259,47 @@ class CodeGraph:
                     current_files.add(rel_path)
 
                     try:
-                        mtime = os.path.getmtime(full_path)
+                        st = os.stat(full_path)
+                        if not stat.S_ISREG(st.st_mode) or st.st_size > 2 * 1024 * 1024:
+                            continue
+                        sig = (st.st_mtime, st.st_size)
                     except OSError:
                         continue
 
-                    if force or rel_path not in self.file_mtimes or self.file_mtimes[rel_path] < mtime:
+                    prev_sig = self.file_stats.get(rel_path)
+                    prev_mtime = self.file_mtimes.get(rel_path)
+                    changed = (
+                        force
+                        or prev_sig is None
+                        or prev_sig != sig
+                        or prev_mtime is None
+                        or prev_mtime < st.st_mtime
+                    )
+                    if changed:
                         self._index_file(full_path, rel_path)
-                        self.file_mtimes[rel_path] = mtime
+                        self.file_stats[rel_path] = sig
+                        self.file_mtimes[rel_path] = st.st_mtime
                         reindexed += 1
 
         # Purge removed files
-        deleted = set(self.file_mtimes.keys()) - current_files
+        deleted = (set(self.file_stats.keys()) | set(self.file_mtimes.keys())) - current_files
         for del_path in deleted:
             self._purge_file(del_path)
+            self.file_stats.pop(del_path, None)
             self.file_mtimes.pop(del_path, None)
 
+        if reindexed > 0 or deleted or force:
+            self._resolve_local_imports()
+
         self.last_scanned = time.time()
+        if reindexed > 0 or deleted:
+            self._save_disk_cache()
         return reindexed
 
     def _purge_file(self, rel_path: str):
-        """Removes symbols and edges belonging to a file."""
+        """Removes symbols, imports, and edges belonging to a file."""
         sym_keys = self.file_symbols.pop(rel_path, [])
+        self.file_imports.pop(rel_path, None)
         for k in sym_keys:
             self.symbols.pop(k, None)
             targets = self.edges.pop(k, set())
@@ -140,11 +313,15 @@ class CodeGraph:
 
         # File-level node
         file_node = f"file:{rel_path}"
-        self.edges.pop(file_node, None)
-        self.rev_edges.pop(file_node, None)
+        for t in self.edges.pop(file_node, set()):
+            if t in self.rev_edges:
+                self.rev_edges[t].discard(file_node)
+        for s in self.rev_edges.pop(file_node, set()):
+            if s in self.edges:
+                self.edges[s].discard(file_node)
 
     def _index_file(self, full_path: str, rel_path: str):
-        """Indexes a single code file using standard AST or regex tokenizers."""
+        """Indexes a single code file using Tree-sitter (if available) or stdlib parsers."""
         self._purge_file(rel_path)
         try:
             st = os.stat(full_path)
@@ -157,14 +334,57 @@ class CodeGraph:
 
         file_node = f"file:{rel_path}"
         self.file_symbols[rel_path] = []
+        self.file_imports[rel_path] = set()
 
         _, ext = os.path.splitext(full_path)
         ext = ext.lower()
 
+        if self._try_index_treesitter(content, rel_path, file_node, ext):
+            return
+
         if ext == ".py":
             self._parse_python(content, rel_path, file_node)
-        elif ext in (".ts", ".js", ".tsx", ".jsx", ".go"):
+        elif ext in SUPPORTED_EXTS:
             self._parse_braces(content, rel_path, file_node, ext)
+
+    def _register_symbol(self, rel_path: str, file_node: str, symbol: CodeSymbol, sym_key: str):
+        self.symbols[sym_key] = symbol
+        if sym_key not in self.file_symbols[rel_path]:
+            self.file_symbols[rel_path].append(sym_key)
+        self.add_edge(file_node, sym_key)
+
+    def _try_index_treesitter(self, code: str, rel_path: str, file_node: str, ext: str) -> bool:
+        if self.backend != "treesitter":
+            return False
+        try:
+            from src.treesitter_backend import TreeSitterBackend
+            data = TreeSitterBackend.extract_graph_data(code, ext, rel_path)
+        except Exception:
+            return False
+        if data is None:
+            return False
+
+        for mod in data.get("imports", []):
+            self.file_imports[rel_path].add(mod)
+            self.add_edge(file_node, f"mod:{mod}")
+        for sym in data.get("imported_symbols", []):
+            self.add_edge(file_node, f"sym:{sym}")
+
+        for item in data.get("symbols", []):
+            symbol = CodeSymbol(
+                name=item["name"],
+                kind=item["kind"],
+                file_path=rel_path,
+                line_start=item["line_start"],
+                line_end=item["line_end"],
+                signature=item["signature"],
+            )
+            self._register_symbol(rel_path, file_node, symbol, item["sym_key"])
+
+        for caller_key, callee_name in data.get("calls", []):
+            self.add_edge(caller_key, f"call:{callee_name}")
+
+        return True
 
     def _parse_python(self, code: str, rel_path: str, file_node: str):
         try:
@@ -174,153 +394,432 @@ class CodeGraph:
 
         lines = code.splitlines()
 
-        for node in ast.walk(tree):
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                # Record imports
-                if isinstance(node, ast.Import):
-                    for alias in node.names:
+        def walk_py(node: ast.AST, class_name: Optional[str] = None, fn_key: Optional[str] = None):
+            for child in ast.iter_child_nodes(node):
+                if isinstance(child, ast.Import):
+                    for alias in child.names:
+                        self.file_imports[rel_path].add(alias.name)
                         self.add_edge(file_node, f"mod:{alias.name}")
-                elif isinstance(node, ast.ImportFrom) and node.module:
-                    self.add_edge(file_node, f"mod:{node.module}")
-                    for alias in node.names:
-                        self.add_edge(file_node, f"sym:{alias.name}")
-
-            elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                kind = "class" if isinstance(node, ast.ClassDef) else "function"
-                start = getattr(node, "lineno", 1)
-                end = getattr(node, "end_lineno", start)
-                sym_key = f"{rel_path}::{node.name}"
-                sig = lines[start - 1].strip() if 0 < start <= len(lines) else node.name
-
-                symbol = CodeSymbol(
-                    name=node.name,
-                    kind=kind,
-                    file_path=rel_path,
-                    line_start=start,
-                    line_end=end,
-                    signature=sig
-                )
-                self.symbols[sym_key] = symbol
-                self.file_symbols[rel_path].append(sym_key)
-                self.add_edge(file_node, sym_key)
-
-                # Scan function calls inside body
-                for sub in ast.walk(node):
-                    if isinstance(sub, ast.Call):
+                elif isinstance(child, ast.ImportFrom):
+                    mod_prefix = "." * (child.level or 0)
+                    mod_name = f"{mod_prefix}{child.module or ''}"
+                    if mod_name:
+                        self.file_imports[rel_path].add(mod_name)
+                        self.add_edge(file_node, f"mod:{mod_name}")
+                    for alias in child.names:
+                        if alias.name != "*":
+                            self.add_edge(file_node, f"sym:{alias.name}")
+                elif isinstance(child, ast.ClassDef):
+                    start = getattr(child, "lineno", 1)
+                    end = getattr(child, "end_lineno", start)
+                    qual = f"{class_name}::{child.name}" if class_name else child.name
+                    sym_key = f"{rel_path}::{qual}"
+                    sig = lines[start - 1].strip() if 0 < start <= len(lines) else child.name
+                    symbol = CodeSymbol(
+                        name=child.name,
+                        kind="class",
+                        file_path=rel_path,
+                        line_start=start,
+                        line_end=end,
+                        signature=sig,
+                    )
+                    self._register_symbol(rel_path, file_node, symbol, sym_key)
+                    walk_py(child, class_name=qual, fn_key=None)
+                elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    start = getattr(child, "lineno", 1)
+                    end = getattr(child, "end_lineno", start)
+                    qual = f"{class_name}::{child.name}" if class_name else child.name
+                    sym_key = f"{rel_path}::{qual}"
+                    sig = lines[start - 1].strip() if 0 < start <= len(lines) else child.name
+                    symbol = CodeSymbol(
+                        name=child.name,
+                        kind="function",
+                        file_path=rel_path,
+                        line_start=start,
+                        line_end=end,
+                        signature=sig,
+                    )
+                    self._register_symbol(rel_path, file_node, symbol, sym_key)
+                    walk_py(child, class_name=class_name, fn_key=sym_key)
+                else:
+                    if isinstance(child, ast.Call) and fn_key:
                         callee_name = None
-                        if isinstance(sub.func, ast.Name):
-                            callee_name = sub.func.id
-                        elif isinstance(sub.func, ast.Attribute):
-                            callee_name = sub.func.attr
-                        if callee_name:
-                            self.add_edge(sym_key, f"call:{callee_name}")
+                        if isinstance(child.func, ast.Name):
+                            callee_name = child.func.id
+                        elif isinstance(child.func, ast.Attribute):
+                            callee_name = child.func.attr
+                        if callee_name and callee_name not in _SKIP_CALLS:
+                            self.add_edge(fn_key, f"call:{callee_name}")
+                    walk_py(child, class_name=class_name, fn_key=fn_key)
+
+        walk_py(tree)
 
     def _parse_braces(self, code: str, rel_path: str, file_node: str, ext: str):
+        from src.skeletonizer import BraceLexer, Skeletonizer
+
         lines = code.splitlines()
+        count_lines = Skeletonizer.blank_template_literals(lines)
+        lexer = BraceLexer()
 
-        # Imports
-        import_pattern = re.compile(r"""(?:import\s+.*?\s+from\s+['"](.*?)['"]|require\(['"](.*?)['"]\))""")
-        for match in import_pattern.finditer(code):
-            target_mod = match.group(1) or match.group(2)
-            if target_mod:
-                self.add_edge(file_node, f"mod:{target_mod}")
+        # Strip comments only (keep string literals intact for import path extraction)
+        no_block_comments = re.sub(r"/\*.*?\*/", "", code, flags=re.DOTALL)
+        cleaned_text = re.sub(r"//.*$", "", no_block_comments, flags=re.MULTILINE)
+        if ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"):
+            imp_re = re.compile(
+                r"""(?:(?:import|export)\s+(?:.*?\s+from\s+)?['"]([^'"]+)['"]|require\(\s*['"]([^'"]+)['"]\s*\))"""
+            )
+            for m in imp_re.finditer(cleaned_text):
+                mod = m.group(1) or m.group(2)
+                if mod:
+                    self.file_imports[rel_path].add(mod)
+                    self.add_edge(file_node, f"mod:{mod}")
+        elif ext == ".go":
+            for m in re.finditer(r'^\s*import\s+(?:[A-Za-z_.]+\s+)?"([^"]+)"', cleaned_text, re.MULTILINE):
+                self.file_imports[rel_path].add(m.group(1))
+                self.add_edge(file_node, f"mod:{m.group(1)}")
+            for blk in re.finditer(r'import\s*\((.*?)\)', cleaned_text, re.DOTALL):
+                for m in re.finditer(r'"([^"]+)"', blk.group(1)):
+                    self.file_imports[rel_path].add(m.group(1))
+                    self.add_edge(file_node, f"mod:{m.group(1)}")
+        elif ext in (".c", ".h", ".cpp", ".cc", ".cxx", ".hpp"):
+            for m in re.finditer(r'^\s*#include\s+[<"]([^>"]+)[>"]', cleaned_text, re.MULTILINE):
+                self.file_imports[rel_path].add(m.group(1))
+                self.add_edge(file_node, f"mod:{m.group(1)}")
+        else:
+            for m in re.finditer(r'^\s*(?:pub\s+)?(?:use|import|using)\s+([^;\n]+)', cleaned_text, re.MULTILINE):
+                mod = m.group(1).strip().rstrip(";")
+                if mod:
+                    self.file_imports[rel_path].add(mod)
+                    self.add_edge(file_node, f"mod:{mod}")
 
-        # Functions & Methods
-        fn_pattern = re.compile(
-            r"""(?:export\s+(?:default\s+)?)?(?:async\s+)?(?:function\s*\*?\s*([a-zA-Z0-9_$]+)|(?:class|interface|struct|impl|trait)\s+([a-zA-Z0-9_$]+)|func\s+(?:\(.*?\)\s+)?([a-zA-Z0-9_]+)|(?:const|let|var)\s+([a-zA-Z0-9_$]+)(?:\s*:\s*[^=]+)?\s*=\s*(?:async\s*)?(?:React\.(?:memo|forwardRef)\s*\()?(?:useCallback\s*\()?\s*\(?)"""
+        container_re = re.compile(
+            r'^(?:export\s+(?:default\s+)?)?(?:pub(?:\([^)]*\))?\s+|public\s+|private\s+|protected\s+|internal\s+|abstract\s+|final\s+|sealed\s+|open\s+|data\s+)*'
+            r'(?:class|interface|struct|impl(?:\s+[A-Za-z0-9_<>,\s]+?\s+for)?|trait|enum|record|protocol|extension|namespace)\s+([A-Za-z0-9_]+)'
         )
-        call_pattern = re.compile(r"""(?:<|\b)([a-zA-Z0-9_$]{3,})\s*(?:\(|>|(?:\s+[a-zA-Z0-9_$-]+))""")
-        current_sym = None
+        go_struct_re = re.compile(r'^type\s+([A-Za-z0-9_]+)\s+(?:struct|interface)\b')
+        ts_method_re = re.compile(
+            r'^(?:(?:public|private|protected|static|readonly|async|override|get|set)\s+)*([A-Za-z_$][A-Za-z0-9_$]*)\s*(?:<[^>]+>)?\s*\([^)]*\)\s*(?::\s*[^{;]+)?\{'
+        )
+        call_re = re.compile(r'\b([a-zA-Z_$][a-zA-Z0-9_$]{1,})\s*\(')
 
-        for idx, line in enumerate(lines, 1):
-            match = fn_pattern.search(line)
-            if match:
-                name = match.group(1) or match.group(2) or match.group(3) or match.group(4)
-                if name and name not in {"if", "for", "while", "switch", "catch", "return", "import", "export"}:
-                    kind = "class" if any(w in line for w in ("class", "interface", "struct", "impl")) else "function"
-                    sym_key = f"{rel_path}::{name}"
-                    symbol = CodeSymbol(
-                        name=name,
-                        kind=kind,
-                        file_path=rel_path,
-                        line_start=idx,
-                        line_end=idx,
-                        signature=line.strip()
-                    )
-                    self.symbols[sym_key] = symbol
-                    self.file_symbols[rel_path].append(sym_key)
-                    self.add_edge(file_node, sym_key)
-                    current_sym = sym_key
-            elif current_sym:
-                for cm in call_pattern.finditer(line):
+        depth = 0
+        sym_stack: List[Tuple[str, int, str]] = []
+        pending_header: Optional[Tuple[str, str, int, str]] = None
+
+        for idx, (raw_line, count_src) in enumerate(zip(lines, count_lines), 1):
+            clean = lexer.clean_line(count_src).strip()
+            open_b, close_b = lexer.count_braces(count_src)
+
+            matched_name: Optional[str] = None
+            matched_kind: Optional[str] = None
+            matched_sig = raw_line.strip()
+            matched_start = idx
+
+            if clean:
+                cm = container_re.match(clean) or (go_struct_re.match(clean) if ext == ".go" else None)
+                if cm:
+                    matched_name = cm.group(1)
+                    matched_kind = "class"
+                else:
+                    fn_info = Skeletonizer._extract_fn(clean)
+                    if fn_info and fn_info[0] != "anonymous":
+                        matched_name, raw_kind = fn_info
+                        matched_kind = "function"
+                        if raw_kind in ("arrow_multiline", "method_multiline", "fn_decl", "go_func", "rust_fn") and "{" not in clean:
+                            if not clean.endswith(";"):
+                                pending_header = (matched_name, matched_kind, idx, matched_sig)
+                            matched_name = None
+                    elif ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs") and any(k == "class" for _, _, k in sym_stack):
+                        mm = ts_method_re.match(clean)
+                        if mm and mm.group(1) not in _SKIP_CALLS:
+                            matched_name = mm.group(1)
+                            matched_kind = "function"
+
+            if pending_header and not matched_name:
+                if "{" in clean:
+                    matched_name, matched_kind, matched_start, matched_sig = pending_header
+                    pending_header = None
+                elif ";" in clean:
+                    pending_header = None
+
+            if matched_name and matched_kind:
+                class_ctx = [sk.split("::", 1)[-1] for sk, _, k in sym_stack if k == "class"]
+                qual = f"{class_ctx[-1]}::{matched_name}" if (class_ctx and matched_kind == "function") else matched_name
+                sym_key = f"{rel_path}::{qual}"
+                symbol = CodeSymbol(
+                    name=matched_name,
+                    kind=matched_kind,
+                    file_path=rel_path,
+                    line_start=matched_start,
+                    line_end=idx,
+                    signature=matched_sig,
+                )
+                self._register_symbol(rel_path, file_node, symbol, sym_key)
+                if open_b > 0:
+                    sym_stack.append((sym_key, depth + 1, matched_kind))
+
+            active_fn = next((sk for sk, _, k in reversed(sym_stack) if k == "function"), None)
+            if active_fn and clean:
+                for cm in call_re.finditer(clean):
                     callee = cm.group(1)
-                    if callee not in {"div", "span", "button", "input", "label", "form", "svg", "path", "true", "false", "null", "undefined"}:
-                        self.add_edge(current_sym, f"call:{callee}")
+                    if callee != matched_name and callee not in _SKIP_CALLS:
+                        self.add_edge(active_fn, f"call:{callee}")
+
+            depth += open_b - close_b
+            while sym_stack and depth < sym_stack[-1][1]:
+                finished_key, _, _ = sym_stack.pop()
+                if finished_key in self.symbols:
+                    self.symbols[finished_key].line_end = idx
+
+    def _resolve_local_imports(self) -> None:
+        """Resolves raw `file_imports` strings to real `file:<rel_path>` edges."""
+        indexed_files = set(self.file_symbols.keys())
+        if not indexed_files:
+            return
+
+        for rel_path in indexed_files:
+            src_node = f"file:{rel_path}"
+            existing = [t for t in self.edges.get(src_node, set()) if t.startswith("file:")]
+            for t in existing:
+                self._remove_edge(src_node, t)
+
+        dir_to_files: Dict[str, List[str]] = {}
+        for fp in indexed_files:
+            d = os.path.dirname(fp)
+            dir_to_files.setdefault(d, []).append(fp)
+
+        for rel_path, mods in self.file_imports.items():
+            src_node = f"file:{rel_path}"
+            src_dir = os.path.dirname(rel_path)
+            ext = os.path.splitext(rel_path)[1].lower()
+
+            for mod in mods:
+                for target_rel in self._resolve_single_import(mod, src_dir, ext, indexed_files, dir_to_files):
+                    if target_rel != rel_path:
+                        self.add_edge(src_node, f"file:{target_rel}")
+
+    @staticmethod
+    def _resolve_single_import(
+        mod: str,
+        src_dir: str,
+        ext: str,
+        indexed_files: Set[str],
+        dir_to_files: Dict[str, List[str]],
+    ) -> List[str]:
+        if not mod:
+            return []
+
+        if ext == ".py":
+            if mod.startswith("."):
+                dots = len(mod) - len(mod.lstrip("."))
+                rest = mod[dots:].replace(".", "/")
+                base_dir = src_dir
+                for _ in range(dots - 1):
+                    base_dir = os.path.dirname(base_dir)
+                prefix = os.path.normpath(os.path.join(base_dir, rest)).replace("\\", "/") if rest else base_dir
+            else:
+                prefix = mod.replace(".", "/")
+            prefix = prefix.lstrip("./")
+            for cand in (f"{prefix}.py", f"{prefix}/__init__.py"):
+                if cand in indexed_files:
+                    return [cand]
+            return []
+
+        if ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs"):
+            if not mod.startswith("."):
+                return []
+            base = os.path.normpath(os.path.join(src_dir, mod)).replace("\\", "/").lstrip("./")
+            for cand in (
+                base,
+                f"{base}.ts", f"{base}.tsx", f"{base}.js", f"{base}.jsx", f"{base}.mjs", f"{base}.cjs",
+                f"{base}/index.ts", f"{base}/index.tsx", f"{base}/index.js", f"{base}/index.mjs",
+            ):
+                if cand in indexed_files:
+                    return [cand]
+            return []
+
+        if ext == ".go":
+            mod_clean = mod.strip("/")
+            for d, files in dir_to_files.items():
+                if d and (mod_clean == d or mod_clean.endswith(f"/{d}")):
+                    return [f for f in files if f.endswith(".go")]
+            return []
+
+        if ext in (".c", ".h", ".cpp", ".cc", ".cxx", ".hpp"):
+            cand = os.path.normpath(os.path.join(src_dir, mod)).replace("\\", "/").lstrip("./")
+            return [cand] if cand in indexed_files else []
+
+        if ext == ".rs" and mod.startswith(("crate::", "super::", "self::")):
+            parts = mod.split("::")[1:]
+            if parts:
+                rel = "/".join(parts)
+                for cand in (f"{rel}.rs", f"{rel}/mod.rs", f"src/{rel}.rs", f"src/{rel}/mod.rs"):
+                    if cand in indexed_files:
+                        return [cand]
+            return []
+
+        return []
 
     # -------------------------------------------------------------
-    # 1. God Nodes Analysis (Degree Centrality)
+    # 1. God Nodes Analysis (Import & Call Centrality)
     # -------------------------------------------------------------
     def get_god_nodes(self, top_n: int = 5) -> List[Dict[str, Any]]:
         """
-        Calculates Degree Centrality across files to locate architectural hubs.
-        God Nodes = files with highest incoming (depended upon) and outgoing connections.
+        Calculates architectural hub centrality across files.
+        Prioritizes resolved file-to-file imports and import-verified symbol calls,
+        and downweights test files when production files are present.
         """
+        has_prod_files = any(not _is_test_file(p) for p in self.file_symbols.keys())
+        has_resolved_imports = any(
+            t.startswith("file:")
+            for src, targets in self.edges.items()
+            if src.startswith("file:")
+            for t in targets
+        )
+
         scores: Dict[str, Dict[str, Any]] = {}
 
         for rel_path in self.file_symbols.keys():
             file_node = f"file:{rel_path}"
-            # Outgoing: What this file imports or contains
             out_degree = len(self.edges.get(file_node, set()))
-            # Incoming: Who imports or calls this file or its symbols
-            in_degree = len(self.rev_edges.get(file_node, set()))
 
-            # Aggregate symbol connections
+            importing_files = {
+                s[5:] for s in self.rev_edges.get(file_node, set()) if s.startswith("file:")
+            }
+            in_degree = len(importing_files)
+
             for sym_key in self.file_symbols.get(rel_path, []):
-                sym_name = sym_key.split("::")[-1]
-                call_ref = f"call:{sym_name}"
-                in_degree += len(self.rev_edges.get(call_ref, set()))
+                sym = self.symbols.get(sym_key)
+                sym_name = sym.name if sym else sym_key.split("::")[-1].split(".")[-1]
+                for caller_key in self.rev_edges.get(f"call:{sym_name}", set()):
+                    caller_file = caller_key.split("::", 1)[0]
+                    if caller_file == rel_path:
+                        continue
+                    if not has_resolved_imports or caller_file in importing_files:
+                        in_degree += 1
 
-            total_centrality = in_degree * 2 + out_degree  # Incoming imports weighted heavier
+            raw_centrality = in_degree * 2 + out_degree
+            rank_score = raw_centrality * 0.2 if (has_prod_files and _is_test_file(rel_path)) else float(raw_centrality)
             scores[rel_path] = {
                 "file": rel_path,
-                "centrality": total_centrality,
+                "centrality": raw_centrality,
                 "dependents": in_degree,
                 "dependencies": out_degree,
-                "symbols_count": len(self.file_symbols.get(rel_path, []))
+                "symbols_count": len(self.file_symbols.get(rel_path, [])),
+                "_rank": rank_score,
             }
 
-        ranked = sorted(scores.values(), key=lambda x: x["centrality"], reverse=True)
-        return ranked[:top_n]
+        ranked = sorted(scores.values(), key=lambda x: (x["_rank"], x["centrality"]), reverse=True)
+        result = []
+        for item in ranked[:top_n]:
+            item.pop("_rank", None)
+            result.append(item)
+        return result
 
     # -------------------------------------------------------------
     # 2. Neighborhood & Graph-Guided Skeletonization
     # -------------------------------------------------------------
-    def get_neighborhood(self, target_symbol: str) -> Dict[str, Set[str]]:
-        """
-        Returns 0-hop (target), 1-hop (callees/callers), and 2-hop related symbols.
-        """
-        target_keys = [k for k in self.symbols if k.endswith(f"::{target_symbol}") or k == target_symbol]
-        one_hop = set()
+    def _match_target_keys(self, target_symbol: str, target_file: Optional[str] = None) -> List[str]:
+        if target_symbol in self.symbols:
+            return [target_symbol]
 
-        for tk in target_keys:
-            # Direct callees
+        norm_target = target_symbol.replace(".", "::")
+        candidates = []
+        for k, sym in self.symbols.items():
+            if sym.name == target_symbol or k.endswith(f"::{target_symbol}") or k.endswith(f"::{norm_target}"):
+                candidates.append(k)
+
+        if target_file:
+            in_file = [k for k in candidates if k.startswith(f"{target_file}::")]
+            if in_file:
+                return in_file
+        return candidates
+
+    def _resolve_callee_keys(self, callee_name: str, caller_file: str) -> List[str]:
+        imported_files = {
+            t[5:] for t in self.edges.get(f"file:{caller_file}", set()) if t.startswith("file:")
+        }
+        same_file = []
+        imported = []
+        others = []
+
+        for k, sym in self.symbols.items():
+            if sym.name == callee_name or k.endswith(f"::{callee_name}"):
+                if sym.file_path == caller_file:
+                    same_file.append(k)
+                elif sym.file_path in imported_files:
+                    imported.append(k)
+                else:
+                    others.append(k)
+
+        if same_file or imported:
+            return same_file + imported
+        return others if len(others) <= 3 else []
+
+    def get_neighborhood(
+        self,
+        target_symbol: str,
+        target_file: Optional[str] = None,
+        include_two_hop: bool = False,
+    ) -> Dict[str, Set[str]]:
+        """
+        Returns 0-hop (`target`), 1-hop (`one_hop`), and optionally 2-hop (`two_hop`) related symbols.
+        Prioritizes same-file and imported-file edges to eliminate bare-name collisions.
+        """
+        target_keys = self._match_target_keys(target_symbol, target_file=target_file)
+        one_hop: Set[str] = set()
+
+        def _expand_one(tk: str) -> Set[str]:
+            found: Set[str] = set()
+            sym = self.symbols.get(tk)
+            caller_file = sym.file_path if sym else tk.split("::", 1)[0]
+            short_name = sym.name if sym else tk.split("::")[-1].split(".")[-1]
+
             for callee in self.edges.get(tk, set()):
                 if callee.startswith("call:"):
-                    name = callee[5:]
-                    for k in self.symbols:
-                        if k.endswith(f"::{name}"):
-                            one_hop.add(k)
+                    found.update(self._resolve_callee_keys(callee[5:], caller_file))
                 elif callee in self.symbols:
-                    one_hop.add(callee)
-            # Direct callers
-            for caller in self.rev_edges.get(f"call:{target_symbol}", set()):
-                if caller in self.symbols:
-                    one_hop.add(caller)
+                    found.add(callee)
 
-        return {
+            importing_files = {
+                s[5:] for s in self.rev_edges.get(f"file:{caller_file}", set()) if s.startswith("file:")
+            }
+            scoped_callers = []
+            fallback_callers = []
+            for caller in self.rev_edges.get(f"call:{short_name}", set()):
+                if caller not in self.symbols or caller == tk:
+                    continue
+                cf = self.symbols[caller].file_path
+                if cf == caller_file or cf in importing_files:
+                    scoped_callers.append(caller)
+                else:
+                    fallback_callers.append(caller)
+            if scoped_callers:
+                found.update(scoped_callers)
+            elif len(fallback_callers) <= 3:
+                found.update(fallback_callers)
+
+            found.discard(tk)
+            return found
+
+        for tk in target_keys:
+            one_hop.update(_expand_one(tk))
+        one_hop -= set(target_keys)
+
+        result: Dict[str, Set[str]] = {
             "target": set(target_keys),
-            "one_hop": one_hop
+            "one_hop": one_hop,
         }
+
+        if include_two_hop:
+            two_hop: Set[str] = set()
+            for ok in one_hop:
+                two_hop.update(_expand_one(ok))
+            two_hop -= set(target_keys)
+            two_hop -= one_hop
+            result["two_hop"] = two_hop
+
+        return result
 
     def graph_guided_skeletonize(
         self,
@@ -353,18 +852,27 @@ class CodeGraph:
         if not target_symbol:
             return Skeletonizer.skeletonize_code(code, ext, collapse_imports=collapse_imports)
 
-        keep_full_names = {target_symbol}
+        try:
+            target_rel = os.path.relpath(os.path.abspath(full_path), self.root_dir).replace("\\", "/")
+        except ValueError:
+            target_rel = ""
+
+        keep_full_names: Set[str] = {target_symbol}
+        neighborhood = self.get_neighborhood(target_symbol, target_file=target_rel or None)
+        for tk in neighborhood.get("target", set()):
+            qual = tk.split("::", 1)[-1]
+            keep_full_names.add(qual)
+            keep_full_names.add(qual.replace("::", "."))
+            sym = self.symbols.get(tk)
+            if sym:
+                keep_full_names.add(sym.name)
+
         external_dep_lines: List[str] = []
         mode = (dep_mode or "full").strip().lower()
 
         if include_deps:
-            neighborhood = self.get_neighborhood(target_symbol)
             one_hop = sorted(neighborhood.get("one_hop", set()))
             if mode == "signature":
-                try:
-                    target_rel = os.path.relpath(os.path.abspath(full_path), self.root_dir).replace("\\", "/")
-                except ValueError:
-                    target_rel = ""
                 comment_prefix = "#" if ext == ".py" else "//"
                 for k in one_hop:
                     sym = self.symbols.get(k)
@@ -374,7 +882,12 @@ class CodeGraph:
                         )
             else:
                 for k in one_hop:
-                    keep_full_names.add(k.split("::")[-1])
+                    qual = k.split("::", 1)[-1]
+                    keep_full_names.add(qual)
+                    keep_full_names.add(qual.replace("::", "."))
+                    sym = self.symbols.get(k)
+                    if sym:
+                        keep_full_names.add(sym.name)
 
         skel = Skeletonizer.skeletonize_code(
             code,
@@ -429,10 +942,10 @@ class CodeGraph:
 
         if output_path is None:
             out_dir = os.path.join(self.root_dir, "tokensafe-out")
-            os.makedirs(out_dir, exist_ok=True)
             output_path = os.path.join(out_dir, "API_SURFACE.md")
 
         try:
+            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
             with open(output_path, "w", encoding="utf-8") as f:
                 f.write(output_content)
         except OSError:
@@ -479,7 +992,7 @@ class GraphEngine:
         # smart_read_file(symbol=...) call. 60s keeps graphs fresh without the churn.
         rescan_ttl = float(os.environ.get("TOKENSAFE_GRAPH_TTL", "60.0"))
         if root_abs not in cls._instances:
-            graph = CodeGraph(root_abs)
+            graph = CodeGraph(root_abs, use_disk_cache=True)
             graph.scan()
             cls._instances[root_abs] = graph
         else:

@@ -27,7 +27,7 @@ The deterministic local AST state machine folds non-target function bodies in **
 | **PHP, Kotlin, Swift** | `.php`, `.kt`, `.kts`, `.swift` | Classes, `function`, `fun`, `func` declarations with visibility modifiers | Function bodies folded into `{ /* ... */ }` |
 | **CSS, SCSS, LESS, Tailwind** | `.css`, `.scss`, `.sass`, `.less` | **Design tokens (`:root`, `@theme`, CSS variables, `$var`) preserved in full**, container queries (`@media`, `@supports`, `@container`, `@layer`) kept open | Component selectors, `@keyframes`, and mixins folded unless matching `target_symbol` |
 
-The separate **Graph Engine** (`src/graph_engine.py`) indexes `.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.go` for architecture-wide queries (God Nodes, API surface maps). The Skeletonizer covers the full matrix above; the Graph Engine covers the subset.
+The **Graph Engine** (`src/graph_engine.py`) indexes all code extensions above (`.py`, `.ts`, `.tsx`, `.js`, `.jsx`, `.mjs`, `.cjs`, `.go`, `.rs`, `.java`, `.cs`, `.c`, `.cpp`, `.cc`, `.cxx`, `.h`, `.hpp`, `.php`, `.kt`, `.kts`, `.swift`) for architecture-wide queries (God Nodes, API surface maps, 1-hop/2-hop neighborhood slicing). When `tree-sitter` language packages are installed (`pip install tokensafe[treesitter]`), both `GraphEngine` and `Skeletonizer` automatically use the optional CST backend (`src/treesitter_backend.py`) and fall back to the zero-dependency stdlib AST/`BraceLexer` engine otherwise (or when `TOKENSAFE_TREESITTER=0`).
 
 ### Engine Guarantees
 

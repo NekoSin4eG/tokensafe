@@ -292,8 +292,7 @@ def main():
     elif command in ("graph", "nodes"):
         from src.graph_engine import GraphEngine
         target_dir = args[1] if len(args) > 1 else os.getcwd()
-        graph = GraphEngine(target_dir)
-        graph.index_workspace()
+        graph = GraphEngine.get_instance(target_dir)
         print(f"\n🔍 TokenSafe Graph Engine — Knowledge Graph & Centrality Analysis")
         print(f"   Indexed: {len(graph.file_symbols)} code files, {len(graph.symbols)} symbols\n")
         god_nodes = graph.get_god_nodes(top_n=7)
@@ -306,9 +305,8 @@ def main():
     elif command in ("map", "surface"):
         from src.graph_engine import GraphEngine
         target_dir = args[1] if len(args) > 1 else os.getcwd()
-        graph = GraphEngine(target_dir)
-        graph.index_workspace()
-        out_file = os.path.join(target_dir, "tokensafe-out", "API_SURFACE.md")
+        graph = GraphEngine.get_instance(target_dir)
+        out_file = os.path.join(os.path.abspath(target_dir), "tokensafe-out", "API_SURFACE.md")
         graph.generate_api_surface(out_file)
         print(f"\n✓ Generated API Surface Map: {out_file} ({os.path.getsize(out_file):,} bytes)")
         print(f"  AI agents can read this file in ~1.5k tokens instead of reading the entire repo.\n")
@@ -318,10 +316,9 @@ def main():
         if len(args) < 2:
             print("Usage: tokensafe skeleton <file_path> [target_symbol]")
             sys.exit(1)
-        file_path = args[1]
+        file_path = os.path.abspath(args[1])
         target_symbol = args[2] if len(args) > 2 else None
-        target_dir = os.path.dirname(os.path.abspath(file_path)) or os.getcwd()
-        graph = GraphEngine(target_dir)
+        graph, _ = GraphEngine.for_file(file_path)
         res = graph.graph_guided_skeletonize(file_path, target_symbol)
         print(res)
 

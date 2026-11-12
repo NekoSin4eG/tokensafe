@@ -117,15 +117,21 @@ class ToolSlicer:
                 # Single pass over the file for ALL candidates (previously O(words x lines)
                 # regex scans per read_file hook call on large files).
                 unique_candidates = list(dict.fromkeys(candidates))
+                cand_alt = "|".join(re.escape(c) for c in unique_candidates)
                 combined = re.compile(
-                    r'\b(?:def|function|class|const|let|var|type|interface|func|fn|impl|struct|enum|trait)\s+('
-                    + "|".join(re.escape(c) for c in unique_candidates) + r')\b'
+                    r'(?:\b(?:def|function|fun|class|const|let|var|type|interface|func|fn|impl|struct|enum|trait|record|namespace)\s+('
+                    + cand_alt
+                    + r')\b|^\s*(?:(?:public|private|protected|internal|static|final|async|override|virtual|suspend|mutating)\s+)+[\w<>\[\],.?*&:]+\s+('
+                    + cand_alt
+                    + r')\s*(?:<[^>]+>)?\s*\()'
                 )
                 first_hit: Dict[str, int] = {}
                 for idx, line in enumerate(lines, 1):
                     m = combined.search(line)
-                    if m and m.group(1) not in first_hit:
-                        first_hit[m.group(1)] = idx
+                    if m:
+                        hit = m.group(1) or m.group(2)
+                        if hit and hit not in first_hit:
+                            first_hit[hit] = idx
                 # Preserve original semantics: highest-priority candidate that has a match
                 for candidate in candidates:
                     if candidate in first_hit:

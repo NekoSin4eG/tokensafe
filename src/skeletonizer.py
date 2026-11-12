@@ -21,14 +21,14 @@ CONTROL_KEYWORDS = {
     'return', 'throw', 'yield', 'await', 'import', 'export', 'record'
 }
 
-# 1. Standard function declarations (JS/TS/PHP/Swift/Kotlin)
+# 1. Standard function declarations (JS/TS/PHP/Kotlin)
 FN_DECL_REGEX = re.compile(
-    r'^(?:export\s+)?(?:default\s+)?(?:async\s+)?(?:function\s*\*?|fun)\s+([a-zA-Z0-9_$]+)?\s*(?:<[^>]+>)?\s*\('
+    r'^(?:export\s+)?(?:default\s+)?(?:(?:public|private|protected|internal|open|override|suspend|final|abstract|static|inline|tailrec|operator|infix|external)\s+)*(?:async\s+)?(?:function\s*\*?|fun)\s+([a-zA-Z0-9_$]+)?\s*(?:<[^>]+>)?\s*\('
 )
 
-# 2. Go func: func Foo(...) or func (r *Recv) Foo(...)
+# 2. Go / Swift func: func Foo(...) or func (r *Recv) Foo(...) or public mutating func Foo(...)
 GO_FN_REGEX = re.compile(
-    r'^func\s+(?:\([^)]+\)\s+)?([a-zA-Z0-9_]+)\s*(?:\[[^\]]+\])?\s*\('
+    r'^(?:(?:@[a-zA-Z0-9_]+(?:\([^)]*\))?\s+)*(?:public|private|fileprivate|internal|open|override|static|class|mutating|nonmutating|final)\s+)*func\s+(?:\([^)]+\)\s+)?([a-zA-Z0-9_]+)\s*(?:\[[^\]]+\]|<[^>]+>)?\s*\('
 )
 
 # 3. Rust fn: fn foo(...) or pub async fn foo(...)
@@ -66,10 +66,17 @@ ARROW_MULTILINE_START = re.compile(
 
 # 5. Method definition (Java, C#, C++, TS, PHP)
 METHOD_REGEX = re.compile(
-    r'^(?:(?:public|private|protected|static|final|native|synchronized|abstract|async|override|virtual|inline|explicit|const|get|set)\s+)*'
+    r'^(?:(?:public|private|protected|internal|open|static|final|native|synchronized|abstract|async|override|virtual|inline|explicit|const|get|set|suspend|mutating)\s+)*'
     r'(?:[a-zA-Z0-9_<>\[\],.?*&:]+\s+)*'
     r'([a-zA-Z0-9_$:~]+)\s*(?:<[^>]+>)?\s*\([^)]*\)\s*'
     r'(?:const\s+|override\s+|final\s+|noexcept\s+|throws\s+[^{]+|->\s*[^{]+|:\s*[^{]+)*\{'
+)
+
+# 5b. Multi-line / Allman-style method header (no '{' on first line; requires at least one modifier/type or trailing '(')
+METHOD_MULTILINE_REGEX = re.compile(
+    r'^(?:(?:public|private|protected|internal|open|static|final|native|synchronized|abstract|async|override|virtual|inline|explicit|const|get|set|suspend|mutating)\s+)*'
+    r'(?:[a-zA-Z0-9_<>\[\],.?*&:]+\s+)+'
+    r'([a-zA-Z0-9_$:~]+)\s*(?:<[^>]+>)?\s*\([^;]*$'
 )
 
 class BraceLexer:
@@ -246,9 +253,17 @@ class Skeletonizer:
             return cls._collapse_import_lines(res, ext) if (collapse_imports and keep_symbols) else res
         elif ext in (
             ".ts", ".js", ".tsx", ".jsx", ".mjs", ".cjs",
-            ".go", ".java", ".rs", ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp", ".cs", ".php", ".kt", ".swift"
+            ".go", ".java", ".rs", ".cpp", ".cc", ".cxx", ".c", ".h", ".hpp",
+            ".cs", ".php", ".kt", ".kts", ".swift",
         ):
-            res = cls._skeletonize_braces(code, ext, keep_symbols=keep_symbols)
+            res = None
+            try:
+                from src.treesitter_backend import TreeSitterBackend
+                res = TreeSitterBackend.skeletonize_braces(code, ext, keep_symbols=keep_symbols)
+            except Exception:
+                res = None
+            if res is None:
+                res = cls._skeletonize_braces(code, ext, keep_symbols=keep_symbols)
             return cls._collapse_import_lines(res, ext) if (collapse_imports and keep_symbols) else res
         elif ext in (".css", ".scss", ".sass", ".less"):
             return cls._skeletonize_css(code, ext, keep_symbols=keep_symbols)
@@ -265,12 +280,20 @@ class Skeletonizer:
                 first_line = doc_val.strip().split("\n")[0].strip()
                 tree.body[0].value.value = f"{first_line} ..."
 
-            for node in ast.walk(tree):
-                if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-                    if keep_symbols is not None and node.name in keep_symbols:
-                        continue
-                    # Fold inert functions to pure ellipsis without verbose docstrings
-                    node.body = [ast.Expr(value=ast.Constant(value=Ellipsis))]
+            def _fold_py_node(node: ast.AST, class_name: Optional[str] = None):
+                for child in ast.iter_child_nodes(node):
+                    if isinstance(child, ast.ClassDef):
+                        _fold_py_node(child, class_name=child.name)
+                    elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                        qual_name = f"{class_name}.{child.name}" if class_name else child.name
+                        if keep_symbols is not None and (child.name in keep_symbols or qual_name in keep_symbols):
+                            _fold_py_node(child, class_name=class_name)
+                            continue
+                        child.body = [ast.Expr(value=ast.Constant(value=Ellipsis))]
+                    else:
+                        _fold_py_node(child, class_name=class_name)
+
+            _fold_py_node(tree)
             return ast.unparse(tree)
         except Exception:
             return code
@@ -324,6 +347,14 @@ class Skeletonizer:
             clean_name = name.split("::")[-1]
             if clean_name not in CONTROL_KEYWORDS:
                 return (clean_name, "method")
+
+        if not line_clean.endswith(";"):
+            m = METHOD_MULTILINE_REGEX.match(line_clean)
+            if m:
+                name = m.group(1)
+                clean_name = name.split("::")[-1]
+                if clean_name not in CONTROL_KEYWORDS and clean_name not in ("new", "delete", "sizeof"):
+                    return (clean_name, "method_multiline")
 
         return None
 
@@ -489,6 +520,15 @@ class Skeletonizer:
                         pending_name = None
                         pending_kind = None
                         continue
+                    elif len(pending_header_lines) > 25:
+                        out.extend(pending_header_lines)
+                        for phl in pending_header_lines:
+                            op, cl = lexer.count_braces(phl)
+                            current_depth += op - cl
+                        pending_header_lines = []
+                        pending_name = None
+                        pending_kind = None
+                        continue
                     else:
                         continue
 
@@ -535,10 +575,19 @@ class Skeletonizer:
                             in_folding = True
                     continue
 
+                if kind in ('fn_decl', 'go_func', 'rust_fn', 'method_multiline') and not raw_line.rstrip().endswith(";"):
+                    pending_header_lines = [raw_line]
+                    pending_name = name
+                    pending_kind = 'fn_multiline'
+                    continue
+
             # 4. Normal line
             out.append(raw_line)
             open_b, close_b = lexer.count_braces(count_src)
             current_depth += open_b - close_b
+
+        if pending_header_lines:
+            out.extend(pending_header_lines)
 
         return "\n".join(out)
 
@@ -551,6 +600,9 @@ class Skeletonizer:
         Container at-rules (@media, @supports, @container, @layer) preserve structure and track depth.
         Component selectors and mixins are folded into '{ /* ... */ }' unless matching keep_symbols.
         """
+        if ext == ".sass" and "{" not in code:
+            return code
+
         lines = code.splitlines()
         out = []
         lexer = BraceLexer()
@@ -670,6 +722,9 @@ class Skeletonizer:
             out.append(raw_line)
             open_b, close_b = lexer.count_braces(raw_line)
             current_depth += open_b - close_b
+
+        if pending_sel:
+            out.extend(pending_sel)
 
         return "\n".join(out)
 

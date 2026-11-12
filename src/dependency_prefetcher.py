@@ -36,7 +36,7 @@ class DependencyPrefetcher:
 
         if ext == ".py":
             imported_symbols = cls._parse_python_imports(content, file_dir)
-        elif ext in (".ts", ".js", ".tsx", ".jsx"):
+        elif ext in (".ts", ".js", ".tsx", ".jsx", ".mjs", ".cjs"):
             imported_symbols = cls._parse_ts_imports(content, file_dir)
 
         if not imported_symbols:
@@ -129,7 +129,7 @@ class DependencyPrefetcher:
             # Resolve target file path (check .ts, .tsx, .js, /index.ts)
             base_target = os.path.normpath(os.path.join(current_dir, rel_path))
             resolved = None
-            for ext in (".ts", ".tsx", ".js", ".jsx", "/index.ts", "/index.js"):
+            for ext in (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs", "/index.ts", "/index.tsx", "/index.js", "/index.mjs"):
                 candidate = f"{base_target}{ext}" if not ext.startswith("/") else f"{base_target}{ext}"
                 if os.path.exists(candidate):
                     resolved = candidate
