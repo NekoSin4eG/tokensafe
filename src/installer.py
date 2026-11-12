@@ -814,34 +814,109 @@ class AgentInstaller:
         return restarted
 
     @staticmethod
+    def _semver_dir_key(name: str) -> Tuple[int, ...]:
+        """Parses a version directory name like 'v24.14.0' into a numeric sort key."""
+        parts = re.findall(r"\d+", name or "")
+        return tuple(int(p) for p in parts[:4]) if parts else (0,)
+
+    @staticmethod
+    def _npm_subprocess_env(npm_bin: str) -> Dict[str, str]:
+        """Builds an env where `#!/usr/bin/env node` resolves the sibling node binary.
+
+        Under `do shell script` + login shell, nvm's bin dir is missing from PATH
+        or shadowed by `/usr/local/bin`. Running `<nvm>/bin/npm` without its own
+        bin directory first on PATH causes `env node` to execute `/usr/local/bin/node`,
+        making npm look at `/usr/local/lib` instead of the nvm prefix.
+        """
+        env = os.environ.copy()
+        bin_dir = os.path.dirname(os.path.abspath(npm_bin))
+        if bin_dir:
+            current_path = env.get("PATH", "")
+            path_parts = [p for p in current_path.split(os.pathsep) if p]
+            if not path_parts or os.path.normpath(path_parts[0]) != os.path.normpath(bin_dir):
+                env["PATH"] = f"{bin_dir}{os.pathsep}{current_path}" if current_path else bin_dir
+        return env
+
+    @staticmethod
+    def _find_npm_candidates(home: Optional[str] = None) -> List[str]:
+        """Discovers all executable npm binaries across PATH, project prefix, nvm, fnm, volta, and system dirs."""
+        base = home or HOME
+        raw_candidates: List[str] = []
+
+        # 1. If running out of an npm node_modules install, include its own bin/npm first.
+        if os.path.basename(os.path.dirname(PROJECT_ROOT)) == "node_modules":
+            nm_parent = os.path.dirname(os.path.dirname(PROJECT_ROOT))
+            if os.path.basename(nm_parent) == "lib":
+                prefix = os.path.dirname(nm_parent)
+                raw_candidates.append(os.path.join(prefix, "bin", "npm"))
+            else:
+                raw_candidates.append(os.path.join(nm_parent, "npm.cmd"))
+                raw_candidates.append(os.path.join(nm_parent, "bin", "npm"))
+
+        # 2. PATH-resolved npm (note: on macOS login shells this may be /usr/local/bin/npm
+        # shadowing nvm, so we must NOT stop after checking only this one).
+        for exe in ("npm", "npm.cmd"):
+            found = shutil.which(exe)
+            if found:
+                raw_candidates.append(found)
+
+        # 3. nvm Node installations (newest semver first).
+        nvm_dir = os.path.join(base, ".nvm", "versions", "node")
+        try:
+            if os.path.isdir(nvm_dir):
+                for version_dir in sorted(
+                    os.listdir(nvm_dir),
+                    key=AgentInstaller._semver_dir_key,
+                    reverse=True,
+                ):
+                    raw_candidates.append(os.path.join(nvm_dir, version_dir, "bin", "npm"))
+        except OSError:
+            pass
+
+        # 4. Other popular Node version managers + system/Homebrew locations.
+        raw_candidates.append(os.path.join(base, ".volta", "bin", "npm"))
+        raw_candidates.append(os.path.join(base, ".nodenv", "shims", "npm"))
+        raw_candidates.append(os.path.join(base, ".fnm", "aliases", "default", "bin", "npm"))
+        fnm_versions = os.path.join(base, ".local", "share", "fnm", "node-versions")
+        try:
+            if os.path.isdir(fnm_versions):
+                for version_dir in sorted(
+                    os.listdir(fnm_versions),
+                    key=AgentInstaller._semver_dir_key,
+                    reverse=True,
+                ):
+                    raw_candidates.append(os.path.join(fnm_versions, version_dir, "installation", "bin", "npm"))
+        except OSError:
+            pass
+
+        raw_candidates += [
+            "/opt/homebrew/bin/npm",
+            "/usr/local/bin/npm",
+            "/usr/bin/npm",
+        ]
+
+        seen = set()
+        unique: List[str] = []
+        for cand in raw_candidates:
+            if not cand:
+                continue
+            norm = os.path.normpath(os.path.abspath(cand))
+            if norm in seen:
+                continue
+            if os.path.isfile(cand) and os.access(cand, os.X_OK):
+                seen.add(norm)
+                unique.append(cand)
+        return unique
+
+    @staticmethod
     def _find_npm(home: Optional[str] = None) -> Optional[str]:
         """Locates an npm executable even in a clean non-interactive environment.
 
         The updater dialog runs via `do shell script` + login shell, where .zshrc
         (and therefore nvm) is never sourced; PATH-only discovery made the npm
         channel silently skip updates. Falls back to well-known locations."""
-        found = shutil.which("npm")
-        if found:
-            return found
-        base = home or HOME
-        candidates: List[str] = []
-        nvm_dir = os.path.join(base, ".nvm", "versions", "node")
-        try:
-            if os.path.isdir(nvm_dir):
-                # Newest installed node version wins.
-                for version_dir in sorted(os.listdir(nvm_dir), reverse=True):
-                    candidates.append(os.path.join(nvm_dir, version_dir, "bin", "npm"))
-        except OSError:
-            pass
-        candidates += [
-            "/opt/homebrew/bin/npm",
-            "/usr/local/bin/npm",
-            "/usr/bin/npm",
-        ]
-        for cand in candidates:
-            if os.path.isfile(cand) and os.access(cand, os.X_OK):
-                return cand
-        return None
+        candidates = AgentInstaller._find_npm_candidates(home=home)
+        return candidates[0] if candidates else None
 
     @classmethod
     def self_update(cls):
@@ -867,26 +942,50 @@ class AgentInstaller:
             except Exception as e:
                 print(f"  {YELLOW}⚠{RESET} Git pull skipped: {e}")
 
-        # 2. Check npm global
-        # The updater dialog runs via `do shell script` + login shell, which skips
-        # .zshrc — nvm is NOT on PATH there, so PATH-only discovery silently
-        # downgraded the npm channel (the active one for many installs).
-        npm_bin = cls._find_npm()
-        if npm_bin:
-            try:
-                res = subprocess.run([npm_bin, "list", "-g", "--depth=0", "tokensafe"], capture_output=True, text=True, timeout=15)
-                if "tokensafe@" in res.stdout:
-                    print(f"  {CYAN}→{RESET} Updating global npm package (npm install -g tokensafe@latest)...")
-                    up_res = subprocess.run([npm_bin, "install", "-g", "tokensafe@latest"], capture_output=True, text=True, timeout=120)
-                    if up_res.returncode == 0:
-                        print(f"  {GREEN}✔{RESET} npm package upgraded successfully.")
-                    else:
-                        detail = (up_res.stderr or up_res.stdout or "").strip()[:200]
-                        print(f"  {YELLOW}⚠{RESET} npm upgrade failed: {detail}")
-                else:
-                    print(f"  {CYAN}ℹ{RESET} tokensafe not installed via npm — skipping npm channel.")
-            except Exception as e:
-                print(f"  {YELLOW}⚠{RESET} npm update skipped: {e}")
+        # 2. Check npm global across all discovered Node/npm prefixes
+        # A macOS login shell may have /usr/local/bin/npm on PATH ahead of nvm,
+        # and `#!/usr/bin/env node` inside nvm's npm also resolves /usr/local/bin/node
+        # unless npm's own bin dir is prepended to PATH.
+        primary_npm = cls._find_npm()
+        upgraded_npm_bins: List[str] = []
+        if primary_npm:
+            npm_candidates = cls._find_npm_candidates()
+            norm_seen = {os.path.normpath(os.path.abspath(p)) for p in npm_candidates}
+            if os.path.normpath(os.path.abspath(primary_npm)) not in norm_seen:
+                npm_candidates.insert(0, primary_npm)
+
+            found_npm_install = False
+            for npm_bin in npm_candidates:
+                npm_env = cls._npm_subprocess_env(npm_bin)
+                try:
+                    res = subprocess.run(
+                        [npm_bin, "list", "-g", "--depth=0", "tokensafe"],
+                        env=npm_env,
+                        capture_output=True,
+                        text=True,
+                        timeout=15,
+                    )
+                    if "tokensafe@" in (res.stdout or ""):
+                        found_npm_install = True
+                        print(f"  {CYAN}→{RESET} Updating global npm package via {npm_bin} (npm install -g tokensafe@latest)...")
+                        up_res = subprocess.run(
+                            [npm_bin, "install", "-g", "tokensafe@latest"],
+                            env=npm_env,
+                            capture_output=True,
+                            text=True,
+                            timeout=120,
+                        )
+                        if up_res.returncode == 0:
+                            print(f"  {GREEN}✔{RESET} npm package upgraded successfully.")
+                            upgraded_npm_bins.append(npm_bin)
+                        else:
+                            detail = (up_res.stderr or up_res.stdout or "").strip()[:200]
+                            print(f"  {YELLOW}⚠{RESET} npm upgrade failed: {detail}")
+                except Exception as e:
+                    print(f"  {YELLOW}⚠{RESET} npm update check failed ({npm_bin}): {e}")
+
+            if not found_npm_install:
+                print(f"  {CYAN}ℹ{RESET} tokensafe not installed via npm — skipping npm channel.")
         else:
             print(f"  {YELLOW}⚠{RESET} npm not found — skipping npm channel.")
 
@@ -932,9 +1031,17 @@ class AgentInstaller:
         except Exception:
             pass
         try:
-            tokensafe_bin = shutil.which("tokensafe")
+            tokensafe_bin = None
+            for npm_bin in upgraded_npm_bins:
+                cand_bin = os.path.join(os.path.dirname(npm_bin), "tokensafe.cmd" if os.name == "nt" else "tokensafe")
+                if os.path.isfile(cand_bin) and os.access(cand_bin, os.X_OK):
+                    tokensafe_bin = cand_bin
+                    break
+            if not tokensafe_bin:
+                tokensafe_bin = shutil.which("tokensafe")
             sync_cmd = [tokensafe_bin, "version", "--check"] if tokensafe_bin else [sys.executable, os.path.join(PROJECT_ROOT, "src", "cli.py"), "version", "--check"]
-            subprocess.run(sync_cmd, capture_output=True, text=True, timeout=5)
+            sync_env = cls._npm_subprocess_env(tokensafe_bin) if tokensafe_bin else None
+            subprocess.run(sync_cmd, env=sync_env, capture_output=True, text=True, timeout=5)
         except Exception:
             pass
 

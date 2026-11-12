@@ -1052,6 +1052,66 @@ class TestUpdaterNpmDiscovery(unittest.TestCase):
              patch("os.path.isfile", return_value=False):
             self.assertIsNone(AgentInstaller._find_npm(home=tmp))
 
+    def test_self_update_upgrades_nvm_even_when_system_npm_shadows_path(self):
+        from unittest.mock import patch, MagicMock
+        from src.installer import AgentInstaller
+
+        tmp = tempfile.mkdtemp(prefix="tokensafe_npm_shadow_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        nvm_npm = self._make_fake_npm(tmp, "v24.14.0")
+        sys_bin = os.path.join(tmp, "sys", "bin")
+        os.makedirs(sys_bin, exist_ok=True)
+        sys_npm = os.path.join(sys_bin, "npm")
+        with open(sys_npm, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(sys_npm, 0o755)
+
+        calls = []
+
+        def fake_run(cmd, *args, **kwargs):
+            calls.append((cmd, kwargs.get("env")))
+            if len(cmd) >= 2 and cmd[1] == "list":
+                stdout = "└── tokensafe@2.5.0\n" if cmd[0] == nvm_npm else "└── (empty)\n"
+                return MagicMock(returncode=0, stdout=stdout, stderr="")
+            return MagicMock(returncode=0, stdout="", stderr="")
+
+        with patch.dict(os.environ, {"TOKENSAFE_DATA_DIR": os.path.join(tmp, "data"), "PATH": sys_bin}), \
+             patch("src.installer.HOME", tmp), \
+             patch("src.installer.PROJECT_ROOT", tmp), \
+             patch("src.installer.shutil.which", side_effect=lambda name: sys_npm if name == "npm" else None), \
+             patch.object(AgentInstaller, "_find_npm_candidates", return_value=[sys_npm, nvm_npm]), \
+             patch.object(AgentInstaller, "detect_available_agents", return_value={}), \
+             patch.object(AgentInstaller, "restart_mcp_daemons", return_value=0), \
+             patch("src.installer.subprocess.run", side_effect=fake_run):
+            AgentInstaller.self_update()
+
+        install_calls = [(cmd, env) for cmd, env in calls if cmd[:3] == [nvm_npm, "install", "-g"]]
+        self.assertEqual(len(install_calls), 1, f"Expected nvm npm install call, got: {calls}")
+        self.assertEqual(install_calls[0][0], [nvm_npm, "install", "-g", "tokensafe@latest"])
+        path_first = install_calls[0][1]["PATH"].split(os.pathsep)[0]
+        self.assertEqual(os.path.normpath(path_first), os.path.normpath(os.path.dirname(nvm_npm)))
+
+    def test_find_npm_candidates_prefers_project_root_prefix(self):
+        from unittest.mock import patch
+        from src.installer import AgentInstaller
+
+        tmp = tempfile.mkdtemp(prefix="tokensafe_npm_proj_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        nvm_npm = self._make_fake_npm(tmp, "v24.14.0")
+        proj_root = os.path.join(tmp, ".nvm", "versions", "node", "v24.14.0", "lib", "node_modules", "tokensafe")
+        os.makedirs(proj_root, exist_ok=True)
+        sys_npm = os.path.join(tmp, "sys", "npm")
+        os.makedirs(os.path.dirname(sys_npm), exist_ok=True)
+        with open(sys_npm, "w") as f:
+            f.write("#!/bin/sh\n")
+        os.chmod(sys_npm, 0o755)
+
+        with patch("src.installer.PROJECT_ROOT", proj_root), \
+             patch("src.installer.shutil.which", side_effect=lambda name: sys_npm if name == "npm" else None):
+            candidates = AgentInstaller._find_npm_candidates(home=tmp)
+        self.assertEqual(candidates[0], nvm_npm)
+        self.assertIn(sys_npm, candidates)
+
 
 class TestReleaseVersionConsistency(unittest.TestCase):
     """Every file the release bumper touches must agree with package.json —
