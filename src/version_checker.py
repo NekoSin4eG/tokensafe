@@ -91,6 +91,15 @@ class VersionChecker:
         except Exception:
             pass
 
+    @staticmethod
+    def _cache_matches_version(cached: Optional[Dict[str, Any]], current_version: str) -> bool:
+        """True when cached payload was recorded for `current_version` (invalidates cache on upgrade)."""
+        if not cached:
+            return False
+        cached_ver = str(cached.get("client_version") or "").strip().lstrip("v")
+        curr_ver = str(current_version or "").strip().lstrip("v")
+        return bool(cached_ver) and cached_ver == curr_ver
+
     @classmethod
     def check_version(
         cls,
@@ -100,8 +109,8 @@ class VersionChecker:
         timeout: float = 1.5
     ) -> Dict[str, Any]:
         """
-        Retrieves version status. Returns cached result if within TTL,
-        otherwise makes a fast network request (< 1.5s timeout).
+        Retrieves version status. Returns cached result if within TTL and matching
+        `current_version`, otherwise makes a fast network request (< 1.5s timeout).
         Falls back gracefully on network or offline scenarios.
         """
         now = int(time.time())
@@ -113,8 +122,9 @@ class VersionChecker:
                 license_key = ""
 
         cached = cls.load_cache()
+        cache_matches = cls._cache_matches_version(cached, current_version)
 
-        if not force_fetch and cached:
+        if not force_fetch and cache_matches:
             checked_at = cached.get("checked_at", 0)
             ttl = int(cached.get("ttl", CACHE_TTL))
             if now - checked_at < ttl:
@@ -161,8 +171,8 @@ class VersionChecker:
         except Exception:
             pass
 
-        # Stale cache fallback if available
-        if cached:
+        # Stale cache fallback if available for the same installed version
+        if cache_matches:
             return cached
         cls.save_cache(payload)
         return payload
@@ -397,7 +407,7 @@ class VersionChecker:
         """
         now = int(time.time())
         cached = cls.load_cache()
-        if not force and cached:
+        if not force and cls._cache_matches_version(cached, current_version):
             checked_at = cached.get("checked_at", 0)
             update_available = cached.get("update_available", False)
             latest = cached.get("latest_version", current_version)

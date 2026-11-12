@@ -348,5 +348,31 @@ class TestAgentsPluginsConfig(unittest.TestCase):
             AgentInstaller.install_project(tmpdir)
             self.assertFalse(os.path.exists(os.path.join(tmpdir, ".agents", "plugins.json")))
 
+    def test_self_update_clears_cache_and_reports_version(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            data_dir = os.path.join(tmpdir, "data")
+            os.makedirs(data_dir)
+            cache_file = os.path.join(data_dir, "version_cache.json")
+            with open(cache_file, "w", encoding="utf-8") as f:
+                f.write('{"client_version": "2.2.1"}')
+
+            calls = []
+
+            def fake_run(cmd, *args, **kwargs):
+                calls.append(cmd)
+                return MagicMock(returncode=0, stdout="", stderr="")
+
+            with patch.dict(os.environ, {"TOKENSAFE_DATA_DIR": data_dir}), \
+                 patch("src.installer.PROJECT_ROOT", tmpdir), \
+                 patch.object(AgentInstaller, "_find_npm", return_value=None), \
+                 patch("src.installer.shutil.which", side_effect=lambda name: "/usr/local/bin/tokensafe" if name == "tokensafe" else None), \
+                 patch.object(AgentInstaller, "detect_available_agents", return_value={}), \
+                 patch.object(AgentInstaller, "restart_mcp_daemons", return_value=0), \
+                 patch("src.installer.subprocess.run", side_effect=fake_run):
+                AgentInstaller.self_update()
+
+            self.assertFalse(os.path.exists(cache_file))
+            self.assertIn(["/usr/local/bin/tokensafe", "version", "--check"], calls)
+
 if __name__ == "__main__":
     unittest.main()

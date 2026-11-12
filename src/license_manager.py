@@ -12,7 +12,7 @@ import hmac
 import hashlib
 import base64
 import threading
-from typing import Dict, Any, Tuple, Optional
+from typing import Dict, Any, Tuple, Optional, List
 
 from src.paths import resolve_data_dir
 
@@ -21,6 +21,8 @@ DATA_DIR = resolve_data_dir()
 LICENSE_FILE = os.path.join(DATA_DIR, "license.json")
 GLOBAL_DATA_DIR = os.path.expanduser("~/.tokensafe")
 GLOBAL_LICENSE_FILE = os.path.join(GLOBAL_DATA_DIR, "license.json")
+_DEFAULT_LICENSE_FILE = LICENSE_FILE
+_DEFAULT_GLOBAL_LICENSE_FILE = GLOBAL_LICENSE_FILE
 
 # Master Public Key for client-side offline verification (RFC 8032 Ed25519)
 DEFAULT_ED25519_PUBLIC_KEY = os.environ.get("TOKENSAFE_PUBLIC_KEY", "3911e2ffe5ad07ee23be392b88f238af302f9d3a0bf51881de8b5e0e6af71430")
@@ -297,40 +299,81 @@ class LicenseManager:
         return True, payload, "License is active and valid"
 
     @classmethod
-    def get_active_license(cls) -> Tuple[str, Dict[str, Any]]:
-        """Retrieves active license from env or data/license.json, falling back to free tier."""
-        key = os.environ.get("TOKENSAFE_LICENSE_KEY", "").strip()
-        if not key and os.path.exists(LICENSE_FILE):
-            try:
-                with open(LICENSE_FILE, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-                    key = data.get("license_key", "").strip()
-            except Exception:
-                pass
+    def _candidate_license_files(cls) -> List[str]:
+        """Returns license.json paths to inspect, honoring explicit TOKENSAFE_DATA_DIR and test patches."""
+        explicit_dir = os.environ.get("TOKENSAFE_DATA_DIR", "").strip()
+        if LICENSE_FILE != _DEFAULT_LICENSE_FILE:
+            paths = [LICENSE_FILE]
+            if GLOBAL_LICENSE_FILE != _DEFAULT_GLOBAL_LICENSE_FILE:
+                paths.append(GLOBAL_LICENSE_FILE)
+        elif explicit_dir:
+            paths = [os.path.join(explicit_dir, "license.json")]
+        else:
+            paths = [LICENSE_FILE, GLOBAL_LICENSE_FILE]
 
-        if key:
-            valid, payload, msg = cls.validate_license(key)
+        seen = set()
+        unique: List[str] = []
+        for p in paths:
+            ap = os.path.abspath(p)
+            if ap not in seen:
+                seen.add(ap)
+                unique.append(p)
+        return unique
+
+    @classmethod
+    def _resolve_active_license_record(cls) -> Tuple[Optional[Tuple[str, Dict[str, Any]]], str]:
+        """Selects the freshest valid license across env and candidate files."""
+        env_key = os.environ.get("TOKENSAFE_LICENSE_KEY", "").strip()
+        if env_key:
+            valid, payload, _ = cls.validate_license(env_key)
+            return ((env_key, payload) if valid else None), env_key
+
+        best_valid: Optional[Tuple[Tuple[int, int, float], str, Dict[str, Any]]] = None
+        best_raw: Optional[Tuple[Tuple[int, float], str]] = None
+
+        for path in cls._candidate_license_files():
+            if not os.path.exists(path):
+                continue
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                candidate = str(data.get("license_key", "")).strip()
+                if not candidate:
+                    continue
+                saved_at = int(data.get("saved_at") or 0)
+                mtime = os.path.getmtime(path)
+            except Exception:
+                continue
+
+            raw_rank = (saved_at, mtime)
+            if best_raw is None or raw_rank > best_raw[0]:
+                best_raw = (raw_rank, candidate)
+
+            valid, payload, _ = cls.validate_license(candidate)
             if valid:
-                return payload.get("tier", "solo"), payload
+                issued_at = int(payload.get("issued_at") or 0)
+                valid_rank = (saved_at, issued_at, mtime)
+                if best_valid is None or valid_rank > best_valid[0]:
+                    best_valid = (valid_rank, candidate, payload)
+
+        if best_valid is not None:
+            return (best_valid[1], best_valid[2]), best_valid[1]
+        return None, (best_raw[1] if best_raw is not None else "")
+
+    @classmethod
+    def get_active_license(cls) -> Tuple[str, Dict[str, Any]]:
+        """Retrieves active license from env or persistent license.json files, falling back to free tier."""
+        resolved, _ = cls._resolve_active_license_record()
+        if resolved is not None:
+            _, payload = resolved
+            return payload.get("tier", "solo"), payload
 
         return "free", {"tier": "free", "max_tokens_monthly": 500_000}
 
     @classmethod
     def get_active_license_key(cls) -> str:
-        """Retrieves active raw license key string from env or persistent license.json files."""
-        key = os.environ.get("TOKENSAFE_LICENSE_KEY", "").strip()
-        if not key:
-            for p in (LICENSE_FILE, GLOBAL_LICENSE_FILE):
-                if os.path.exists(p):
-                    try:
-                        with open(p, "r", encoding="utf-8") as f:
-                            data = json.load(f)
-                            candidate = data.get("license_key", "").strip()
-                            if candidate:
-                                key = candidate
-                                break
-                    except Exception:
-                        pass
+        """Retrieves the freshest active raw license key string from env or persistent license.json files."""
+        _, key = cls._resolve_active_license_record()
         return key
 
     @classmethod
@@ -349,9 +392,11 @@ class LicenseManager:
             "saved_at": int(time.time())
         }
 
-        for target_dir, target_file in ((DATA_DIR, LICENSE_FILE), (GLOBAL_DATA_DIR, GLOBAL_LICENSE_FILE)):
+        for target_file in cls._candidate_license_files():
+            target_dir = os.path.dirname(target_file)
             try:
-                os.makedirs(target_dir, exist_ok=True)
+                if target_dir:
+                    os.makedirs(target_dir, exist_ok=True)
                 with open(target_file, "w", encoding="utf-8") as f:
                     json.dump(record, f, indent=2)
             except Exception:

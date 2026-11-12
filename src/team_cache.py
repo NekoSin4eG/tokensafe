@@ -26,25 +26,7 @@ class TeamCache:
     @classmethod
     def _is_team_tier(cls) -> Tuple[bool, str]:
         """Checks if current active license belongs to a Team tier subscription."""
-        key = os.environ.get("TOKENSAFE_LICENSE_KEY", "").strip()
-        if not key:
-            from src.paths import resolve_data_dir
-            candidate_paths = [
-                os.path.join(resolve_data_dir(), "license.json"),
-                os.path.join(os.getcwd(), "data", "license.json"),
-                os.path.expanduser("~/.tokensafe/license.json")
-            ]
-            for lic_file in candidate_paths:
-                if os.path.exists(lic_file):
-                    try:
-                        with open(lic_file, "r", encoding="utf-8") as f:
-                            data = json.load(f)
-                            key = data.get("license_key", "").strip()
-                            if key:
-                                break
-                    except Exception:
-                        pass
-
+        key = LicenseManager.get_active_license_key()
         if not key:
             return False, ""
 

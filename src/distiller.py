@@ -213,16 +213,7 @@ Rules:
 
         # 1. Managed Cloud Distillation (Default for Solo/Team SaaS)
         if "cloud" in providers:
-            lic_key = os.environ.get("TOKENSAFE_LICENSE_KEY", "").strip()
-            if not lic_key:
-                base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-                lic_file = os.path.join(base_dir, "data", "license.json")
-                if os.path.exists(lic_file):
-                    try:
-                        with open(lic_file, "r", encoding="utf-8") as f:
-                            lic_key = json.load(f).get("license_key", "").strip()
-                    except Exception:
-                        pass
+            lic_key = LicenseManager.get_active_license_key()
 
             if lic_key:
                 cloud_res = cls._call_cloud_distill(raw_text, lic_key)

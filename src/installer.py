@@ -922,12 +922,18 @@ class AgentInstaller:
                 else:
                     print(f"    {YELLOW}⚠{RESET} {info['name']}: {msg}")
 
-        # 5. Refresh local version cache
+        # 5. Refresh local version cache and report the newly installed version in a fresh process
         try:
             from src.paths import resolve_data_dir
             cache_file = os.path.join(resolve_data_dir(), "version_cache.json")
             if os.path.exists(cache_file):
                 os.remove(cache_file)
+        except Exception:
+            pass
+        try:
+            tokensafe_bin = shutil.which("tokensafe")
+            sync_cmd = [tokensafe_bin, "version", "--check"] if tokensafe_bin else [sys.executable, os.path.join(PROJECT_ROOT, "src", "cli.py"), "version", "--check"]
+            subprocess.run(sync_cmd, capture_output=True, text=True, timeout=5)
         except Exception:
             pass
 

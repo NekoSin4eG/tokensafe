@@ -192,6 +192,58 @@ class TestVersionChecker(unittest.TestCase):
             cached = VersionChecker.load_cache() or {}
             self.assertEqual(cached.get("last_os_notify_version"), "1.3.0")
 
+    def test_cache_invalidated_when_client_version_changes(self):
+        from unittest.mock import patch, MagicMock
+        VersionChecker.save_cache({
+            "checked_at": int(time.time()),
+            "client_version": "2.2.1",
+            "latest_version": "2.4.2",
+            "update_available": True,
+            "force_update": False,
+        })
+        mock_resp = MagicMock()
+        mock_resp.status = 200
+        mock_resp.read.return_value = json.dumps({
+            "status": "up_to_date",
+            "client_version": "2.4.2",
+            "latest_version": "2.4.2",
+            "update_available": False,
+            "force_update": False,
+        }).encode("utf-8")
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp) as mock_url:
+            res = VersionChecker.check_version(current_version="2.4.2", license_key="TS2.dummy")
+        self.assertTrue(mock_url.called)
+        self.assertEqual(res["client_version"], "2.4.2")
+        self.assertFalse(res["update_available"])
+
+    def test_offline_fallback_ignores_mismatched_version_cache(self):
+        from unittest.mock import patch
+        VersionChecker.save_cache({
+            "checked_at": int(time.time()),
+            "client_version": "2.2.1",
+            "latest_version": "2.4.2",
+            "update_available": True,
+            "force_update": False,
+        })
+        with patch("urllib.request.urlopen", side_effect=OSError("offline")):
+            res = VersionChecker.check_version(current_version="2.4.2", license_key="TS2.dummy")
+        self.assertEqual(res["client_version"], "2.4.2")
+        self.assertFalse(res["update_available"])
+
+    def test_notify_background_not_skipped_after_client_upgrade(self):
+        from unittest.mock import patch
+        VersionChecker.save_cache({
+            "checked_at": int(time.time()),
+            "client_version": "2.2.1",
+            "latest_version": "2.2.1",
+            "update_available": False,
+        })
+        with patch("subprocess.Popen") as mock_popen:
+            VersionChecker.notify_os_update_background(current_version="2.4.2", force=False)
+            self.assertTrue(mock_popen.called)
+
 
 if __name__ == "__main__":
     unittest.main()
