@@ -1250,7 +1250,7 @@ def run_mcp_server():
             finally:
                 try:
                     from src.telemetry_sync import TelemetrySync
-                    TelemetrySync.sync_background(throttle_seconds=60.0)
+                    TelemetrySync.sync_background(throttle_seconds=20.0)
                 except Exception:
                     pass
         else:

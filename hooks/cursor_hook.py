@@ -78,6 +78,12 @@ def main():
         response = _allow(event)
     if not isinstance(response, dict) or not response:
         response = _allow(event)
+    if event in ("beforeShellExecution", "beforeReadFile", "beforeSubmitPrompt", "stop"):
+        try:
+            from src.telemetry_sync import TelemetrySync
+            TelemetrySync.sync_background(throttle_seconds=0.0 if event == "stop" else 20.0)
+        except Exception:
+            pass
     print(json.dumps(response))
 
 

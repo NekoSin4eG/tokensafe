@@ -15,6 +15,7 @@ import os
 import sys
 import json
 import time
+import secrets
 import sqlite3
 import threading
 import subprocess
@@ -166,114 +167,16 @@ class TelemetrySync:
             last_id = 0 if force else state.get("last_synced_event_id", 0)
 
             try:
-                conn = sqlite3.connect(METRICS_DB_PATH)
-                conn.row_factory = sqlite3.Row
-                cur = conn.cursor()
-
-                synthetic_events: List[Dict[str, Any]] = []
-                if not state.get("lifetime_rollup_synced", False):
-                    try:
-                        life_row = cur.execute("SELECT * FROM lifetime_aggregates WHERE id = 1").fetchone()
-                        if life_row and life_row["total_saved_tokens"] > 0:
-                            synthetic_events.append({
-                                "event_type": "ROLLUP_LIFETIME",
-                                "original_tokens": int(life_row["total_original_tokens"]),
-                                "saved_tokens": int(life_row["total_saved_tokens"]),
-                                "usd_saved": float(life_row["total_usd_saved"]),
-                                "model": "aggregate",
-                                "timestamp": int(time.time()),
-                                # Rolled-up historical mass of mixed provenance: conservatively estimated.
-                                "measurement": "estimated"
-                            })
-                    except Exception:
-                        pass
-
-                # The measurement column may be absent on legacy databases that have
-                # not yet been migrated by MetricsTracker._init_db; fall back to the
-                # event-type map so sync never blocks on schema drift.
-                try:
-                    rows = cur.execute(
-                        "SELECT id, timestamp, event_type, original_tokens, saved_tokens, est_usd_saved, details, measurement "
-                        "FROM events WHERE id > ? ORDER BY id ASC LIMIT 2000",
-                        (last_id,)
-                    ).fetchall()
-                except sqlite3.OperationalError:
-                    rows = cur.execute(
-                        "SELECT id, timestamp, event_type, original_tokens, saved_tokens, est_usd_saved, details, "
-                        "NULL as measurement "
-                        "FROM events WHERE id > ? ORDER BY id ASC LIMIT 2000",
-                        (last_id,)
-                    ).fetchall()
-                conn.close()
-            except Exception as e:
-                return {
-                    "success": False,
-                    "synced_events": 0,
-                    "error": f"Failed to read local metrics database: {str(e)}"
-                }
-
-            try:
                 from src.metrics import MetricsTracker
                 local_monthly_measured = MetricsTracker(db_path=METRICS_DB_PATH).get_monthly_saved_tokens(measured_only=True)
             except Exception:
                 local_monthly_measured = 0
             machine_fp = "" if os.environ.get("TOKENSAFE_TELEMETRY_DISABLED") in ("1", "true", "yes") else LicenseManager.get_machine_fingerprint()
 
-            if not rows and not synthetic_events:
-                last_q_sync = float(state.get("last_quota_sync_at", 0) or 0)
-                if not (machine_fp and active_key == "community" and (time.time() - last_q_sync > 3600)):
-                    return {
-                        "success": True,
-                        "synced_events": 0,
-                        "total_synced": state.get("total_synced_events", 0),
-                        "message": "All metrics are already up to date."
-                    }
-                formatted_items = [(None, None)]  # quota-only probe for community tier
-            else:
-                formatted_items = [
-                    (None, ev) for ev in synthetic_events
-                ]
-            current_last_id = last_id
-
-            for r in rows:
-                ev_id = int(r["id"])
-                raw_ts = r["timestamp"]
-                ts_int = int(time.time())
-                if isinstance(raw_ts, (int, float)):
-                    ts_int = int(raw_ts)
-                elif isinstance(raw_ts, str) and raw_ts.strip():
-                    try:
-                        ts_int = int(float(raw_ts.strip()))
-                    except ValueError:
-                        try:
-                            clean_iso = raw_ts.strip().replace("Z", "+00:00")
-                            dt = datetime.fromisoformat(clean_iso)
-                            ts_int = int(dt.timestamp())
-                        except Exception:
-                            ts_int = int(time.time())
-
-                model_name = os.environ.get("AGY_MODEL") or os.environ.get("MODEL") or "gemini-3.8-flash"
-                if r["details"]:
-                    try:
-                        det = json.loads(r["details"]) if isinstance(r["details"], str) else r["details"]
-                        if isinstance(det, dict) and det.get("model"):
-                            model_name = str(det["model"])
-                    except Exception:
-                        pass
-
-                formatted_items.append((ev_id, {
-                    "event_type": str(r["event_type"] or "PROMPT"),
-                    "original_tokens": int(r["original_tokens"] or 0),
-                    "saved_tokens": int(r["saved_tokens"] or 0),
-                    "usd_saved": float(r["est_usd_saved"] or 0.0),
-                    "model": model_name,
-                    "timestamp": ts_int,
-                    "measurement": resolve_measurement(str(r["event_type"] or "PROMPT"), r["measurement"])
-                }))
-
             total_sent = 0
             cumulative_synced = state.get("total_synced_events", 0)
             rollup_synced = bool(state.get("lifetime_rollup_synced", False))
+            current_last_id = last_id
             headers = {
                 "Content-Type": "application/json",
                 "User-Agent": "TokenSafe-Sync/2.6.0"
@@ -296,54 +199,163 @@ class TelemetrySync:
                     "error": err_msg
                 }
 
-            for i in range(0, len(formatted_items), batch_size):
-                batch_items = formatted_items[i:i + batch_size]
-                chunk = [item[1] for item in batch_items if item[1] is not None]
-                body_dict = {
-                    "email": target_email,
-                    "license_key": active_key,
-                    "events": chunk,
-                }
-                if machine_fp and active_key == "community":
-                    body_dict["machine_id"] = machine_fp
-                    body_dict["monthly_measured_saved"] = local_monthly_measured
-                body_bytes = json.dumps(body_dict).encode("utf-8")
-
-                req = urllib.request.Request(target_url, data=body_bytes, headers=headers, method="POST")
+            page_limit = 2000
+            max_pages = 25
+            for page_idx in range(max_pages):
                 try:
-                    with urllib.request.urlopen(req, timeout=timeout) as resp:
-                        if resp.status == 200:
+                    conn = sqlite3.connect(METRICS_DB_PATH)
+                    conn.row_factory = sqlite3.Row
+                    cur = conn.cursor()
+
+                    synthetic_events: List[Dict[str, Any]] = []
+                    if page_idx == 0 and not rollup_synced:
+                        try:
+                            life_row = cur.execute("SELECT * FROM lifetime_aggregates WHERE id = 1").fetchone()
+                            if life_row and life_row["total_saved_tokens"] > 0:
+                                synthetic_events.append({
+                                    "event_type": "ROLLUP_LIFETIME",
+                                    "original_tokens": int(life_row["total_original_tokens"]),
+                                    "saved_tokens": int(life_row["total_saved_tokens"]),
+                                    "usd_saved": float(life_row["total_usd_saved"]),
+                                    "model": "aggregate",
+                                    "timestamp": int(time.time()),
+                                    # Rolled-up historical mass of mixed provenance: conservatively estimated.
+                                    "measurement": "estimated"
+                                })
+                        except Exception:
+                            pass
+
+                    # The measurement column may be absent on legacy databases that have
+                    # not yet been migrated by MetricsTracker._init_db; fall back to the
+                    # event-type map so sync never blocks on schema drift.
+                    try:
+                        rows = cur.execute(
+                            "SELECT id, timestamp, event_type, original_tokens, saved_tokens, est_usd_saved, details, measurement "
+                            "FROM events WHERE id > ? ORDER BY id ASC LIMIT ?",
+                            (current_last_id, page_limit)
+                        ).fetchall()
+                    except sqlite3.OperationalError:
+                        rows = cur.execute(
+                            "SELECT id, timestamp, event_type, original_tokens, saved_tokens, est_usd_saved, details, "
+                            "NULL as measurement "
+                            "FROM events WHERE id > ? ORDER BY id ASC LIMIT ?",
+                            (current_last_id, page_limit)
+                        ).fetchall()
+                    conn.close()
+                except Exception as e:
+                    if total_sent > 0:
+                        return _record_failure(f"Failed to read local metrics database: {str(e)}")
+                    return {
+                        "success": False,
+                        "synced_events": 0,
+                        "error": f"Failed to read local metrics database: {str(e)}"
+                    }
+
+                if not rows and not synthetic_events:
+                    if page_idx == 0:
+                        last_q_sync = float(state.get("last_quota_sync_at", 0) or 0)
+                        if not (machine_fp and active_key == "community" and (time.time() - last_q_sync > 3600)):
+                            return {
+                                "success": True,
+                                "synced_events": 0,
+                                "total_synced": cumulative_synced,
+                                "message": "All metrics are already up to date."
+                            }
+                        formatted_items = [(None, None)]  # quota-only probe for community tier
+                    else:
+                        break
+                else:
+                    formatted_items = [
+                        (None, ev) for ev in synthetic_events
+                    ]
+
+                for r in rows:
+                    ev_id = int(r["id"])
+                    raw_ts = r["timestamp"]
+                    ts_int = int(time.time())
+                    if isinstance(raw_ts, (int, float)):
+                        ts_int = int(raw_ts)
+                    elif isinstance(raw_ts, str) and raw_ts.strip():
+                        try:
+                            ts_int = int(float(raw_ts.strip()))
+                        except ValueError:
                             try:
-                                resp_body = json.loads(resp.read().decode("utf-8") or "{}")
-                                srv_measured = int(resp_body.get("server_monthly_measured_saved") or 0)
-                                if srv_measured > 0:
-                                    from src.metrics import MetricsTracker
-                                    MetricsTracker(db_path=METRICS_DB_PATH).record_server_quota_floor(srv_measured)
+                                clean_iso = raw_ts.strip().replace("Z", "+00:00")
+                                dt = datetime.fromisoformat(clean_iso)
+                                ts_int = int(dt.timestamp())
                             except Exception:
-                                pass
-                            total_sent += len(chunk)
-                            cumulative_synced += len(chunk)
-                            for ev_id, ev_payload in batch_items:
-                                if ev_id is not None and ev_id > current_last_id:
-                                    current_last_id = ev_id
-                                if ev_payload and ev_payload.get("event_type") == "ROLLUP_LIFETIME":
+                                ts_int = int(time.time())
+
+                    model_name = os.environ.get("AGY_MODEL") or os.environ.get("MODEL") or "gemini-3.8-flash"
+                    if r["details"]:
+                        try:
+                            det = json.loads(r["details"]) if isinstance(r["details"], str) else r["details"]
+                            if isinstance(det, dict) and det.get("model"):
+                                model_name = str(det["model"])
+                        except Exception:
+                            pass
+
+                    formatted_items.append((ev_id, {
+                        "event_type": str(r["event_type"] or "PROMPT"),
+                        "original_tokens": int(r["original_tokens"] or 0),
+                        "saved_tokens": int(r["saved_tokens"] or 0),
+                        "usd_saved": float(r["est_usd_saved"] or 0.0),
+                        "model": model_name,
+                        "timestamp": ts_int,
+                        "measurement": resolve_measurement(str(r["event_type"] or "PROMPT"), r["measurement"])
+                    }))
+
+                for i in range(0, len(formatted_items), batch_size):
+                    batch_items = formatted_items[i:i + batch_size]
+                    chunk = [item[1] for item in batch_items if item[1] is not None]
+                    body_dict = {
+                        "email": target_email,
+                        "license_key": active_key,
+                        "events": chunk,
+                    }
+                    if machine_fp and active_key == "community":
+                        body_dict["machine_id"] = machine_fp
+                        body_dict["monthly_measured_saved"] = local_monthly_measured
+                    body_bytes = json.dumps(body_dict).encode("utf-8")
+
+                    req = urllib.request.Request(target_url, data=body_bytes, headers=headers, method="POST")
+                    try:
+                        with urllib.request.urlopen(req, timeout=timeout) as resp:
+                            if resp.status == 200:
+                                try:
+                                    resp_body = json.loads(resp.read().decode("utf-8") or "{}")
+                                    srv_measured = int(resp_body.get("server_monthly_measured_saved") or 0)
+                                    if srv_measured > 0:
+                                        from src.metrics import MetricsTracker
+                                        MetricsTracker(db_path=METRICS_DB_PATH).record_server_quota_floor(srv_measured)
+                                except Exception:
+                                    pass
+                                total_sent += len(chunk)
+                                cumulative_synced += len(chunk)
+                                for ev_id, ev_payload in batch_items:
+                                    if ev_id is not None and ev_id > current_last_id:
+                                        current_last_id = ev_id
+                                    if ev_payload and ev_payload.get("event_type") == "ROLLUP_LIFETIME":
+                                        rollup_synced = True
+                                if not synthetic_events:
                                     rollup_synced = True
-                            if not synthetic_events:
-                                rollup_synced = True
-                            cls.save_state({
-                                "last_synced_event_id": current_last_id,
-                                "last_synced_at": int(time.time()),
-                                "last_attempt_at": int(time.time()),
-                                "last_quota_sync_at": int(time.time()),
-                                "total_synced_events": cumulative_synced,
-                                "lifetime_rollup_synced": rollup_synced
-                            })
-                        else:
-                            return _record_failure(f"Server returned HTTP {resp.status}")
-                except urllib.error.HTTPError as he:
-                    return _record_failure(f"Cloud API error: {he.code} {he.reason}")
-                except Exception as ex:
-                    return _record_failure(f"Network error during sync: {str(ex)}")
+                                cls.save_state({
+                                    "last_synced_event_id": current_last_id,
+                                    "last_synced_at": int(time.time()),
+                                    "last_attempt_at": int(time.time()),
+                                    "last_quota_sync_at": int(time.time()),
+                                    "total_synced_events": cumulative_synced,
+                                    "lifetime_rollup_synced": rollup_synced
+                                })
+                            else:
+                                return _record_failure(f"Server returned HTTP {resp.status}")
+                    except urllib.error.HTTPError as he:
+                        return _record_failure(f"Cloud API error: {he.code} {he.reason}")
+                    except Exception as ex:
+                        return _record_failure(f"Network error during sync: {str(ex)}")
+
+                if len(rows) < page_limit:
+                    break
 
             return {
                 "success": True,
@@ -352,11 +364,48 @@ class TelemetrySync:
                 "message": f"Successfully synchronized {total_sent:,} events to TokenSafe Cloud."
             }
 
+    @staticmethod
+    def _is_pid_alive(pid: int) -> bool:
+        if pid <= 0:
+            return False
+        try:
+            os.kill(pid, 0)
+            return True
+        except (OSError, ProcessLookupError):
+            return False
+
     @classmethod
-    def sync_background(cls, throttle_seconds: float = 60.0, force: bool = False):
+    def _lock_is_active(cls, raw_content: str, allow_legacy_self: bool = False) -> bool:
+        """Interprets .sync.lock contents (`spawn:<token>:<ts>`, `worker:<pid>`, or legacy `<pid>`)."""
+        text = (raw_content or "").strip()
+        if not text:
+            return False
+        if text.startswith("spawn:"):
+            parts = text.split(":")
+            try:
+                claimed_at = float(parts[2])
+            except (IndexError, ValueError):
+                return False
+            return (time.time() - claimed_at) < 15.0
+        if text.startswith("worker:"):
+            try:
+                pid = int(text.split(":", 1)[1])
+            except ValueError:
+                return False
+            return cls._is_pid_alive(pid)
+        try:
+            pid = int(text)
+        except ValueError:
+            return False
+        if not allow_legacy_self and pid == os.getpid():
+            return False
+        return cls._is_pid_alive(pid)
+
+    @classmethod
+    def sync_background(cls, throttle_seconds: float = 20.0, force: bool = False):
         """
         Spawns a detached, non-blocking background OS process to sync metrics.
-        Throttled to run at most once every `throttle_seconds` (default: 60s)
+        Throttled to run at most once every `throttle_seconds` (default: 20s)
         using persistent state from sync_state.json.
         Detached from parent process group so it survives the termination of short-lived CLI lifecycle hooks.
         """
@@ -372,30 +421,35 @@ class TelemetrySync:
         if status.get("pending_events", 0) == 0:
             return
 
-        # Prevent overlapping sync runs via PID lock file.
-        # Atomic O_EXCL claim closes the check-then-write race where two hook
-        # processes could both pass the liveness check and spawn duplicate syncs.
+        os.makedirs(DATA_DIR, exist_ok=True)
+        # Claim a short-lived spawn handoff token atomically so concurrent hooks
+        # don't spawn duplicate workers, while the spawned child replaces the
+        # lock with its own `worker:<pid>` instead of deadlocking on parent PID.
+        claim_token = secrets.token_hex(8)
+        spawn_marker = f"spawn:{claim_token}:{now:.3f}"
         lock_claimed = False
         for _ in range(2):
             try:
                 fd = os.open(SYNC_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(fd, str(os.getpid()).encode("utf-8"))
-                os.close(fd)
+                try:
+                    os.write(fd, spawn_marker.encode("utf-8"))
+                finally:
+                    os.close(fd)
                 lock_claimed = True
                 break
             except FileExistsError:
                 try:
                     with open(SYNC_LOCK_PATH, "r", encoding="utf-8") as f:
-                        pid = int(f.read().strip())
-                    # Check if PID is still alive
-                    os.kill(pid, 0)
-                    return  # an active sync owns the lock
-                except (ValueError, OSError, ProcessLookupError):
-                    # Stale lock from a dead process: reclaim it once
-                    try:
-                        os.unlink(SYNC_LOCK_PATH)
-                    except OSError:
+                        existing = f.read()
+                    if cls._lock_is_active(existing, allow_legacy_self=False):
                         return
+                except OSError:
+                    return
+                # Stale spawn/dead-worker/legacy-self lock: reclaim it once
+                try:
+                    os.unlink(SYNC_LOCK_PATH)
+                except OSError:
+                    return
         if not lock_claimed:
             return
 
@@ -405,7 +459,7 @@ class TelemetrySync:
                 flags = subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
             script_path = os.path.abspath(__file__)
             subprocess.Popen(
-                [sys.executable, script_path, "--background"],
+                [sys.executable, script_path, "--background", f"--claim-token={claim_token}"],
                 cwd=PROJECT_ROOT,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
@@ -414,41 +468,80 @@ class TelemetrySync:
                 creationflags=flags
             )
         except Exception:
-            pass
+            try:
+                with open(SYNC_LOCK_PATH, "r", encoding="utf-8") as f:
+                    if f.read().strip() == spawn_marker:
+                        os.unlink(SYNC_LOCK_PATH)
+            except OSError:
+                pass
+
+
+def _claim_worker_lock(claim_token: str) -> bool:
+    """Claims or takes over .sync.lock for the current sync worker process."""
+    worker_marker = f"worker:{os.getpid()}"
+    for _ in range(2):
+        try:
+            fd = os.open(SYNC_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            try:
+                os.write(fd, worker_marker.encode("utf-8"))
+            finally:
+                os.close(fd)
+            return True
+        except FileExistsError:
+            try:
+                with open(SYNC_LOCK_PATH, "r", encoding="utf-8") as f:
+                    existing = f.read().strip()
+            except OSError:
+                return False
+
+            if claim_token and existing.startswith(f"spawn:{claim_token}:"):
+                tmp_path = f"{SYNC_LOCK_PATH}.{os.getpid()}.tmp"
+                try:
+                    fd = os.open(tmp_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+                    try:
+                        os.write(fd, worker_marker.encode("utf-8"))
+                    finally:
+                        os.close(fd)
+                    os.replace(tmp_path, SYNC_LOCK_PATH)
+                    return True
+                except OSError:
+                    try:
+                        if os.path.exists(tmp_path):
+                            os.unlink(tmp_path)
+                    except OSError:
+                        pass
+                    return False
+
+            if TelemetrySync._lock_is_active(existing, allow_legacy_self=True):
+                return False
+
+            try:
+                os.unlink(SYNC_LOCK_PATH)
+            except OSError:
+                return False
+    return False
 
 
 if __name__ == "__main__":
     is_bg = "--background" in sys.argv
+    claim_token = ""
+    for arg in sys.argv[1:]:
+        if arg.startswith("--claim-token="):
+            claim_token = arg.split("=", 1)[1].strip()
+
     os.makedirs(DATA_DIR, exist_ok=True)
-    # Claim the lock atomically; if another live process owns it, exit without syncing.
-    try:
-        fd = os.open(SYNC_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-        os.write(fd, str(os.getpid()).encode("utf-8"))
-        os.close(fd)
-    except FileExistsError:
-        try:
-            with open(SYNC_LOCK_PATH, "r", encoding="utf-8") as f:
-                pid = int(f.read().strip())
-            os.kill(pid, 0)
-            sys.exit(0)  # live owner is syncing already
-        except (ValueError, OSError, ProcessLookupError):
-            try:
-                os.unlink(SYNC_LOCK_PATH)
-            except OSError:
-                sys.exit(0)
-            try:
-                fd = os.open(SYNC_LOCK_PATH, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
-                os.write(fd, str(os.getpid()).encode("utf-8"))
-                os.close(fd)
-            except FileExistsError:
-                sys.exit(0)
+    if not _claim_worker_lock(claim_token):
+        sys.exit(0)
+
+    worker_marker = f"worker:{os.getpid()}"
     try:
         res = TelemetrySync.sync(timeout=10.0, verbose=not is_bg)
         if not is_bg:
             print(json.dumps(res, indent=2))
     finally:
         try:
-            if os.path.exists(SYNC_LOCK_PATH):
-                os.remove(SYNC_LOCK_PATH)
+            with open(SYNC_LOCK_PATH, "r", encoding="utf-8") as f:
+                if f.read().strip() == worker_marker:
+                    os.remove(SYNC_LOCK_PATH)
         except Exception:
             pass

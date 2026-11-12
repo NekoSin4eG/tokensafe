@@ -219,6 +219,8 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                                 },
                                 measurement="measured",  # bytes literally swapped
                             )
+                            from src.telemetry_sync import TelemetrySync
+                            TelemetrySync.sync_background(throttle_seconds=20.0)
                         except Exception:
                             pass
                     target_symbol = compaction.get("symbol")

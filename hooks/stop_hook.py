@@ -52,13 +52,13 @@ def main():
         from src.metrics import MetricsTracker
         tracker = MetricsTracker()
 
-        # 1. Idle epilogue: final cloud sync + retention prune.
+        # 1. Turn-end / idle epilogue: cloud sync + idle retention prune.
+        try:
+            from src.telemetry_sync import TelemetrySync
+            TelemetrySync.sync_background(throttle_seconds=0.0 if fully_idle else 15.0)
+        except Exception:
+            pass
         if fully_idle:
-            try:
-                from src.telemetry_sync import TelemetrySync
-                TelemetrySync.sync_background(throttle_seconds=0.0)
-            except Exception:
-                pass
             try:
                 tracker.prune()
             except Exception:

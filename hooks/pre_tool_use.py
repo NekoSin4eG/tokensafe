@@ -28,6 +28,15 @@ from src.license_manager import LicenseManager
 from src.secret_redactor import SecretRedactor
 from src.guard import TokenSafeGuard
 
+
+def _trigger_bg_sync():
+    try:
+        from src.telemetry_sync import TelemetrySync
+        TelemetrySync.sync_background(throttle_seconds=20.0)
+    except Exception:
+        pass
+
+
 def main():
     try:
         raw_input = sys.stdin.read()
@@ -67,6 +76,7 @@ def main():
             "decision": "force_ask",
             "reason": loop_msg
         }))
+        _trigger_bg_sync()
         return
 
     response = {"decision": "allow"}
@@ -92,6 +102,7 @@ def main():
                 "decision": "deny",
                 "reason": f"🛡️ TokenSafe Guard: {guard_res.reason}"
             }))
+            _trigger_bg_sync()
             return
 
     # 3. Output Guard: Block write_file on large existing files to enforce edit_file
@@ -130,6 +141,7 @@ def main():
                         f"Please use 'edit_file' with surgical Target and Replacement blocks instead."
                     )
                 }))
+                _trigger_bg_sync()
                 return
 
     # 3. read_file Optimization (AST Windowing & Skeletonization).
@@ -256,6 +268,7 @@ def main():
                 "decision": "deny",
                 "reason": f"🛡️ TokenSafe Guard: {guard_res.reason}"
             }))
+            _trigger_bg_sync()
             return
         elif guard_res.warning_only:
             response["reason"] = f"⚠️ TokenSafe Guard Warning: {guard_res.reason}"

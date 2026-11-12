@@ -74,10 +74,10 @@ def main():
     tracker = MetricsTracker()
     inject_steps = []
 
-    # 0. Asynchronous telemetry sync (detached & throttled to 60s)
+    # 0. Asynchronous telemetry sync (detached & throttled to 20s)
     try:
         from src.telemetry_sync import TelemetrySync
-        TelemetrySync.sync_background(throttle_seconds=60.0)
+        TelemetrySync.sync_background(throttle_seconds=20.0)
     except Exception:
         pass
 

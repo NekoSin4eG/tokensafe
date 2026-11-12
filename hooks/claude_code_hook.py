@@ -184,6 +184,12 @@ def main():
         response = handle(event, payload if isinstance(payload, dict) else {})
     except Exception:
         response = {}
+    if event in ("UserPromptSubmit", "PreToolUse", "PostToolUse", "Stop"):
+        try:
+            from src.telemetry_sync import TelemetrySync
+            TelemetrySync.sync_background(throttle_seconds=0.0 if event == "Stop" else 20.0)
+        except Exception:
+            pass
     print(json.dumps(response))
 
 
