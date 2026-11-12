@@ -74,7 +74,7 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
 ```
 *Extracts the targeted `LuckyWheelTab` implementation plus compact 1-line signatures for 1-hop dependencies with inert code and imports folded. Pass `"dep_mode": "full"` for full dependency bodies, `"include_deps": false` for 0-hop isolation, or `"force_full": true` to bypass a session pointer hit.*
 
-### 3. Public API Map Workflow
+### 4. Public API Map Workflow
 ```json
 {
   "ServerName": "tokensafe",
@@ -86,21 +86,20 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
 ```
 *Returns all exported interfaces and types without reading hundreds of module files.*
 
-### 4. Pre-flight Security & Hygiene Audit
+### 5. Pre-flight Security & Hygiene Audit
 ```json
 {
   "ServerName": "tokensafe",
   "ToolName": "guard_inspect",
   "Arguments": {
     "command": "git add .env",
-    "code": "const key = process.env.JWT_SECRET || 'hardcoded_secret';",
     "file_path": "src/auth.ts"
   }
 }
 ```
 *Validates commands and code snippets before execution; returns structured pass/block verdict with check_name.*
 
-### 5. Context Budget → Smart Compact Workflow
+### 6. Context Budget → Smart Compact Workflow
 ```json
 {
   "ServerName": "tokensafe",

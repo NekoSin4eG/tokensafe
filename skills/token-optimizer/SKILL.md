@@ -60,6 +60,8 @@ Quick pointers:
 - Search: `tokensafe:scoped_search(query, scope)` — never raw grep.
 - Inspect: `tokensafe:smart_read_file(path, symbol)` — definition + 1-hop deps.
 - Navigate: `tokensafe:get_architecture_graph(project_path)` / `tokensafe:get_api_surface(project_path)`.
+- Directory: `tokensafe:list_dir(path, depth=2)` — clean tree, never verbose `ls -la`.
+- Terminal: `tokensafe:sanitize_command(command, cwd)` — bounded logs/diffs, test runner guards.
 - Context: `tokensafe:compact_conversation(transcript_path)` / `tokensafe:context_budget`.
 
 ---
