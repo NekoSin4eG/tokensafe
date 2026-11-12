@@ -567,6 +567,17 @@ def npm_version_published(version: str) -> bool:
     return code == 0 and version in out
 
 
+def wait_for_npm(version: str, attempts: int = 24, delay: int = 10) -> bool:
+    """Waits for the npm registry to serve `version` (bounded ~4 min). The MCP
+    Registry refuses packages npm does not list yet, so a CDN lag right after
+    publish used to break Phase 7 and force a manual resume."""
+    for _ in range(attempts):
+        if npm_version_published(version):
+            return True
+        time.sleep(delay)
+    return False
+
+
 def registry_version_published(version: str) -> bool:
     try:
         import urllib.request
@@ -789,6 +800,10 @@ def run_release(target: str, otp: Optional[str] = None, no_bump: bool = False, s
             pending.append("npm publish staged — approve in npmjs.com, then re-run --resume")
         elif code == 0:
             print(f"  ✔ npm published ({mode})")
+            # Give the npm registry a bounded window to list the version before
+            # Phase 7 (the MCP Registry needs it) — avoids the CDN-lag pending.
+            if not wait_for_npm(next_v):
+                print("  ⚠ npm registry did not list the version yet — Phase 7 may need a resume")
         elif "previously staged version" in out or "E409" in out:
             print("  ⏳ npm version is already STAGED and waiting for your 2FA confirmation on npmjs.com (or email link).")
             print("     Approve the staged publish on npmjs.com, then re-run: python3 scripts/release.py release --resume")
@@ -828,9 +843,18 @@ def run_release(target: str, otp: Optional[str] = None, no_bump: bool = False, s
         else:
             # Packages must exist on npm/PyPI before the registry accepts them.
             print(out[-300:])
+            published_now = False
             if not npm_version_published(next_v):
-                print("  ⚠ npm package not published yet — registry needs it. Re-run after npm.")
-            pending.append("mcp-publisher publish")
+                print("  ⏳ npm CDN lag — waiting for the version to appear, then retrying the registry...")
+                if wait_for_npm(next_v):
+                    code_r, out_r = _sh([publisher, "publish", "server.json"], timeout=120)
+                    if code_r == 0:
+                        print("  ✔ registry published after npm CDN catch-up")
+                        published_now = True
+                    else:
+                        print(out_r[-300:])
+            if not published_now and not registry_version_published(next_v):
+                pending.append("mcp-publisher publish")
 
     # Phase 8: tokensafe-cloud sync & auto-deploy ------------------------------
     cloud_head_sha: Optional[str] = None
