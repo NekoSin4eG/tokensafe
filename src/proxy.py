@@ -51,6 +51,12 @@ class EventBroadcaster:
                 self._subscribers.remove(q)
 
     def publish(self, event_type: str, data: Dict[str, Any]):
+        # Live relay: anonymized metadata copy to the cloud live view (best-effort)
+        try:
+            from src.live_relay import LIVE_RELAY
+            LIVE_RELAY.record(event_type, data if isinstance(data, dict) else {})
+        except Exception:
+            pass
         payload = f"event: {event_type}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
         with self._lock:
             dead = []
@@ -169,7 +175,10 @@ def _translate_openai_payload_to_anthropic(payload: Dict[str, Any]) -> Dict[str,
                     if not isinstance(tool_input, dict):
                         tool_input = {"_raw": tool_input}
                 except Exception:
-                    tool_input = {}
+                    # Self-healing: repair malformed argument JSON instead of
+                    # silently dropping the tool call's inputs.
+                    from src.json_repair import parse_tool_arguments
+                    tool_input = parse_tool_arguments(fn.get("arguments")) or {}
                 blocks.append({
                     "type": "tool_use",
                     "id": tc.get("id") or "toolu_call",

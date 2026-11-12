@@ -22,6 +22,7 @@ sys.path.insert(0, BASE_DIR)
 from src.compactor import PromptCompactor
 from src.skeletonizer import Skeletonizer
 from src.slicer import ToolSlicer
+from src.schema_slicer import SchemaSlicer
 from src.dependency_prefetcher import DependencyPrefetcher
 from src.command_sanitizer import CommandSanitizer
 from src.loop_detector import LoopDetector
@@ -91,6 +92,32 @@ TOOLS = [
                 "end_line": {"type": "integer", "description": "Optional: ending line number"}
             },
             "required": ["path"]
+        }
+    },
+    {
+        "name": "smart_bundle",
+        "description": "Reads 2-8 related symbols across multiple files as ONE merged context bundle: per-file AST skeletons with shared import lines deduplicated and merged 1-hop dependency signatures. Use it instead of 3+ separate smart_read_file calls on related code (one roundtrip, no duplicated imports/types).",
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "targets": {
+                    "type": "array",
+                    "maxItems": 8,
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "path": {"type": "string", "description": "Absolute path to the code file"},
+                            "symbol": {"type": "string", "description": "Optional symbol to keep unfolded (class/function name)"}
+                        },
+                        "required": ["path"]
+                    },
+                    "description": "Up to 8 {path, symbol} targets; list several symbols of the same file as separate entries"
+                },
+                "include_deps": {"type": "boolean", "description": "Optional: include merged 1-hop dependency signatures (default: true)"},
+                "dep_mode": {"type": "string", "enum": ["signature", "full"], "description": "Optional: kept for parity with smart_read_file; signatures are always merged for bundles"},
+                "force_full": {"type": "boolean", "description": "Optional: bypass session pointer deduplication"}
+            },
+            "required": ["targets"]
         }
     },
     {
@@ -610,6 +637,23 @@ def _resolve_dep_mode(args: dict) -> Tuple[bool, str]:
     return True, "signature"
 
 
+def _repo_fingerprint(graph) -> str:
+    """Stable Shared-Team-Symbol-Index cache key for an indexed repo: repo name +
+    per-file relative paths + sizes. Machine-independent on purpose (mtimes differ
+    across clones, sizes survive them); a 7-day TTL bounds staleness on the cloud."""
+    import hashlib
+    h = hashlib.sha256()
+    root = os.path.abspath(getattr(graph, "root_dir", "") or "")
+    h.update(os.path.basename(root).encode("utf-8", "ignore"))
+    stats = getattr(graph, "file_stats", {}) or {}
+    for rel in sorted(stats.keys()):
+        _m, s = stats[rel]
+        h.update(f"{rel}:{int(s)};".encode("utf-8", "ignore"))
+    if not stats:
+        h.update(f"symbols:{len(getattr(graph, 'symbols', {}) or {})}".encode("utf-8", "ignore"))
+    return h.hexdigest()[:40]
+
+
 def handle_tool_call(name: str, args: dict) -> dict:
     if args is None or not isinstance(args, dict):
         args = {}
@@ -698,6 +742,26 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
 
         if _is_binary_file(path):
             return _fallback_error("smart_read_file", f"'{os.path.basename(path)}' appears to be a binary file")
+
+        # Heavy declarative schema files (OpenAPI/Swagger/Prisma/GraphQL/SQL DDL):
+        # generic AST skeletonization does not apply — route to the schema slicer.
+        # `symbol` carries the target (a spec path, model, type or table); an empty
+        # symbol yields a compact overview instead of a 20k-50k token dump.
+        schema_kind = SchemaSlicer.detect(os.path.abspath(path))
+        if schema_kind:
+            sliced, sinfo = SchemaSlicer.slice_file(os.path.abspath(path), target=(symbol or ""))
+            if sliced:
+                orig_t = max(1000, st.st_size // 4)
+                sliced_t = count_tokens(sliced)
+                tracker.record_event(
+                    session_id=_mcp_session_id(),
+                    event_type="SCHEMA_SLICE",
+                    original_tokens=orig_t,
+                    optimized_tokens=sliced_t,
+                    details={"kind": sinfo.get("kind"), "mode": sinfo.get("mode"), "target": (symbol or "")[:120]}
+                )
+                header = f"// [TokenSafe Schema Slice: {sinfo.get('kind')} | mode={sinfo.get('mode')} | target='{(symbol or '')[:80]}']\n"
+                return {"content": [{"type": "text", "text": header + sliced}]}
 
         # Community 500k quota reached: soft-degrade to bounded raw read (disable Graph/AST/Pointer/Team Cache)
         if is_quota_exceeded:
@@ -856,6 +920,117 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             with open(path, "r", encoding="utf-8", errors="replace") as f:
                 content = f.read()
         return {"content": [{"type": "text", "text": (prefetch_block or "") + content}]}
+
+    elif name == "smart_bundle":
+        targets = args.get("targets")
+        if not isinstance(targets, list) or not targets:
+            return _fallback_error("smart_bundle", "missing required 'targets' array of {path, symbol} objects")
+        if len(targets) > 8:
+            return _fallback_error("smart_bundle", "too many targets (max 8)")
+        if is_quota_exceeded:
+            LicenseManager.should_emit_quota_banner(tracker, session_id=_mcp_session_id(), every_n_turns=5)
+            return {"content": [{"type": "text", "text": f"{quota.get('warning', '')}\n\nsmart_bundle is paused over the 500k Community limit. Use single smart_read_file calls, or activate a subscription at https://tokensafe.dev/#pricing."}]}
+
+        inc_deps, _eff_dep_mode = _resolve_dep_mode(args)
+        max_tokens = _safe_int(os.environ.get("TOKENSAFE_BUNDLE_MAX_TOKENS"), 6000, lo=1000, hi=50000)
+
+        by_file: Dict[str, List[str]] = {}
+        for t in targets:
+            if not isinstance(t, dict) or not str(t.get("path") or "").strip():
+                return _fallback_error("smart_bundle", "each target must be {path: str, symbol?: str}")
+            by_file.setdefault(os.path.abspath(str(t["path"])), []).append(str(t.get("symbol") or "").strip())
+
+        missing = [p for p in by_file if not os.path.isfile(p)]
+        if missing:
+            return {"isError": True, "content": [{"type": "text", "text": f"File(s) not found: {', '.join(missing)}"}]}
+
+        bundle_max_bytes = 512 * 1024
+        file_sections: List[Tuple[str, str, List[str]]] = []  # (abs_path, skeleton, import_lines)
+        dep_lines: List[str] = []
+        seen_dep_lines: set = set()
+        orig_tokens_est = 0
+
+        _imp_line_re = re.compile(r"^\s*(?:import\s|from\s+\S+\s+import\b|use\s|using\s|#include|require(?:_relative)?\s|extern crate\s).*$", re.MULTILINE)
+
+        for p, symbols in by_file.items():
+            try:
+                st_b = os.stat(p)
+                with open(p, "r", encoding="utf-8", errors="replace") as f:
+                    code = f.read(bundle_max_bytes)
+            except OSError as e:
+                return _fallback_error("smart_bundle", f"cannot read {p}: {e}")
+            orig_tokens_est += max(200, st_b.st_size // 4)
+            ext = os.path.splitext(p)[1].lower()
+            keep = {s for s in symbols if s} or None
+            skel = Skeletonizer.skeletonize_code(code, ext, keep_symbols=keep)
+            imp_lines = sorted({m.group(0).strip() for m in _imp_line_re.finditer(skel)})
+            file_sections.append((p, skel, imp_lines))
+
+            if inc_deps and keep:
+                try:
+                    graph, rel = GraphEngine.for_file(p)
+                    if graph and rel:
+                        for sym in keep:
+                            # A class target's call edges live on its methods:
+                            # resolve every qual key under the target symbol.
+                            keys = [k for k in graph.symbols if k == f"{rel}::{sym}" or k.startswith(f"{rel}::{sym}::")]
+                            for key in keys[:12]:
+                                qual = key[len(rel) + 2:]
+                                nb = graph.get_neighborhood(qual, target_file=rel)
+                                for dep_key in sorted(nb.get("one_hop", [])):
+                                    dep_sym = graph.symbols.get(dep_key)
+                                    if not dep_sym:
+                                        continue
+                                    line = f"  {qual} -> {dep_key[len(rel) + 2:]}: {dep_sym.signature.strip()[:160]}"
+                                    if line not in seen_dep_lines:
+                                        seen_dep_lines.add(line)
+                                        dep_lines.append(line)
+                except Exception:
+                    pass
+
+        # Shared imports: lines present in 2+ files are emitted once
+        from collections import Counter
+        imp_counter = Counter()
+        for _p, _skel, imps in file_sections:
+            imp_counter.update(set(imps))
+        shared = sorted({ln for ln, cnt in imp_counter.items() if cnt >= 2 and len(ln) > 4})
+
+        parts: List[str] = []
+        if shared:
+            parts.append("// [Shared imports — deduplicated across files]")
+            parts.extend(f"  {ln}" for ln in shared[:40])
+        for p, skel, imps in file_sections:
+            body = skel
+            if shared:
+                body = "\n".join(ln for ln in body.splitlines() if ln.strip() not in shared)
+            parts.append(f"\n// ===== {os.path.basename(p)} ({len(by_file[p])} symbol target(s)) =====")
+            parts.append(body)
+        if dep_lines:
+            parts.append("\n// [Merged 1-hop dependency signatures (deduplicated)]")
+            parts.extend(dep_lines)
+        bundle = "\n".join(parts)
+
+        bundle_t = count_tokens(bundle)
+        if bundle_t > max_tokens and dep_lines:
+            # Graceful degradation: drop the merged dependency signatures first
+            deps_idx = bundle.find("\n// [Merged 1-hop dependency signatures")
+            if deps_idx > 0:
+                bundle = bundle[:deps_idx] + (
+                    f"\n// [TokenSafe smart_bundle: dependency signatures omitted (output cap {max_tokens} tokens)"
+                    " — narrow the 'targets' list for deeper detail.]"
+                )
+            bundle_t = count_tokens(bundle)
+        if bundle_t > max_tokens:
+            bundle += f"\n// [TokenSafe smart_bundle: output exceeds the {max_tokens}-token cap — narrow the 'targets' list.]"
+
+        tracker.record_event(
+            session_id=_mcp_session_id(),
+            event_type="BUNDLE",
+            original_tokens=min(orig_tokens_est, 200000),
+            optimized_tokens=bundle_t,
+            details={"files": len(by_file), "targets": len(targets), "shared_imports": len(shared), "dep_lines": len(dep_lines)}
+        )
+        return {"content": [{"type": "text", "text": bundle}]}
 
     elif name == "compress_prompt":
         prompt = args.get("prompt", "")
@@ -1152,6 +1327,34 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
                 "warning": quota.get("warning"),
             }, indent=2, ensure_ascii=False)}]}
         graph = GraphEngine.get_instance(target_abs)
+        # Cap estimated crawl tokens to max 50,000 to prevent runaway spikes on large/root dirs
+        capped_files = min(80, len(graph.file_symbols))
+        est_crawl_tokens = min(50000, max(5000, capped_files * 600))
+        topo_tokens = 250
+
+        # Shared Team Symbol Index: reuse a teammate's graph for the exact same
+        # repo state (key = rel paths + sizes, so clones with identical trees hit).
+        fp = _repo_fingerprint(graph)
+        team_cached = None
+        try:
+            raw_cached = TeamCache.get("arch_index", fp)
+            if raw_cached:
+                team_cached = json.loads(raw_cached)
+        except Exception:
+            team_cached = None
+        if isinstance(team_cached, dict) and team_cached.get("god_nodes") is not None:
+            payload = dict(team_cached)
+            payload["source"] = "team_symbol_index"
+            hit_text = json.dumps(payload, indent=2, ensure_ascii=False)
+            tracker.record_event(
+                session_id=_mcp_session_id(),
+                event_type="TEAM_CACHE_HIT",
+                original_tokens=est_crawl_tokens,
+                optimized_tokens=topo_tokens,
+                details={"source": "team_symbol_index", "indexed_files": len(graph.file_symbols)}
+            )
+            return {"content": [{"type": "text", "text": hit_text}]}
+
         god_nodes = graph.get_god_nodes(7)
         banner = graph.format_topology_banner()
         payload = {
@@ -1161,10 +1364,6 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             "total_symbols": len(graph.symbols),
             "god_nodes": god_nodes
         }
-        # Cap estimated crawl tokens to max 50,000 to prevent runaway spikes on large/root dirs
-        capped_files = min(80, len(graph.file_symbols))
-        est_crawl_tokens = min(50000, max(5000, capped_files * 600))
-        topo_tokens = 250
         tracker.record_event(
             session_id=_mcp_session_id(),
             event_type="GRAPH_TOPOLOGY",
@@ -1172,6 +1371,10 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             optimized_tokens=topo_tokens,
             details={"hubs_count": len(god_nodes), "indexed_files": len(graph.file_symbols)}
         )
+        try:
+            TeamCache.put("arch_index", fp, json.dumps(payload, ensure_ascii=False, default=str))
+        except Exception:
+            pass
         return {"content": [{"type": "text", "text": json.dumps(payload, indent=2, ensure_ascii=False)}]}
 
     elif name == "get_api_surface":
@@ -1185,11 +1388,29 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             LicenseManager.should_emit_quota_banner(tracker, session_id=_mcp_session_id(), every_n_turns=5)
             return {"content": [{"type": "text", "text": f"{quota.get('warning', '')}\n\nAPI surface map generation is paused over the 500k Community limit. Use scoped_search or list_dir, or activate a subscription at https://tokensafe.dev/#pricing."}]}
         graph = GraphEngine.get_instance(target_abs)
-        surface_md = graph.generate_api_surface()
-        surface_tokens = count_tokens(surface_md)
         # Cap estimated crawl tokens to max 60,000
         capped_files = min(100, len(graph.file_symbols))
         est_orig_tokens = min(60000, max(10000, capped_files * 600))
+
+        # Shared Team Symbol Index surface variant (separate key from the graph payload)
+        fp = _repo_fingerprint(graph) + ":surface"
+        team_cached_md = None
+        try:
+            team_cached_md = TeamCache.get("arch_index", fp)
+        except Exception:
+            team_cached_md = None
+        if team_cached_md:
+            tracker.record_event(
+                session_id=_mcp_session_id(),
+                event_type="TEAM_CACHE_HIT",
+                original_tokens=est_orig_tokens,
+                optimized_tokens=count_tokens(team_cached_md),
+                details={"source": "team_symbol_index", "type": "API_SURFACE"}
+            )
+            return {"content": [{"type": "text", "text": team_cached_md}]}
+
+        surface_md = graph.generate_api_surface()
+        surface_tokens = count_tokens(surface_md)
         tracker.record_event(
             session_id=_mcp_session_id(),
             event_type="GRAPH_TOPOLOGY",
@@ -1197,6 +1418,10 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
             optimized_tokens=surface_tokens,
             details={"type": "API_SURFACE", "symbols_count": len(graph.symbols)}
         )
+        try:
+            TeamCache.put("arch_index", fp, surface_md[:200000])
+        except Exception:
+            pass
         return {"content": [{"type": "text", "text": surface_md}]}
 
     elif name == "list_dir":
@@ -1382,6 +1607,11 @@ def run_mcp_server():
             tool_name = str(params.get("name") or "")
             raw_tool_args = params.get("arguments")
             tool_args = raw_tool_args if isinstance(raw_tool_args, dict) else {}
+            if not tool_args and raw_tool_args:
+                # Self-healing: hosts on small/local models intermittently send
+                # arguments as a malformed JSON string — repair before failing.
+                from src.json_repair import parse_tool_arguments
+                tool_args = parse_tool_arguments(raw_tool_args) or {}
             try:
                 response["result"] = _execute_with_timeout(tool_name, tool_args)
             except Exception as e:
