@@ -1133,11 +1133,53 @@ class TestReleaseVersionConsistency(unittest.TestCase):
         spec = importlib.util.spec_from_file_location("release_tool", script)
         mod = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mod)
-        self.assertEqual(mod.parse_release_args(["--resume"]), ("patch", None, True))
-        self.assertEqual(mod.parse_release_args(["--otp=123456", "2.5.2", "--no-bump"]), ("2.5.2", "123456", True))
-        self.assertEqual(mod.parse_release_args(["minor", "--otp", "654321"]), ("minor", "654321", False))
+        self.assertEqual(mod.parse_release_args(["--resume"]), ("patch", None, True, False))
+        self.assertEqual(mod.parse_release_args(["--otp=123456", "2.5.2", "--no-bump", "--skip-cloud"]), ("2.5.2", "123456", True, True))
+        self.assertEqual(mod.parse_release_args(["minor", "--otp", "654321"]), ("minor", "654321", False, False))
         notes = mod.generate_release_notes(mod.get_current_version())
         self.assertNotIn("chore(release): bump version", notes)
+
+    def test_release_npm_token_resolution_and_cloud_update(self):
+        import importlib.util
+        from unittest.mock import patch
+        script = os.path.join(PROJECT_ROOT, "scripts", "release.py")
+        spec = importlib.util.spec_from_file_location("release_tool", script)
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+
+        # Env takes priority without reading defaults
+        with patch.dict(os.environ, {"NPM_TOKEN": "npm_test_tok_123"}, clear=False):
+            self.assertEqual(mod.resolve_npm_token(), "npm_test_tok_123")
+
+        # Cloud repo manifests update cleanly in isolation
+        tmp = tempfile.mkdtemp(prefix="ts_cloud_release_")
+        self.addCleanup(shutil.rmtree, tmp, ignore_errors=True)
+        os.makedirs(os.path.join(tmp, "src", "cloud"))
+        os.makedirs(os.path.join(tmp, ".github", "workflows"))
+        with open(os.path.join(tmp, "src", "cloud", "config.py"), "w", encoding="utf-8") as f:
+            f.write('HARDCODED_VERSION = "2.5.2"\n')
+        with open(os.path.join(tmp, "Dockerfile.cloud"), "w", encoding="utf-8") as f:
+            f.write('RUN pip install "tokensafe>=2.5.2,<3"\n')
+        with open(os.path.join(tmp, ".github", "workflows", "test.yml"), "w", encoding="utf-8") as f:
+            f.write('        run: pip install "tokensafe>=2.5.2,<3"\n')
+        with open(os.path.join(tmp, "package.json"), "w", encoding="utf-8") as f:
+            json.dump({"name": "tokensafe", "version": "2.5.2"}, f)
+        with open(os.path.join(tmp, "plugin.json"), "w", encoding="utf-8") as f:
+            json.dump({"name": "tokensafe", "version": "2.5.2"}, f)
+        with open(os.path.join(tmp, "pyproject.toml"), "w", encoding="utf-8") as f:
+            f.write('version = "2.5.2"\n')
+        with open(os.path.join(tmp, "server.json"), "w", encoding="utf-8") as f:
+            json.dump({"version": "2.5.2", "packages": [{"registryType": "npm", "version": "2.5.2"}]}, f)
+
+        mod.update_cloud_repo_version(tmp, "2.6.0")
+        with open(os.path.join(tmp, "src", "cloud", "config.py"), encoding="utf-8") as f:
+            self.assertIn('HARDCODED_VERSION = "2.6.0"', f.read())
+        with open(os.path.join(tmp, "Dockerfile.cloud"), encoding="utf-8") as f:
+            self.assertIn("tokensafe>=2.6.0,<3", f.read())
+        with open(os.path.join(tmp, "server.json"), encoding="utf-8") as f:
+            sdata = json.load(f)
+        self.assertEqual(sdata["version"], "2.6.0")
+        self.assertEqual(sdata["packages"][0]["version"], "2.6.0")
 
 
 class TestContextBudgetHUD(unittest.TestCase):
