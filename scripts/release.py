@@ -523,6 +523,18 @@ def sync_and_push_cloud_repo(cloud_root: str, next_v: str) -> Tuple[bool, str, O
     p_code, p_out = _sh(["git", "push", "origin", "main"], cwd=cloud_root)
     if p_code != 0:
         return False, f"push failed: {p_out[-300:]}", None
+
+    # Refresh the local gitignored dist copies (src/*.py) so the cloud working
+    # tree matches the freshly released client instead of drifting stale (the
+    # CI merge step does the same against a fresh checkout; locally the stale
+    # copies would otherwise shadow `import src` during manual test runs).
+    try:
+        import glob as _glob
+        for src_file in _glob.glob(os.path.join(PROJECT_ROOT, "src", "*.py")):
+            shutil.copy2(src_file, os.path.join(cloud_root, "src", os.path.basename(src_file)))
+    except Exception:
+        pass
+
     sha = _sh(["git", "rev-parse", "HEAD"], cwd=cloud_root)[1].strip()
     return True, "pushed", sha
 
