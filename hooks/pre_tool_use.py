@@ -53,6 +53,14 @@ def _handle(payload: dict) -> dict:
     # package.json and Guard audit git staging in the user's repo (never plugin CWD).
     workspace_paths = payload.get("workspacePaths") if isinstance(payload.get("workspacePaths"), list) else []
     hook_cwd = str(payload.get("cwd") or (workspace_paths[0] if workspace_paths else "") or os.getcwd())
+    try:
+        from src.paths import save_active_workspace
+        if workspace_paths and workspace_paths[0]:
+            save_active_workspace(str(workspace_paths[0]))
+        elif hook_cwd:
+            save_active_workspace(hook_cwd)
+    except Exception:
+        pass
 
     tracker = MetricsTracker()
     quota = LicenseManager.check_quota(tracker)

@@ -64,6 +64,25 @@ class TestScopedSearch(unittest.TestCase):
         home_res = ScopedSearch.search("anything", project_path=os.path.expanduser("~"))
         self.assertFalse(home_res["success"])
 
+    def test_scoped_search_extension_scope(self):
+        res = ScopedSearch.search("class ScopedSearch", scope="py")
+        self.assertTrue(res["success"])
+        self.assertTrue(any("src/scoped_search.py" in m["file"] for m in res["matches"]))
+
+    def test_mcp_scoped_search_subfolder_in_scope(self):
+        # Testing agent passing subfolder in 'scope' (e.g. scope="src")
+        res = handle_tool_call("scoped_search", {"query": "ScopedSearch", "scope": "src"})
+        self.assertNotIn("isError", res)
+        text = res["content"][0]["text"]
+        self.assertIn("ScopedSearch", text)
+
+    def test_mcp_scoped_search_relative_path(self):
+        # Testing agent passing relative path in 'path'
+        res = handle_tool_call("scoped_search", {"query": "ScopedSearch", "path": "src"})
+        self.assertNotIn("isError", res)
+        text = res["content"][0]["text"]
+        self.assertIn("ScopedSearch", text)
+
 
 if __name__ == "__main__":
     unittest.main()

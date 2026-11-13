@@ -19,6 +19,7 @@ active directory is identical for every agent on the machine.
 import os
 import shutil
 import sqlite3
+from typing import Optional
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -110,3 +111,49 @@ def _migrate_into(target: str) -> None:
             f.write("1")
     except Exception:
         pass
+
+
+def is_plugin_or_system_dir(path: str) -> bool:
+    """Returns True if path is a system root or inside an agent plugin directory."""
+    if not path:
+        return True
+    abs_p = os.path.abspath(path)
+    system_roots = {"/", "/Users", "/home", "/root", os.path.expanduser("~")}
+    if abs_p in system_roots:
+        return True
+    lower = abs_p.lower()
+    if any(k in lower for k in (".gemini/config/plugins", "/.tokensafe", "plugins/tokensafe", ".cursor/extensions")):
+        return True
+    return False
+
+
+def save_active_workspace(path: str) -> None:
+    """Records the active user workspace directory observed by lifecycle hooks."""
+    if not path or not os.path.isabs(path) or not os.path.isdir(path):
+        return
+    if is_plugin_or_system_dir(path):
+        return
+    try:
+        data_dir = resolve_data_dir()
+        os.makedirs(data_dir, exist_ok=True)
+        marker = os.path.join(data_dir, ".active_workspace")
+        with open(marker, "w", encoding="utf-8") as f:
+            f.write(os.path.abspath(path))
+    except Exception:
+        pass
+
+
+def get_active_workspace() -> Optional[str]:
+    """Retrieves the last known active user workspace directory."""
+    try:
+        data_dir = resolve_data_dir()
+        marker = os.path.join(data_dir, ".active_workspace")
+        if os.path.isfile(marker):
+            with open(marker, "r", encoding="utf-8") as f:
+                path = f.read().strip()
+                if path and os.path.isabs(path) and os.path.isdir(path):
+                    if not is_plugin_or_system_dir(path):
+                        return path
+    except Exception:
+        pass
+    return None

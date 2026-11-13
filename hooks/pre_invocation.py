@@ -64,6 +64,14 @@ def _handle(payload: dict) -> dict:
         invocation_num = 1
     transcript_path = str(payload.get("transcriptPath") or "")
 
+    try:
+        from src.paths import save_active_workspace
+        raw_ws = payload.get("workspacePaths")
+        if raw_ws and isinstance(raw_ws, list) and raw_ws[0]:
+            save_active_workspace(str(raw_ws[0]))
+    except Exception:
+        pass
+
     tracker = MetricsTracker()
     inject_steps = []
 

@@ -38,6 +38,7 @@ from src.diff_slicer import DiffSlicer
 from src.guard import TokenSafeGuard
 from src.scoped_search import ScopedSearch
 from src.license_manager import LicenseManager
+from src.paths import get_active_workspace, is_plugin_or_system_dir
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
@@ -250,12 +251,11 @@ TOOLS = [
                 },
                 "scope": {
                     "type": "string",
-                    "enum": ["code", "config", "all"],
-                    "description": "Scope of search: 'code' (source files only), 'config' (json, toml, yaml), or 'all' (default: 'all')"
+                    "description": "Filter scope: 'code', 'config', 'all', a file extension (e.g. 'go', 'ts', '*.py'), or a subfolder path (e.g. 'internal/promo') (default: 'all')"
                 },
                 "path": {
                     "type": "string",
-                    "description": "Directory or project path to search (alias for project_path)"
+                    "description": "Directory or project path to search (alias for project_path, e.g. '.', './src', 'internal/promo')"
                 },
                 "project_path": {
                     "type": "string",
@@ -399,17 +399,24 @@ def build_dir_tree(dir_path: str, max_depth: int = 2, max_entries: int = 80) -> 
 
 def _resolve_project_root(args: dict) -> Tuple[Optional[str], Optional[str]]:
     """
-    Safely resolves the target project root without falling back to system root dirs.
+    Safely resolves the target project root without falling back to system root dirs or plugin dirs.
     """
     target = args.get("project_path") or args.get("root_dir") or args.get("path") or args.get("directory")
-    system_roots = {"/", "/Users", "/home", "/root", os.path.expanduser("~")}
+    active_ws = get_active_workspace()
 
     if target:
-        target_abs = os.path.abspath(target)
+        if not os.path.isabs(target):
+            if active_ws and os.path.isdir(os.path.join(active_ws, target)):
+                target_abs = os.path.abspath(os.path.join(active_ws, target))
+            else:
+                target_abs = os.path.abspath(target)
+        else:
+            target_abs = os.path.abspath(target)
+
         if os.path.isfile(target_abs):
             target_abs = os.path.dirname(target_abs)
-        if target_abs in system_roots:
-            return None, f"Error: Refusing to scan system root or home directory '{target}'. Please provide a specific project directory."
+        if is_plugin_or_system_dir(target_abs):
+            return None, f"Error: Refusing to scan system root or plugin directory '{target}'. Please provide a specific project directory."
         if not os.path.isdir(target_abs):
             return None, f"Error: project_path not found or not a directory: '{target}'."
         return target_abs, None
@@ -419,14 +426,18 @@ def _resolve_project_root(args: dict) -> Tuple[Optional[str], Optional[str]]:
         candidate = os.environ.get(env_var)
         if candidate:
             cand_abs = os.path.abspath(candidate)
-            if cand_abs not in system_roots and os.path.isdir(cand_abs):
+            if not is_plugin_or_system_dir(cand_abs) and os.path.isdir(cand_abs):
                 return cand_abs, None
 
-    # Check cwd
+    # Check active workspace recorded by lifecycle hooks
+    if active_ws and not is_plugin_or_system_dir(active_ws) and os.path.isdir(active_ws):
+        return active_ws, None
+
+    # Check cwd (only if it is not inside an agent plugin or system root directory)
     cwd = os.getcwd()
     if cwd:
         cwd_abs = os.path.abspath(cwd)
-        if cwd_abs not in system_roots and os.path.isdir(cwd_abs):
+        if not is_plugin_or_system_dir(cwd_abs) and os.path.isdir(cwd_abs):
             return cwd_abs, None
 
     # Hint with active projects if found under ~/Documents/projects
@@ -1458,17 +1469,41 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         if not query:
             return _fallback_error("scoped_search", "missing required 'query' argument")
 
-        scope = args.get("scope", "all")
+        raw_scope = str(args.get("scope") or "all").strip()
         raw_path = args.get("project_path") or args.get("path") or args.get("root_dir") or args.get("directory")
+        active_ws = get_active_workspace()
+
+        # 1. Resolve base directory safely without scanning plugin or system roots
         if raw_path:
-            target_path = os.path.abspath(raw_path)
+            if not os.path.isabs(raw_path):
+                if active_ws and os.path.isdir(os.path.join(active_ws, raw_path)):
+                    target_path = os.path.abspath(os.path.join(active_ws, raw_path))
+                else:
+                    target_path = os.path.abspath(raw_path)
+            else:
+                target_path = os.path.abspath(raw_path)
+
             if os.path.isfile(target_path):
                 target_path = os.path.dirname(target_path)
+            if is_plugin_or_system_dir(target_path):
+                return _fallback_error("scoped_search", f"refusing to search system root or plugin dir '{raw_path}'")
         else:
             resolved_path, err = _resolve_project_root(args)
             if err or not resolved_path:
                 return _fallback_error("scoped_search", err or "unspecified project_path")
             target_path = resolved_path
+
+        # 2. Smart scope routing: handle agents passing subdirectories or extensions in `scope`
+        scope = raw_scope
+        if raw_scope and raw_scope.lower() not in ("code", "config", "all"):
+            candidate_subdir = os.path.normpath(os.path.join(target_path, raw_scope))
+            if os.path.isdir(candidate_subdir):
+                target_path = candidate_subdir
+                scope = "all"
+            elif "/" in raw_scope or "\\" in raw_scope:
+                if os.path.exists(candidate_subdir):
+                    target_path = candidate_subdir
+                    scope = "all"
 
         max_res = _safe_int(args.get("max_results"), 25, lo=1, hi=100)
         c_sens = bool(args.get("case_sensitive", False))

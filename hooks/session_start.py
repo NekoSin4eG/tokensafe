@@ -60,6 +60,11 @@ def main():
     raw_ws = payload.get("workspacePaths")
     workspace_paths = raw_ws if isinstance(raw_ws, list) else []
     workspace_root = str(workspace_paths[0]) if workspace_paths else os.getcwd()
+    try:
+        from src.paths import save_active_workspace
+        save_active_workspace(workspace_root)
+    except Exception:
+        pass
 
     inject_steps = [
         {"systemMessage": {"systemMessage": PROTOCOL_DIRECTIVES, "metadata": {}}}

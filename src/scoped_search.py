@@ -69,6 +69,12 @@ class ScopedSearch:
             return lower_base in CONFIG_FILENAMES or ext in CONFIG_EXTENSIONS
         elif scope == "all":
             return True
+        elif scope.startswith("*."):
+            return ext == scope[1:].lower()
+        elif scope.startswith("."):
+            return ext == scope.lower()
+        elif f".{scope}" in CODE_EXTENSIONS or scope in ("go", "py", "ts", "js", "tsx", "jsx", "rs", "java", "cpp", "c", "php", "rb", "swift", "kt", "sql", "html", "css", "json", "yaml", "yml", "toml"):
+            return ext == f".{scope}"
         return True
 
     @classmethod
@@ -215,11 +221,12 @@ class ScopedSearch:
                 break
 
         # Generate ultra-compact Markdown output (< 150 tokens)
+        display_root = os.path.basename(root_dir) or root_dir
         lines = [
-            f"### TokenSafe Scoped Search: '{query}' ({len(matches)} match{'es' if len(matches) != 1 else ''} in {len(hit_files)} file{'s' if len(hit_files) != 1 else ''}, scope: {scope})"
+            f"### TokenSafe Scoped Search: '{query}' ({len(matches)} match{'es' if len(matches) != 1 else ''} in {len(hit_files)} file{'s' if len(hit_files) != 1 else ''}, dir: `{display_root}`, scope: {scope})"
         ]
         if not matches:
-            lines.append(f"_No matches found across {total_scanned_files} scanned files._")
+            lines.append(f"_No matches found across {total_scanned_files} scanned files in `{root_dir}`._")
         else:
             for m in matches:
                 lines.append(f"- `{m['file']}:{m['line']}`: `{m['text']}`")
