@@ -535,7 +535,7 @@ def sync_and_push_cloud_repo(cloud_root: str, next_v: str) -> Tuple[bool, str, O
         return False, "tokensafe-cloud tests failed", None
 
     _sh(["git", "add", "src/cloud/config.py", "Dockerfile.cloud", ".github/workflows/test.yml",
-         "package.json", "plugin.json", "pyproject.toml", "server.json"], cwd=cloud_root)
+         "package.json", "plugin.json", ".codex-plugin/plugin.json", "pyproject.toml", "server.json"], cwd=cloud_root)
     c_code, c_out = _sh(["git", "commit", "-m", f"chore(release): align cloud backend and manifests to v{next_v}"], cwd=cloud_root)
     if c_code != 0:
         return False, f"commit failed: {c_out[-300:]}", None
