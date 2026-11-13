@@ -192,7 +192,7 @@ def main():
             pass
         print()
 
-    if command in ("stats", "dashboard"):
+    elif command in ("stats", "dashboard"):
         tracker = MetricsTracker()
         dashboard = Dashboard(tracker)
         try:
