@@ -279,6 +279,28 @@ class TestTestRunnerWatchGuard(unittest.TestCase):
             new_cmd, saved, reason = CommandSanitizer.sanitize('cd "my app" && yarn test', cwd=tmp)
             self.assertEqual(new_cmd, 'cd "my app" && CI=true yarn test --watch=false --forceExit')
 
+    def test_cargo_test_quiet(self):
+        cmd = "cargo test"
+        new_cmd, saved, reason = CommandSanitizer.sanitize(cmd)
+        self.assertIsNotNone(new_cmd)
+        self.assertEqual(new_cmd, "cargo test -- --quiet")
+        self.assertGreater(saved, 0)
+
+    def test_compact_test_output_pytest(self):
+        raw = "rootdir: /app\ncollected 5 items\n\n==== 5 passed in 0.15s ===="
+        res = CommandSanitizer.compact_test_output(raw, exit_code=0)
+        self.assertEqual(res, "PASS: 5 passed in 0.15s")
+
+    def test_compact_test_output_unittest(self):
+        raw = "...\n----------------------------------------------------------------------\nRan 3 tests in 0.002s\n\nOK"
+        res = CommandSanitizer.compact_test_output(raw, exit_code=0)
+        self.assertEqual(res, "PASS: Ran 3 tests in 0.002s (OK)")
+
+    def test_compact_test_output_failure_preserved(self):
+        raw = "FAIL: test_something\nAssertionError: False != True"
+        res = CommandSanitizer.compact_test_output(raw, exit_code=1)
+        self.assertEqual(res, raw)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -24,6 +24,8 @@ Execute the specified action directly based on these extracted parameters.
 2. **Surgical Code Edits**: Prefer `edit_file` with concise `Target` and `Replacement` over `write_file` on large existing files.
 3. **Diff-Centric Responses**: Never reprint entire unmodified files or long boilerplate blocks. Reference file lines instead (e.g., `wallet.ts#L42-L50`).
 4. **Dense Formatting**: Use compact bullet points and direct technical prose.
+5. **Repeat Read Deduplication**: Never re-read unchanged files or symbols in the same session. Reuse the skeleton or pointer reference (`// [TokenSafe: Pointer Hit ...]`) returned earlier; only pass `force_full=true` if your context was compacted or you are a fresh subagent.
+6. **Compact Test Output Execution**: Run unit tests with concise flags or via `tokensafe tests [cmd]` so passing test runs return a 1-line summary (`PASS: ...`) rather than flooding `Messages` history with hundreds of verbose log lines. Full output is preserved only on failure.
 
 ### 3. Architecture & Code Navigation Directives (Graph-Guided)
 1. **Zero Raw Terminal Grep/Find (Blocked)**: Strictly NEVER execute terminal `grep`, `egrep`, `ripgrep`, or `find` on source code files or directories (`src/`, `views/`, `components/`, `.ts`, `.tsx`, `.py`, `.js`). These commands are hard-blocked by TokenSafe Guard.

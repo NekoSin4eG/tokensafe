@@ -333,6 +333,11 @@ class CommandSanitizer:
             if "--tb=" not in stage and "-q" not in cmd_args and "--quiet" not in cmd_args:
                 return f"{stage} -q --tb=short", 800, "Applied short traceback to pytest", None
 
+        # cargo test: quiet test runner by default when not specified
+        if cmd_tok == "cargo" and cmd_args[:1] == ["test"]:
+            if "--quiet" not in stage and "-q" not in stage and "--" not in stage:
+                return f"{stage} -- --quiet", 600, "Applied quiet mode to cargo test", None
+
         # test runners: agents block on watch mode
         guard = cls._optimize_test_stage(stage, cwd)
         if guard:
@@ -594,3 +599,55 @@ class CommandSanitizer:
             return None, 0, ""
 
         return cls.join_stages(pairs), total_saved, "; ".join(reasons)
+
+    @classmethod
+    def compact_test_output(cls, raw: str, exit_code: int = 0) -> str:
+        """
+        Compacts test execution output to prevent context bloating in Messages history.
+        - If exit_code != 0: returns full raw output untouched to preserve error context.
+        - If exit_code == 0: extracts concise summary lines (e.g. 'PASS: 42 passed in 1.2s')
+          discarding repetitive passing test lines.
+        """
+        if exit_code != 0 or not raw or not raw.strip():
+            return raw
+
+        lines = [line.strip() for line in raw.splitlines() if line.strip()]
+        if not lines:
+            return raw
+
+        # 1. pytest check
+        for line in reversed(lines):
+            if re.search(r"=\s*(?:[0-9]+\s+passed.*in\s+[\d\.]+s|passed in\s+[\d\.]+s)\s*=", line):
+                clean = re.sub(r"^=+\s*|\s*=+$", "", line)
+                return f"PASS: {clean}"
+
+        # 2. unittest check
+        ran_line = ""
+        for line in lines:
+            if line.startswith("Ran ") and " test" in line:
+                ran_line = line
+            elif line.startswith("OK"):
+                return f"PASS: {ran_line or 'all tests passed'} ({line})"
+
+        # 3. jest / vitest check
+        for line in reversed(lines):
+            if "Tests:" in line and "passed" in line:
+                return f"PASS: {line}"
+            if re.search(r"✓.*tests? passed", line):
+                return f"PASS: {line}"
+
+        # 4. cargo test check
+        for line in reversed(lines):
+            if line.startswith("test result: ok."):
+                return f"PASS: {line}"
+
+        # 5. go test check
+        for line in reversed(lines):
+            if line.startswith("ok  \t") or line.startswith("PASS"):
+                return f"PASS: {line}"
+
+        # Fallback for verbose outputs: if > 12 lines, cap to first line + last line
+        if len(lines) > 12:
+            return f"PASS: {lines[0]} ... {lines[-1]} (exit code 0)"
+
+        return raw

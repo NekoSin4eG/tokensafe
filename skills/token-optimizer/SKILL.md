@@ -47,6 +47,17 @@ folds multi-turn conversation history, slices verbose tool outputs, and guards a
    - Before large multi-step tasks, call `tokensafe:context_budget(model=...)` to check the window budget (tools/history/prompts breakdown, 50/80/95% thresholds).
    - When it reports `warning` or `critical`, call `tokensafe:compact_conversation(transcript_path=...)` to fold past turns into a State Ledger before continuing — do not let context exhaustion degrade code quality mid-task.
 
+8. **REPEAT READ DEDUPLICATION & CACHE POINTERS**:
+   - Never repeatedly re-read the same file or symbol within an active session.
+   - When `smart_read_file` returns a pointer hit (`// [TokenSafe: Pointer Hit for ...]`), reuse earlier context; pass `"force_full": true` only if your context was compacted or you are a fresh subagent lacking prior turns.
+
+9. **ZERO-FLUFF EGRESS & SURGICAL DIFFS**:
+   - Eliminate conversational preambles, courtesy fillers, and trailing sign-offs.
+   - Never reprint full unmodified files or lengthy boilerplate; cite line ranges and provide targeted diffs.
+
+10. **COMPACT TEST EXECUTION**:
+    - Run unit tests with concise flags or via `tokensafe tests [cmd]` so passing test suites emit a single-line summary (`PASS: ...`) rather than flooding `Messages` history with hundreds of verbose log lines. Full traceback is strictly preserved on failure.
+
 ---
 
 ## Core MCP Tools (`tokensafe`)
