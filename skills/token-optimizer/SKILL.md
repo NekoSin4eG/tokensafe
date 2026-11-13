@@ -18,9 +18,10 @@ folds multi-turn conversation history, slices verbose tool outputs, and guards a
 
 ## MANDATORY AGENT DIRECTIVES
 
-1. **ZERO RAW TERMINAL GREP / FIND (HARD-BLOCKED)**:
+1. **ZERO RAW TERMINAL GREP / FIND (HARD-BLOCKED & REPLACED BY `scoped_search`)**:
    - Strictly NEVER run `grep`, `egrep`, `ripgrep`, or `find` in `run_command` on source code files (`.ts`, `.tsx`, `.py`, `.js`, `src/`, `views/`, `components/`).
    - Raw code searches via bash burn thousands of context tokens and are blocked by **TokenSafe Guard** (`decision: deny`).
+   - **Mandatory Search Tool (`scoped_search`)**: ALWAYS call `tokensafe:scoped_search(query, path=".", scope="code")` to search for text, identifiers, or symbol definitions across unknown files (-90% tokens). The `path` parameter specifies the search directory or project root (e.g. `"."`, `"./src"`). The `scope` parameter filters files (`"code"`, `"config"`, `"all"`), a file extension (`"go"`, `"ts"`), or a subfolder path (`"internal/promo"`).
 
 2. **SYMBOL & COMPONENT EXTRACTION (`smart_read_file`)**:
    - When locating or reading any function, component, class, or handler (e.g. `<LuckyWheelTab>`, `areSectorEqual`, `useWallet`), ALWAYS call `tokensafe:smart_read_file` with `path` and `symbol`.
@@ -70,7 +71,7 @@ The full tool table with efficiency impact, JSON workflow examples, the Guard ch
 
 Quick pointers:
 
-- Search: `tokensafe:scoped_search(query, scope)` — never raw grep.
+- Search: `tokensafe:scoped_search(query, path=".", scope="code")` — safe keyword & symbol search, never raw grep.
 - Inspect: `tokensafe:smart_read_file(path, symbol)` — definition + 1-hop deps.
 - Bundle: `tokensafe:smart_bundle(targets=[{path, symbol}])` — 3-8 related symbols across files in one call, shared imports deduplicated.
 - Navigate: `tokensafe:get_architecture_graph(project_path)` / `tokensafe:get_api_surface(project_path)`.

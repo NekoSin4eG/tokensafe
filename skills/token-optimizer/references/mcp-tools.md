@@ -6,7 +6,7 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
 |---|---|---|
 | `tokensafe:smart_read_file` | Graph-guided AST reader with `symbol` body retention, `dep_mode` (`signature` default / `full`), and session pointer dedup (`force_full`). OpenAPI/Swagger, Prisma, GraphQL and SQL files are auto-sliced: `symbol` = spec path/model/type/table; empty `symbol` returns a compact overview. | **-90% to -98%** token reduction |
 | `tokensafe:smart_bundle` | Multi-symbol context bundle: up to 8 `{path, symbol}` targets in ONE call — per-file skeletons with shared import lines deduplicated and merged 1-hop dependency signatures. Replaces 3+ chained `smart_read_file` calls. | **-85% to -95%** + one roundtrip instead of many |
-| `tokensafe:scoped_search` | Safe, token-bounded keyword, symbol, or config search across the codebase (supports `path`, 4s safety timeout, system root protection). | **-90% to -95%** vs raw grep/find |
+| `tokensafe:scoped_search` | Safe, token-bounded keyword, symbol, or config search across the codebase (supports `path='.'`, `scope='code'`/`'config'`/`'all'`/file extension/subfolder, 4s safety timeout, system root protection). | **-90% to -95%** vs raw grep/find |
 | `tokensafe:list_dir` | Token-efficient directory tree without lockfiles, timestamps, or ignored folders (node_modules, .git, dist, .env). Replaces `ls -la`. | **-90%** vs verbose `ls` |
 | `tokensafe:get_architecture_graph` | Computes dependency topology, hub centrality, and identifies top God Nodes for `project_path`. | **~200 tokens** (replaces 50k crawl) |
 | `tokensafe:get_api_surface` | Generates a compact markdown map of all exported types, interfaces, and classes. | **~500 tokens** for entire project |
@@ -41,12 +41,12 @@ All tools are exposed via Model Context Protocol (stdio JSON-RPC 2.0).
   "ToolName": "scoped_search",
   "Arguments": {
     "query": "HARDCODED_VERSION",
-    "path": "/Users/.../projects/my-app/src",
+    "path": "./src",
     "scope": "code"
   }
 }
 ```
-*Locates exact occurrences with file and line references in < 100 tokens. Always pass explicit `path` or `project_path` (auto-guarded against system roots with 4s safety timeout).*
+*Locates exact occurrences with file and line references in < 100 tokens. Always pass `path` (defaults to active project root, e.g. ".") and optional `scope` ('code', 'config', 'all', file extension like 'go', or subfolder like 'internal/promo'). Auto-guarded against system roots.*
 
 ### 2b. Directory Navigation Workflow (`list_dir`)
 ```json
