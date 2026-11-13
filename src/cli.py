@@ -359,8 +359,41 @@ def main():
 
     elif command == "proxy":
         from src.proxy import run_proxy
-        if len(args) > 1 and args[1] in ("--help", "-h", "help"):
-            print("Usage: tokensafe proxy [port]   (default: 8765)")
+        sub = args[1] if len(args) > 1 else ""
+        if sub in ("--help", "-h", "help"):
+            print("Usage: tokensafe proxy [port]        Run in foreground (default: 8765)")
+            print("       tokensafe proxy on            Install daemon + wire agents (one command)")
+            print("       tokensafe proxy off           Unwire agents + remove daemon (rollback)")
+            print("       tokensafe proxy status        Health, wiring state, heartbeat")
+            return
+        if sub == "on":
+            from src.installer import AgentInstaller
+            report = AgentInstaller.proxy_on()
+            d, w = report["daemon"], report["wiring"]
+            print(f"\n\033[1m\033[36m⚡ TOKENSAFE PROXY SETUP ⚡\033[0m\n")
+            print(f"  Daemon:    {'✔ ' + d['message'] if d['ok'] else '✖ ' + d['message']}")
+            print(f"  Health:    {'✔ proxy answering on 127.0.0.1:8765' if report['health'] else '✖ not reachable'}")
+            print(f"  Wiring:    {'✔ ' + w['message'] if w['ok'] else '✖ ' + w['message']}")
+            if report["manual_steps"]:
+                print("  Manual (not auto-wirable):")
+                for step in report["manual_steps"]:
+                    print(f"    • {step}")
+            print(f"\n  Rollback anytime: \033[1mtokensafe proxy off\033[0m\n")
+            return
+        if sub == "off":
+            from src.installer import AgentInstaller
+            report = AgentInstaller.proxy_off()
+            u, d = report["unwired"], report["daemon"]
+            print(f"\n  Unwired:   {'✔ ' + u['message'] if u['ok'] else '✖ ' + u['message']}")
+            print(f"  Daemon:    {'✔ ' + d['message'] if d['ok'] else '✖ ' + d['message']}\n")
+            return
+        if sub == "status":
+            from src.installer import AgentInstaller
+            st = AgentInstaller.proxy_status()
+            print(f"\n  Health:    {'✔ running on 127.0.0.1:8765' if st['health'] else '✖ not running'}")
+            print(f"  Claude Code wired: {'✔ ' + str(st['claude_code_env_value']) if st['claude_code_wired'] else '○ not wired'}")
+            hb = st.get("heartbeat_age_seconds")
+            print(f"  Last traffic: {f'{hb}s ago' if hb is not None else 'no heartbeat yet'}\n")
             return
         port = 8765
         if len(args) > 1:

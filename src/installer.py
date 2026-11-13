@@ -300,6 +300,247 @@ class AgentInstaller:
         cls._atomic_write_json(config_file, data)
         return True, "guards registered (shell + junk-read + prompt pipeline)"
 
+    # ------------------------------------------------------------------
+    # Proxy auto-wiring (v3.0.0): daemon + per-agent base URL override with
+    # one-command rollback. Only agents that CAN be wired programmatically
+    # are touched (Claude Code via settings.json env); everything else gets
+    # printed manual steps instead of silent failure.
+    # ------------------------------------------------------------------
+
+    PROXY_PORT = 8765
+    PROXY_BASE_URL = f"http://127.0.0.1:{PROXY_PORT}"
+    PROXY_ENV_KEY = "ANTHROPIC_BASE_URL"
+    _PLIST_LABEL = "dev.tokensafe.proxy"
+    _SERVICE_NAME = "tokensafe-proxy"
+    _WIRING_BACKUP = "proxy_wiring_backup.json"
+
+    @classmethod
+    def proxy_health(cls, timeout: float = 1.5) -> bool:
+        """True when the local proxy answers /health."""
+        try:
+            import urllib.request
+            with urllib.request.urlopen(f"{cls.PROXY_BASE_URL}/health", timeout=timeout) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
+    @classmethod
+    def _wiring_backup_path(cls) -> str:
+        return os.path.join(HOME, ".tokensafe", "data", cls._WIRING_BACKUP)
+
+    @classmethod
+    def wire_proxy_config(cls) -> Tuple[bool, str]:
+        """Points Claude Code at the local proxy via settings.json env.
+        Backs up the previous value for `tokensafe proxy off`."""
+        if not cls.proxy_health():
+            return False, "proxy is not running on 127.0.0.1:8765 — start it first (`tokensafe proxy on` installs a daemon)"
+        config_file = os.path.join(HOME, ".claude", "settings.json")
+        os.makedirs(os.path.dirname(config_file), exist_ok=True)
+        data, err = cls._load_json_with_backup(config_file)
+        if err or data is None:
+            return False, err or f"Failed to parse {config_file}"
+        env = data.get("env") if isinstance(data.get("env"), dict) else {}
+        previous = env.get(cls.PROXY_ENV_KEY)
+        if previous == cls.PROXY_BASE_URL:
+            return True, "Claude Code already points at the local proxy"
+        # Persist rollback info before mutating user config
+        try:
+            backup_path = cls._wiring_backup_path()
+            os.makedirs(os.path.dirname(backup_path), exist_ok=True)
+            backup = {}
+            if os.path.exists(backup_path):
+                try:
+                    with open(backup_path, "r", encoding="utf-8") as f:
+                        backup = json.load(f)
+                except Exception:
+                    backup = {}
+            backup.setdefault("claude_code", {})["ANTHROPIC_BASE_URL"] = previous
+            with open(backup_path, "w", encoding="utf-8") as f:
+                json.dump(backup, f)
+        except Exception:
+            pass
+        env[cls.PROXY_ENV_KEY] = cls.PROXY_BASE_URL
+        data["env"] = env
+        cls._atomic_write_json(config_file, data)
+        return True, "Claude Code wired: ANTHROPIC_BASE_URL=http://127.0.0.1:8765 (rollback: tokensafe proxy off)"
+
+    @classmethod
+    def unwire_proxy_config(cls) -> Tuple[bool, str]:
+        """Removes the proxy override and restores the pre-wiring value."""
+        config_file = os.path.join(HOME, ".claude", "settings.json")
+        if not os.path.exists(config_file):
+            return True, "nothing to unwire"
+        data, err = cls._load_json_with_backup(config_file)
+        if err or data is None:
+            return False, err or f"Failed to parse {config_file}"
+        env = data.get("env") if isinstance(data.get("env"), dict) else {}
+        if env.get(cls.PROXY_ENV_KEY) != cls.PROXY_BASE_URL:
+            return True, "Claude Code was not wired to the proxy"
+        restored = None
+        try:
+            backup_path = cls._wiring_backup_path()
+            if os.path.exists(backup_path):
+                with open(backup_path, "r", encoding="utf-8") as f:
+                    backup = json.load(f)
+                restored = (backup.get("claude_code") or {}).get("ANTHROPIC_BASE_URL")
+        except Exception:
+            restored = None
+        if restored:
+            env[cls.PROXY_ENV_KEY] = restored
+        else:
+            env.pop(cls.PROXY_ENV_KEY, None)
+        if env:
+            data["env"] = env
+        else:
+            data.pop("env", None)
+        cls._atomic_write_json(config_file, data)
+        return True, "Claude Code unwired (previous base URL restored)"
+
+    @classmethod
+    def install_proxy_daemon(cls) -> Tuple[bool, str]:
+        """Keeps `tokensafe proxy` running: launchd (macOS) / systemd user unit (Linux)."""
+        python_bin = sys.executable or PYTHON_BIN
+        if sys.platform == "darwin":
+            launch_dir = os.path.join(HOME, "Library", "LaunchAgents")
+            os.makedirs(launch_dir, exist_ok=True)
+            plist_path = os.path.join(launch_dir, f"{cls._PLIST_LABEL}.plist")
+            log_path = os.path.join(HOME, ".tokensafe", "data", "proxy.log")
+            os.makedirs(os.path.dirname(log_path), exist_ok=True)
+            plist = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>{cls._PLIST_LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>{python_bin}</string>
+    <string>-m</string>
+    <string>src.proxy</string>
+    <string>{cls.PROXY_PORT}</string>
+  </array>
+  <key>WorkingDirectory</key><string>{PROJECT_ROOT}</string>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>StandardOutPath</key><string>{log_path}</string>
+  <key>StandardErrorPath</key><string>{log_path}</string>
+</dict>
+</plist>
+"""
+            with open(plist_path, "w", encoding="utf-8") as f:
+                f.write(plist)
+            subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
+            res = subprocess.run(["launchctl", "load", "-w", plist_path], capture_output=True, text=True)
+            if res.returncode != 0:
+                return False, f"launchctl load failed: {(res.stderr or '').strip()[:160]}"
+            return True, f"launchd daemon installed ({plist_path})"
+        if sys.platform.startswith("linux"):
+            unit_dir = os.path.join(HOME, ".config", "systemd", "user")
+            os.makedirs(unit_dir, exist_ok=True)
+            unit_path = os.path.join(unit_dir, f"{cls._SERVICE_NAME}.service")
+            unit = f"""[Unit]
+Description=TokenSafe Local AI Proxy
+After=network.target
+
+[Service]
+ExecStart={python_bin} -m src.proxy {cls.PROXY_PORT}
+WorkingDirectory={PROJECT_ROOT}
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target
+"""
+            with open(unit_path, "w", encoding="utf-8") as f:
+                f.write(unit)
+            for cmd in (["systemctl", "--user", "daemon-reload"], ["systemctl", "--user", "enable", "--now", cls._SERVICE_NAME]):
+                res = subprocess.run(cmd, capture_output=True, text=True)
+                if res.returncode != 0:
+                    return False, f"systemctl failed: {(res.stderr or '').strip()[:160]}"
+            return True, f"systemd user service installed ({unit_path})"
+        return False, "no daemon support on this OS — run `tokensafe proxy` manually in a terminal"
+
+    @classmethod
+    def remove_proxy_daemon(cls) -> Tuple[bool, str]:
+        if sys.platform == "darwin":
+            plist_path = os.path.join(HOME, "Library", "LaunchAgents", f"{cls._PLIST_LABEL}.plist")
+            if not os.path.exists(plist_path):
+                return True, "no daemon installed"
+            subprocess.run(["launchctl", "unload", plist_path], capture_output=True)
+            os.remove(plist_path)
+            return True, "launchd daemon removed"
+        if sys.platform.startswith("linux"):
+            unit_path = os.path.join(HOME, ".config", "systemd", "user", f"{cls._SERVICE_NAME}.service")
+            if not os.path.exists(unit_path):
+                return True, "no daemon installed"
+            subprocess.run(["systemctl", "--user", "disable", "--now", cls._SERVICE_NAME], capture_output=True)
+            os.remove(unit_path)
+            subprocess.run(["systemctl", "--user", "daemon-reload"], capture_output=True)
+            return True, "systemd user service removed"
+        return True, "no daemon support on this OS"
+
+    @classmethod
+    def proxy_on(cls) -> Dict[str, Any]:
+        """One command: daemon + wiring. Returns a structured report."""
+        report: Dict[str, Any] = {"daemon": None, "wiring": None, "health": False, "manual_steps": []}
+        d_ok, d_msg = cls.install_proxy_daemon()
+        report["daemon"] = {"ok": d_ok, "message": d_msg}
+        # Give the daemon a moment to boot before wiring agents to it.
+        for _ in range(6):
+            if cls.proxy_health():
+                break
+            time.sleep(0.8)
+        report["health"] = cls.proxy_health()
+        if d_ok and not report["health"]:
+            report["wiring"] = {"ok": False, "message": "daemon installed but /health did not answer — check ~/.tokensafe/data/proxy.log; agents NOT rewired"}
+            return report
+        if report["health"]:
+            w_ok, w_msg = cls.wire_proxy_config()
+            report["wiring"] = {"ok": w_ok, "message": w_msg}
+        else:
+            report["wiring"] = {"ok": False, "message": "proxy not reachable; agents NOT rewired"}
+        report["manual_steps"] = [
+            "Cursor: Settings → Models → add OpenAI-compatible model with base URL http://127.0.0.1:8765/v1",
+            "Cline/Aider: set OpenAI-compatible base URL to http://127.0.0.1:8765/v1",
+        ]
+        return report
+
+    @classmethod
+    def proxy_off(cls) -> Dict[str, Any]:
+        report: Dict[str, Any] = {}
+        u_ok, u_msg = cls.unwire_proxy_config()
+        report["unwired"] = {"ok": u_ok, "message": u_msg}
+        r_ok, r_msg = cls.remove_proxy_daemon()
+        report["daemon"] = {"ok": r_ok, "message": r_msg}
+        return report
+
+    @classmethod
+    def proxy_status(cls) -> Dict[str, Any]:
+        env_present = None
+        settings_path = os.path.join(HOME, ".claude", "settings.json")
+        try:
+            if os.path.exists(settings_path):
+                with open(settings_path, "r", encoding="utf-8") as f:
+                    env = (json.load(f) or {}).get("env") or {}
+                    env_present = env.get(cls.PROXY_ENV_KEY)
+        except Exception:
+            pass
+        heartbeat_age = None
+        try:
+            from src.paths import resolve_data_dir
+            marker = os.path.join(resolve_data_dir(), ".proxy_active")
+            if os.path.exists(marker):
+                with open(marker, "r", encoding="utf-8") as f:
+                    heartbeat_age = int(time.time()) - int(f.read().strip() or 0)
+        except Exception:
+            pass
+        return {
+            "health": cls.proxy_health(),
+            "claude_code_wired": env_present == cls.PROXY_BASE_URL,
+            "claude_code_env_value": env_present,
+            "heartbeat_age_seconds": heartbeat_age,
+            "daemon": sys.platform,
+        }
+
     @classmethod
     def install_mcp_config(cls, agent_key: str) -> Tuple[bool, str]:
         """Injects TokenSafe MCP config into target agent."""

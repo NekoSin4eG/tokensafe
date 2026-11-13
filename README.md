@@ -329,6 +329,7 @@ tokensafe doctor                    Audit MCP tool overhead and context token ta
 tokensafe digest [--send]           Compile (and optionally dispatch) the weekly team digest
 tokensafe mcp list|disable|enable   Manage configured MCP servers
 tokensafe proxy [port]              Local transparent AI proxy (127.0.0.1:8765/v1; host via TOKENSAFE_HOST)
+tokensafe proxy on/off/status       Daemon + agent wiring with one-command rollback
 tokensafe install / setup [--all]   Configure detected agent environments
 tokensafe update / check-update     Self-update / check for a newer version
 tokensafe activate <KEY>            Activate a Team or Solo license key
@@ -345,14 +346,22 @@ tokensafe --version                 Print version and exit
 
 ### Proxy mode & agent coverage (v3.0.0)
 
-Run `tokensafe proxy` (or the bundled docker-compose), then point your agent's base URL at `http://127.0.0.1:8765/v1` — the installer does **not** wire this for you; it is a per-agent setting:
+One command wires everything it safely can:
+
+```bash
+tokensafe proxy on      # installs a keep-alive daemon (launchd/systemd), wires Claude Code, prints manual steps for the rest
+tokensafe proxy status  # health, wiring state, last traffic
+tokensafe proxy off     # rollback: unwires agents (previous base URL restored) and removes the daemon
+```
+
+The daemon keeps the proxy alive on `127.0.0.1:8765`, `on` rewires agents only after a verified `/health` answer (a dead proxy never bricks an agent), and every wiring is backed up for `off`. Prefer manual? Run `tokensafe proxy` in a terminal and point your agent's base URL at `http://127.0.0.1:8765` yourself:
 
 | Agent | Route through proxy? | How |
 |---|---|---|
-| Claude Code | ✅ | `ANTHROPIC_BASE_URL=http://127.0.0.1:8765` (or OpenAI-compatible env) |
-| Cline / Roo Code | ✅ | API Provider → OpenAI-compatible → Base URL |
-| Aider | ✅ | `--openai-api-base http://127.0.0.1:8765/v1` |
-| Cursor (custom models) | ✅ | Add an OpenAI-compatible model with override base URL |
+| Claude Code | ✅ auto (`tokensafe proxy on`) | `ANTHROPIC_BASE_URL=http://127.0.0.1:8765` — the proxy ingests native Anthropic `/v1/messages` shape |
+| Cline / Roo Code | ✅ manual | API Provider → OpenAI-compatible → Base URL `http://127.0.0.1:8765/v1` |
+| Aider | ✅ manual | `--openai-api-base http://127.0.0.1:8765/v1` |
+| Cursor (custom models) | ✅ manual | Add an OpenAI-compatible model with override base URL |
 | Cursor (built-in models) | ❌ | Routed via Cursor's own backend — hooks only |
 | Antigravity / ZCode | ❌ | Hooks only (lifecycle adapters) |
 | Codex CLI | ❌ | stdio MCP + AGENTS.md (no proxy transport) |
