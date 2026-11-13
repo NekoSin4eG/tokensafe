@@ -27,6 +27,7 @@ GREEN = "\033[32m"
 CYAN = "\033[36m"
 YELLOW = "\033[33m"
 RED = "\033[31m"
+DIM = "\033[2m"
 
 HOME = os.path.expanduser("~")
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
@@ -542,6 +543,38 @@ WantedBy=default.target
         }
 
     @classmethod
+    def maybe_prompt_proxy_enable(cls, context: str = "install") -> None:
+        """Interactive opt-in prompt shown at the end of install/update flows.
+        Strictly fail-open and non-nagging: skipped entirely for non-TTY runs
+        (scripts, CI, background updaters) and when the proxy is already wired."""
+        try:
+            if not (sys.stdin.isatty() and sys.stdout.isatty()):
+                return
+            if os.environ.get("TOKENSAFE_NONINTERACTIVE", "").strip() in ("1", "true", "yes"):
+                return
+            st = cls.proxy_status()
+            if st.get("claude_code_wired"):
+                return  # already wired — never nag
+            print(f"\n  {BOLD}?{RESET} Enable the local AI proxy now? [y/N] ", end="", flush=True)
+            answer = input().strip().lower()
+            if answer not in ("y", "yes"):
+                print(f"    {DIM}Skipped — enable anytime with:{RESET} {BOLD}tokensafe proxy on{RESET}")
+                return
+            report = cls.proxy_on()
+            d, w = report["daemon"], report["wiring"]
+            print(f"    Daemon:  {'✔ ' + d['message'] if d['ok'] else '✖ ' + d['message']}")
+            print(f"    Health:  {'✔ 127.0.0.1:8765 answering' if report['health'] else '✖ not reachable — agents NOT rewired'}")
+            print(f"    Wiring:  {'✔ ' + w['message'] if w['ok'] else '✖ ' + w['message']}")
+            for step in report.get("manual_steps") or []:
+                print(f"    Manual:  {step}")
+            print(f"    Rollback: {BOLD}tokensafe proxy off{RESET}")
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        except Exception:
+            return  # fail-open: a prompt problem never breaks install/update
+
+    @classmethod
     def install_mcp_config(cls, agent_key: str) -> Tuple[bool, str]:
         """Injects TokenSafe MCP config into target agent."""
         info = AGENTS_REGISTRY.get(agent_key)
@@ -1040,6 +1073,7 @@ WantedBy=default.target
 
         print(f"\n\033[32m\033[1m✅ TokenSafe successfully connected to {installed_count} agent(s)!\033[0m")
         print("   Restart your IDE / Agent to start saving tokens automatically.\n")
+        cls.maybe_prompt_proxy_enable(context="install")
 
     @staticmethod
     def _is_tokensafe_mcp_command(cmd: str) -> bool:
@@ -1385,6 +1419,7 @@ WantedBy=default.target
         print(f"   Synchronized {synced_count} agent environments with zero-loss AST & God Nodes rules.")
         print(f"   Run {BOLD}tokensafe stats{RESET} to view token savings.")
         print(f"   {CYAN}ℹ{RESET} If your terminal still shows the old version, open a new window or run {BOLD}hash -r{RESET}.")
+        cls.maybe_prompt_proxy_enable(context="update")
 
 def main():
     args = sys.argv[1:]

@@ -247,6 +247,7 @@ def main():
                 status = "\033[32m✔\033[0m" if r["success"] else "\033[31m✖\033[0m"
                 print(f"  {status} \033[1m{r['name']:<28}\033[0m: {r['message']}")
             print(f"\n\033[32m✔ Universal project rules injected into: {', '.join(res['project_rules'])}\033[0m\n")
+            AgentInstaller.maybe_prompt_proxy_enable(context="install")
         elif "--project" in args:
             agents_plugin = None
             if "--agents-plugin" in args:

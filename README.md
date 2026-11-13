@@ -354,7 +354,7 @@ tokensafe proxy status  # health, wiring state, last traffic
 tokensafe proxy off     # rollback: unwires agents (previous base URL restored) and removes the daemon
 ```
 
-The daemon keeps the proxy alive on `127.0.0.1:8765`, `on` rewires agents only after a verified `/health` answer (a dead proxy never bricks an agent), and every wiring is backed up for `off`. Prefer manual? Run `tokensafe proxy` in a terminal and point your agent's base URL at `http://127.0.0.1:8765` yourself:
+The daemon keeps the proxy alive on `127.0.0.1:8765`, `on` rewires agents only after a verified `/health` answer (a dead proxy never bricks an agent), and every wiring is backed up for `off`. `tokensafe install` and `tokensafe update` ask interactively whether to enable the proxy (skipped in non-TTY/scripted runs); prefer manual? Run `tokensafe proxy` in a terminal and point your agent's base URL at `http://127.0.0.1:8765` yourself:
 
 | Agent | Route through proxy? | How |
 |---|---|---|
