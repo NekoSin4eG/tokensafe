@@ -1,5 +1,5 @@
 {
-  "version": "2.8.4",
+  "version": "2.9.0",
   "name": "tokensafe",
   "description": "Reduce your AI bills by up to 99% locally. Your agents read only needed code, keep prompt caches intact across turns, and keep secrets out of git.",
   "author": {
