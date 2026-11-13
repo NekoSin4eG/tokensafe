@@ -642,7 +642,10 @@ def run_release(target: str, otp: Optional[str] = None, no_bump: bool = False, s
     # Resume semantics: if the current version is already tagged AND published
     # somewhere, this run finishes THAT version instead of bumping again —
     # 'release minor' after an npm-OTP pause must not silently create 1.(n+1).0.
-    tag_exists = _sh(["git", "rev-parse", f"v{v}"])[0] == 0
+    tag_sha = _sh(["git", "rev-parse", f"v{v}"])[1].strip() if _sh(["git", "rev-parse", f"v{v}"])[0] == 0 else ""
+    head_sha = _sh(["git", "rev-parse", "HEAD"])[1].strip()
+    tag_at_head = bool(tag_sha and tag_sha == head_sha)
+    tag_exists = bool(tag_sha)
     gh_release_exists = _sh(["gh", "release", "view", f"v{v}"])[0] == 0
     fully_shipped = (
         tag_exists and gh_release_exists
@@ -652,16 +655,19 @@ def run_release(target: str, otp: Optional[str] = None, no_bump: bool = False, s
     if no_bump:
         next_v = v
         print(f"🚀 Release pipeline: FINISH-ONLY v{next_v} (--no-bump: complete pending channels, no version bump)\n")
-    elif tag_exists and not fully_shipped:
-        # In-flight release (e.g. paused on npm 2FA): finish THIS version.
+    elif tag_at_head and not fully_shipped:
+        # In-flight release (e.g. paused on npm 2FA at this commit): finish THIS version.
         next_v = v
-        print(f"🚀 Release pipeline: RESUME v{next_v} (tagged, channels incomplete — completing)\n")
-    elif fully_shipped:
+        print(f"🚀 Release pipeline: RESUME v{next_v} (tagged at HEAD, channels incomplete — completing)\n")
+    elif fully_shipped or (tag_exists and not tag_at_head):
         next_v = calculate_next_version(v, target)
-        print(f"⚠  v{v} is already fully shipped everywhere — a NEW release v{next_v} will be created.")
-        print(f"   If you only wanted to finish pending channels, abort NOW and use --no-bump. Continuing in 5s...")
-        time.sleep(5)
-        print(f"🚀 Release pipeline: {v} ➜ {next_v}\n")
+        if not fully_shipped and tag_exists and not tag_at_head:
+            print(f"ℹ  Current commit is ahead of tag v{v} — advancing to NEW release v{next_v}.\n")
+        else:
+            print(f"⚠  v{v} is already fully shipped everywhere — a NEW release v{next_v} will be created.")
+            print(f"   If you only wanted to finish pending channels, abort NOW and use --no-bump. Continuing in 5s...")
+            time.sleep(5)
+            print(f"🚀 Release pipeline: {v} ➜ {next_v}\n")
     else:
         next_v = calculate_next_version(v, target)
         print(f"🚀 Release pipeline: {v} ➜ {next_v}\n")
