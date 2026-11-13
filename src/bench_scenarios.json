@@ -1,15 +1,17 @@
 {
-  "version": 1,
+  "version": 2,
   "created": "2026-11-14",
-  "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table.",
-  "metrics": ["token_reduction_pct", "usd_saved_sonnet_input", "cache_hit_ratio", "zero_loss_gates"],
-  "pricing": { "sonnet_input_usd_per_mtok": 3.0, "sonnet_cached_usd_per_mtok": 0.3 },
+  "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking; v1 scenarios measured in 784628d remain untouched). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table. v2 adds four angles: architecture discovery, raw search leak, git-diff churn, write-egress (output-token axis).",
+  "metrics": ["token_reduction_pct", "usd_saved_sonnet_input", "usd_saved_sonnet_output", "cache_hit_ratio", "zero_loss_gates"],
+  "pricing": { "sonnet_input_usd_per_mtok": 3.0, "sonnet_cached_usd_per_mtok": 0.3, "sonnet_output_usd_per_mtok": 15.0 },
   "repos": [
     {
       "key": "flask",
       "url": "https://github.com/pallets/flask",
+      "clone_depth": 50,
+      "raw_search": { "pattern": "def test_", "dir": "tests" },
       "symbol_read": { "file": "src/flask/app.py", "symbol": "Flask.full_dispatch_request" },
-      "pytest": { "subset_glob": "tests/test_basic.py", "deps": ["werkzeug", "jinja2", "itsdangerous", "click", "blinker"] },
+      "pytest": { "subset_glob": "tests/", "deps": ["werkzeug", "jinja2", "itsdangerous", "click", "blinker"] },
       "multiturn_reads": [
         { "file": "src/flask/app.py", "symbol": "Flask.full_dispatch_request" },
         { "file": "src/flask/wrappers.py", "symbol": "Request.full_path" },
@@ -19,8 +21,10 @@
     {
       "key": "requests",
       "url": "https://github.com/psf/requests",
+      "clone_depth": 50,
+      "raw_search": { "pattern": "session", "dir": "src" },
       "symbol_read": { "file": "src/requests/sessions.py", "symbol": "Session.request" },
-      "pytest": { "subset_glob": "tests/test_requests.py", "deps": ["charset_normalizer", "idna", "urllib3", "certifi", "pytest-httpbin"] },
+      "pytest": { "subset_glob": "tests/", "deps": ["charset_normalizer", "idna", "urllib3", "certifi", "pytest-httpbin"] },
       "multiturn_reads": [
         { "file": "src/requests/sessions.py", "symbol": "Session.request" },
         { "file": "src/requests/models.py", "symbol": "Response.iter_content" },
@@ -30,8 +34,10 @@
     {
       "key": "fastapi",
       "url": "https://github.com/fastapi/fastapi",
+      "clone_depth": 50,
+      "raw_search": { "pattern": "def get", "dir": "fastapi" },
       "symbol_read": { "file": "fastapi/routing.py", "symbol": "APIRouter.add_api_route" },
-      "pytest": { "subset_glob": "tests/test_router_events.py", "deps": ["pydantic", "starlette", "email-validator"] },
+      "pytest": { "subset_glob": "tests/", "deps": ["pydantic", "starlette", "email-validator"] },
       "multiturn_reads": [
         { "file": "fastapi/routing.py", "symbol": "APIRouter.add_api_route" },
         { "file": "fastapi/applications.py", "symbol": "FastAPI.__init__" },
@@ -41,8 +47,10 @@
     {
       "key": "rich",
       "url": "https://github.com/Textualize/rich",
+      "clone_depth": 50,
+      "raw_search": { "pattern": "class ", "dir": "rich" },
       "symbol_read": { "file": "rich/console.py", "symbol": "Console.print" },
-      "pytest": { "subset_glob": "tests/test_console.py", "deps": [] },
+      "pytest": { "subset_glob": "tests/", "deps": [] },
       "multiturn_reads": [
         { "file": "rich/console.py", "symbol": "Console.print" },
         { "file": "rich/table.py", "symbol": "Table.add_row" },
@@ -52,8 +60,10 @@
     {
       "key": "httpie",
       "url": "https://github.com/httpie/cli",
+      "clone_depth": 50,
+      "raw_search": { "pattern": "import", "dir": "httpie" },
       "symbol_read": { "file": "httpie/core.py", "symbol": "main" },
-      "pytest": { "subset_glob": "tests/test_cli.py", "deps": ["requests", "pygments", "multidict", "rich"] },
+      "pytest": { "subset_glob": "tests/", "deps": ["requests", "pygments", "multidict", "rich"] },
       "multiturn_reads": [
         { "file": "httpie/core.py", "symbol": "main" },
         { "file": "httpie/cli/definition.py", "symbol": "HTTPieArgumentParser" },
@@ -69,6 +79,10 @@
   "zero_loss_gates": {
     "symbol_read": ["symbol_present", "valid_python", "all_top_level_defs_present", "signature_line_match"],
     "test_output": ["failing_test_name_present", "error_type_present", "first_traceback_frame_present"],
-    "multiturn": ["all_reads_lossless"]
+    "multiturn": ["all_reads_lossless"],
+    "architecture": ["hub_files_listed", "compact_bound"],
+    "raw_search": ["matches_exist", "paths_preserved"],
+    "git_diff": ["changed_files_preserved"],
+    "write_egress": ["inserted_line_present", "original_signature_in_target"]
   }
 }

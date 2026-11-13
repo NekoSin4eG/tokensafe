@@ -19,6 +19,21 @@ from src.benchmark_real import (
     REGISTRY_PATH,
 )
 
+from src.benchmark_real import RealRepoBenchmark as _RRB
+
+RAW_SEARCH_SAMPLE = "\n".join(f"tests/test_mod_{i}.py:{i * 3}:    def test_case_{i}(): ..." for i in range(40))
+RAW_DIFF_SAMPLE = (
+    "diff --git a/app.py b/app.py\n"
+    "--- a/app.py\n"
+    "+++ b/app.py\n"
+    "@@ -1,3 +1,4 @@\n"
+    " def main():\n"
+    "+    return 2\n"
+    "diff --git a/poetry.lock b/poetry.lock\n"
+    "--- a/poetry.lock\n"
+    "+++ b/poetry.lock\n"
+)
+
 FAT_SOURCE = (
     "import json\n"
     + "".join(
@@ -41,7 +56,7 @@ FAT_SOURCE = (
 class TestRegistryPreRegistration(unittest.TestCase):
     def test_registry_loads_and_is_well_formed(self):
         reg = load_registry()
-        self.assertEqual(reg.get("version"), 1)
+        self.assertGreaterEqual(reg.get("version"), 1)
         self.assertGreaterEqual(len(reg["repos"]), 5, "pre-registration promises 5 repos")
         for repo in reg["repos"]:
             self.assertIn("url", repo)
@@ -131,6 +146,57 @@ class TestMarkdownRendering(unittest.TestCase):
         self.assertIn("| fixture | symbol_read |", md)
         self.assertIn("80.0%", md)
         self.assertIn("| PASS |", md)
+
+
+class TestNewScenarioGates(unittest.TestCase):
+    def test_registry_v2_fields(self):
+        reg = load_registry()
+        self.assertEqual(reg.get("version"), 2)
+        self.assertIn("sonnet_output_usd_per_mtok", reg["pricing"])
+        for repo in reg["repos"]:
+            self.assertGreaterEqual(repo.get("clone_depth", 0), 50, "git_diff scenario needs history")
+            self.assertIn("pattern", repo.get("raw_search", {}))
+
+    def test_raw_search_gates(self):
+        gates = _RRB.raw_search_gates(RAW_SEARCH_SAMPLE, RAW_SEARCH_SAMPLE.splitlines()[0][:120], 40)
+        self.assertTrue(gates["matches_exist"])
+        self.assertTrue(gates["paths_preserved"])
+        gates_small = _RRB.raw_search_gates(RAW_SEARCH_SAMPLE.splitlines()[0], RAW_SEARCH_SAMPLE.splitlines()[0], 3)
+        self.assertFalse(gates_small["matches_exist"])
+
+    def test_git_diff_gates_lockfile_exempt(self):
+        gates = _RRB.git_diff_gates(RAW_DIFF_SAMPLE, "diff --git a/app.py b/app.py\n+++ b/app.py")
+        self.assertTrue(gates["changed_files_preserved"])
+        gates_broken = _RRB.git_diff_gates(RAW_DIFF_SAMPLE, "diff --git a/other.py b/other.py")
+        self.assertFalse(gates_broken["changed_files_preserved"])
+
+    def test_write_egress_axis_is_output_priced(self):
+        bench = RealRepoBenchmark()
+        self.assertEqual(bench.pricing.get("sonnet_output_usd_per_mtok"), 15.0)
+
+
+class TestRunLocal(unittest.TestCase):
+    def test_run_local_on_tmp_repo(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src_dir = os.path.join(tmp, "pkg")
+            tests_dir = os.path.join(tmp, "tests")
+            os.makedirs(src_dir)
+            os.makedirs(tests_dir)
+            with open(os.path.join(src_dir, "core.py"), "w") as f:
+                f.write(FAT_SOURCE)
+            with open(os.path.join(src_dir, "other.py"), "w") as f:
+                f.write("def side():\n" + "".join(f"    x{j} = {j}\n" for j in range(40)) + "    return x39\n")
+            with open(os.path.join(tests_dir, "test_ok.py"), "w") as f:
+                f.write("def test_ok():\n    assert True\n")
+            bench = RealRepoBenchmark()
+            data = bench.run_local(tmp)
+        entry = data["results"][0]
+        self.assertIn(entry["status"], ("ok", "partial"), entry.get("reason"))
+        self.assertEqual(entry["symbol_read"]["status"], "ok")
+        self.assertGreater(entry["symbol_read"]["reduction_pct"], 30.0)
+        self.assertTrue(all(entry["symbol_read"]["gates"].values()))
+        # test_output: ok (pytest available) or skipped (no pytest in env) — never counted dishonestly
+        self.assertIn(entry["test_output"]["status"], ("ok", "gate_failed", "skipped"))
 
 
 if __name__ == "__main__":

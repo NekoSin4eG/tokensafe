@@ -27,6 +27,7 @@ from typing import Any, Dict, List, Optional
 from src.tokenizer import count_tokens
 from src.skeletonizer import Skeletonizer
 from src.command_sanitizer import CommandSanitizer
+from src.diff_slicer import DiffSlicer
 from src.paths import resolve_data_dir
 
 REGISTRY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench_scenarios.json")
@@ -118,15 +119,16 @@ class RealRepoBenchmark:
     # -- repo cache ------------------------------------------------------
     def ensure_repo(self, repo: Dict[str, Any]) -> str:
         dest = os.path.join(REPOS_DIR, repo["key"])
+        depth = str(repo.get("clone_depth", 1))
         if os.path.isdir(os.path.join(dest, ".git")):
-            subprocess.run(["git", "fetch", "--depth", "1", "origin"], cwd=dest,
+            subprocess.run(["git", "fetch", "--depth", depth, "origin"], cwd=dest,
                            capture_output=True, timeout=120)
             subprocess.run(["git", "reset", "--hard", "-q", "origin/HEAD"], cwd=dest,
                            capture_output=True, timeout=60)
         else:
             os.makedirs(REPOS_DIR, exist_ok=True)
-            subprocess.run(["git", "clone", "--depth", "1", "-q", repo["url"], dest],
-                           capture_output=True, timeout=300, check=True)
+            subprocess.run(["git", "clone", "--depth", depth, "-q", repo["url"], dest],
+                           capture_output=True, timeout=600, check=True)
         return dest
 
     # -- scenario 1: symbol read ------------------------------------------
@@ -223,11 +225,253 @@ class RealRepoBenchmark:
                  "reads_measured": len(gate_results)}
         return self._finish(baseline, optimized, gates, extra={"per_read": per_read})
 
+    # -- local mode: measure the CURRENT repository (no pre-registration) ----
+    def _hot_symbols(self, root: str, limit: int = 3) -> List[Any]:
+        """Top graph-hub files × their largest top-level symbol — the reads an
+        agent actually performs first in an unfamiliar repo."""
+        from src.graph_engine import GraphEngine
+        graph = GraphEngine.get_instance(root)
+        out: List[Any] = []
+        for node in graph.get_god_nodes(top_n=8):
+            f = node.get("file")
+            if not f:
+                continue
+            fp = f if os.path.isabs(f) else os.path.join(root, f)
+            if not os.path.isfile(fp):
+                continue
+            try:
+                with open(fp, "r", encoding="utf-8", errors="replace") as fh:
+                    tree = ast.parse(fh.read())
+            except SyntaxError:
+                continue
+            best: Optional[Any] = None
+            for node2 in tree.body:
+                if isinstance(node2, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+                    size = (node2.end_lineno or node2.lineno) - node2.lineno
+                    if best is None or size > best[1]:
+                        best = (node2.name, size)
+            if best:
+                out.append((f, best[0]))
+            if len(out) >= limit:
+                break
+        return out[:limit]
+
+    def measure_local_test_output(self, root: str) -> Dict[str, Any]:
+        tests_dir = os.path.join(root, "tests")
+        if not os.path.isdir(tests_dir):
+            return {"status": "skipped", "reason": "no tests/ directory"}
+        venv_py = os.path.join(VENV_DIR, "bin", "python")
+        if os.path.exists(venv_py):
+            py = venv_py
+        else:
+            import importlib.util
+            if importlib.util.find_spec("pytest") is None:
+                return {"status": "skipped", "reason": "pytest not installed"}
+            py = sys.executable
+        try:
+            proc = subprocess.run(
+                [py, "-m", "pytest", "tests/", "-q", "--tb=long", "--no-header", "-p", "no:cacheprovider"],
+                cwd=root, capture_output=True, text=True, timeout=300,
+            )
+        except subprocess.TimeoutExpired:
+            return {"status": "skipped", "reason": "pytest timeout 300s"}
+        raw = (proc.stdout or "") + (proc.stderr or "")
+        if not raw.strip():
+            return {"status": "skipped", "reason": "no pytest output"}
+        baseline = count_tokens(raw)
+        compacted = CommandSanitizer.compact_test_output(raw, proc.returncode)
+        optimized = count_tokens(compacted)
+        # Local mode never mutates the user's repo (no injected regression):
+        # gates verify the outcome signal survived compaction.
+        gates = {
+            "outcome_signal_retained": any(w in compacted for w in ("passed", "failed", "error", "==")),
+            "shorter_or_equal": optimized <= baseline,
+        }
+        return self._finish(baseline, optimized, gates, extra={
+            "exit_code": proc.returncode,
+            "note": "local mode: suite as-is (no injected regression)",
+        })
+
+    def run_local(self, root_dir: Optional[str] = None) -> Dict[str, Any]:
+        """Measures the CURRENT repository. Not pre-registered by definition —
+        this mode is a self-measurement tool for any repo, not the published
+        methodology (that lives in bench_scenarios.json)."""
+        root = os.path.abspath(root_dir or os.getcwd())
+        key = os.path.basename(root) or "local-repo"
+        envelope: Dict[str, Any] = {
+            "version": self.reg.get("version"),
+            "created": self.reg.get("created"),
+            "methodology": "local mode: measured on the current repository (no scenario pre-registration)",
+            "pricing": self.pricing,
+            "results": [],
+        }
+        entry: Dict[str, Any] = {"key": key, "url": f"local:{root}", "mode": "local"}
+        envelope["results"].append(entry)
+        try:
+            reads = self._hot_symbols(root, limit=3)
+        except Exception as exc:
+            entry.update({"status": "failed", "reason": f"graph engine: {exc}"})
+            return envelope
+        if not reads:
+            entry.update({"status": "skipped", "reason": "no measurable symbols found (empty/too small repo?)"})
+            return envelope
+        read_results = [{"file": f, "symbol": s, **self.measure_symbol_read(root, f, s)} for f, s in reads]
+        entry["symbol_read"] = self._aggregate_reads(read_results)
+        entry["multiturn"] = self.measure_multiturn(root, [{"file": f, "symbol": s} for f, s in reads])
+        entry["test_output"] = self.measure_local_test_output(root)
+        entry["symbol_read_details"] = read_results
+        statuses = [entry["symbol_read"].get("status"), entry["multiturn"].get("status"), entry["test_output"].get("status")]
+        entry["status"] = "ok" if all(s == "ok" for s in statuses) else ("partial" if any(s == "ok" for s in statuses) else "failed")
+        return envelope
+
+    def _aggregate_reads(self, read_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        oks = [r for r in read_results if r.get("status") == "ok"]
+        if not oks:
+            return {"status": read_results[0].get("status", "skipped"), "reason": read_results[0].get("reason", "no reads measured")}
+        baseline = sum(r["baseline_tokens"] for r in oks)
+        optimized = sum(r["optimized_tokens"] for r in oks)
+        gates_all = {}
+        for r in oks:
+            gates_all.update(r.get("gates", {}))
+        return self._finish(baseline, optimized, gates_all, extra={"reads": len(oks)})
+
+    # -- scenario 4: architecture discovery --------------------------------
+    def _hub_files(self, root: str, limit: int = 5) -> List[str]:
+        from src.graph_engine import GraphEngine
+        graph = GraphEngine.get_instance(root)
+        out = []
+        for n in graph.get_god_nodes(top_n=limit):
+            f = n.get("file")
+            if f and os.path.isfile(os.path.join(root, f)):
+                out.append(f)
+        return out
+
+    def _architecture_map(self, root: str) -> str:
+        from src.graph_engine import GraphEngine
+        graph = GraphEngine.get_instance(root)
+        lines = [f"Architecture: {len(graph.symbols)} symbols in {len(graph.file_symbols)} files"]
+        for n in graph.get_god_nodes(top_n=7):
+            lines.append(
+                f"{n.get('file')} (symbols: {n.get('symbols_count')}, "
+                f"dependents: {n.get('dependents')}, dependencies: {n.get('dependencies')})"
+            )
+        return "\n".join(lines)
+
+    def measure_architecture(self, root: str) -> Dict[str, Any]:
+        hub_files = self._hub_files(root)
+        if len(hub_files) < 2:
+            return {"status": "skipped", "reason": "fewer than 2 hub files resolved"}
+        baseline = 0
+        for f in hub_files:
+            with open(os.path.join(root, f), "r", encoding="utf-8", errors="replace") as fh:
+                baseline += count_tokens(fh.read())
+        map_text = self._architecture_map(root)
+        optimized = count_tokens(map_text)
+        gates = {
+            "hub_files_listed": all(os.path.basename(f) in map_text for f in hub_files),
+            "compact_bound": optimized < 600,
+        }
+        return self._finish(baseline, optimized, gates, extra={"hub_files": hub_files})
+
+    # -- scenario 5: raw search leak ---------------------------------------
+    @staticmethod
+    def raw_search_gates(raw_text: str, optimized_text: str, match_count: int) -> Dict[str, bool]:
+        optimized_paths = {ln.split(":", 1)[0] for ln in optimized_text.splitlines() if ":" in ln}
+        return {
+            "matches_exist": match_count > 25,
+            "paths_preserved": bool(optimized_paths) and all(p in raw_text for p in optimized_paths),
+        }
+
+    def measure_raw_search(self, root: str, cfg: Dict[str, Any]) -> Dict[str, Any]:
+        pattern = cfg.get("pattern")
+        search_dir = cfg.get("dir", ".")
+        if not pattern:
+            return {"status": "skipped", "reason": "no pattern pre-registered"}
+        proc = subprocess.run(["git", "grep", "-n", pattern, "--", search_dir],
+                              cwd=root, capture_output=True, text=True, timeout=120)
+        raw_lines = [ln for ln in (proc.stdout or "").splitlines() if ln.strip()]
+        if not raw_lines:
+            return {"status": "skipped", "reason": f"no matches for '{pattern}'"}
+        baseline = count_tokens("\n".join(raw_lines))
+        if len(raw_lines) <= 25:
+            return {"status": "skipped",
+                    "reason": f"no leak: {len(raw_lines)} matches <= 25 cap (scoped_search would save nothing)"}
+        # scoped_search semantics: max 25 results, lines trimmed to a bounded width
+        optimized_lines = [ln[:120] for ln in raw_lines[:25]]
+        optimized_text = "\n".join(optimized_lines)
+        optimized = count_tokens(optimized_text)
+        gates = self.raw_search_gates("\n".join(raw_lines), optimized_text, len(raw_lines))
+        return self._finish(baseline, optimized, gates, extra={"matches": len(raw_lines), "pattern": pattern})
+
+    # -- scenario 6: git-diff churn → slice_diff ----------------------------
+    @staticmethod
+    def git_diff_gates(raw_text: str, sliced_text: str) -> Dict[str, bool]:
+        changed = [ln[4:].strip() for ln in raw_text.splitlines() if ln.startswith("+++ b/")]
+        non_lock = [p for p in changed if "lock" not in p.lower()]
+        return {"changed_files_preserved": bool(non_lock) and all(p in sliced_text for p in non_lock)}
+
+    def measure_git_diff(self, root: str) -> Dict[str, Any]:
+        count = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=root,
+                               capture_output=True, text=True, timeout=60)
+        try:
+            if int((count.stdout or "0").strip() or 0) < 2:
+                return {"status": "skipped", "reason": "insufficient history for git diff"}
+        except ValueError:
+            return {"status": "skipped", "reason": "no commit history"}
+        proc = subprocess.run(["git", "diff", "HEAD~1", "HEAD"], cwd=root,
+                              capture_output=True, text=True, timeout=180)
+        raw = proc.stdout or ""
+        if not raw.strip():
+            return {"status": "skipped", "reason": "empty diff at HEAD~1"}
+        baseline = count_tokens(raw)
+        sliced, _orig, _new = DiffSlicer.slice_diff(raw)
+        optimized = count_tokens(sliced)
+        gates = self.git_diff_gates(raw, sliced)
+        return self._finish(baseline, optimized, gates, extra={"changed_bytes": len(raw)})
+
+    # -- scenario 7: write-egress (OUTPUT-token axis) ------------------------
+    @staticmethod
+    def write_egress_gates(modified_text: str, edit_block: str) -> Dict[str, bool]:
+        return {
+            "inserted_line_present": "bench-probe" in modified_text,
+            "original_signature_in_target": True,  # replaced per-call with real check
+        }
+
+    def measure_write_egress(self, root: str) -> Dict[str, Any]:
+        for f in self._hub_files(root, limit=8):
+            fp = os.path.join(root, f)
+            with open(fp, "r", encoding="utf-8", errors="replace") as fh:
+                lines = fh.read().splitlines()
+            if not (100 <= len(lines) <= 800):
+                continue
+            sig_idx = next((i for i, ln in enumerate(lines)
+                            if ln.lstrip().startswith(("def ", "async def ", "class "))), None)
+            if sig_idx is None:
+                continue
+            sig_line = lines[sig_idx]
+            modified_lines = lines[:sig_idx + 1] + ["    # bench-probe: egress guard scenario"] + lines[sig_idx + 1:]
+            modified_text = "\n".join(modified_lines)
+            edit_block = (
+                f"{f}\nTarget:\n{sig_line}\nReplacement:\n{sig_line}\n    # bench-probe: egress guard scenario\n"
+            )
+            baseline_out = count_tokens(modified_text)   # write_file re-emits the whole file
+            optimized_out = count_tokens(edit_block)     # surgical Edit emits only the delta
+            gates = {
+                "inserted_line_present": "bench-probe" in modified_text,
+                "original_signature_in_target": sig_line.strip() in edit_block,
+            }
+            out = self._finish(baseline_out, optimized_out, gates,
+                               usd_per_mtok=self.pricing.get("sonnet_output_usd_per_mtok"),
+                               extra={"file": f, "axis": "output_tokens (write_file vs surgical Edit)"})
+            return out
+        return {"status": "skipped", "reason": "no mid-size hub file for egress scenario"}
+
     # -- aggregation -----------------------------------------------------
-    def _finish(self, baseline: int, optimized: int, gates: Dict[str, bool], extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def _finish(self, baseline: int, optimized: int, gates: Dict[str, bool], extra: Optional[Dict[str, Any]] = None, usd_per_mtok: Optional[float] = None) -> Dict[str, Any]:
         saved = max(0, baseline - optimized)
         reduction = round(saved / baseline * 100.0, 1) if baseline else 0.0
-        usd = round(saved / 1e6 * self.pricing["sonnet_input_usd_per_mtok"], 4)
+        price = float(usd_per_mtok or self.pricing.get("sonnet_input_usd_per_mtok", PUBLISHED_PIN["sonnet_input_usd_per_mtok"]))
+        usd = round(saved / 1e6 * price, 4)
         out = {
             "status": "ok" if all(gates.values()) else "gate_failed",
             "baseline_tokens": baseline,
@@ -251,8 +495,13 @@ class RealRepoBenchmark:
         entry["symbol_read"] = self.measure_symbol_read(root, **repo["symbol_read"])
         entry["test_output"] = self.measure_test_output(root, repo.get("pytest", {}))
         entry["multiturn"] = self.measure_multiturn(root, repo.get("multiturn_reads", []))
-        ok = [entry[s].get("status") == "ok" for s in ("symbol_read", "test_output", "multiturn")]
-        entry["status"] = "ok" if all(ok) else ("partial" if any(ok) else "failed")
+        entry["architecture"] = self.measure_architecture(root)
+        entry["raw_search"] = self.measure_raw_search(root, repo.get("raw_search", {}))
+        entry["git_diff"] = self.measure_git_diff(root)
+        entry["write_egress"] = self.measure_write_egress(root)
+        scen_keys = ("symbol_read", "test_output", "multiturn", "architecture", "raw_search", "git_diff", "write_egress")
+        ok = [entry[s].get("status") == "ok" for s in scen_keys if s in entry and isinstance(entry[s], dict)]
+        entry["status"] = "ok" if ok and all(ok) else ("partial" if any(ok) else "failed")
         return entry
 
     def run_all(self, repo_keys: Optional[List[str]] = None) -> Dict[str, Any]:
@@ -276,7 +525,7 @@ class RealRepoBenchmark:
         lines.append("| Repo | Scenario | Baseline tok | Optimized tok | Saved | % | USD (Sonnet input) | Gates |")
         lines.append("| :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- |")
         for r in data.get("results", []):
-            for scen in ("symbol_read", "test_output", "multiturn"):
+            for scen in ("symbol_read", "test_output", "multiturn", "architecture", "raw_search", "git_diff", "write_egress"):
                 s = r.get(scen) or {}
                 if s.get("status") != "ok" and s.get("status") != "gate_failed":
                     continue
