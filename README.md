@@ -328,7 +328,7 @@ tokensafe guard audit [path]        Recursive source audit for secrets & vulnera
 tokensafe doctor                    Audit MCP tool overhead and context token tax
 tokensafe digest [--send]           Compile (and optionally dispatch) the weekly team digest
 tokensafe mcp list|disable|enable   Manage configured MCP servers
-tokensafe proxy [port]              Local transparent AI proxy (0.0.0.0:8765/v1)
+tokensafe proxy [port]              Local transparent AI proxy (127.0.0.1:8765/v1; host via TOKENSAFE_HOST)
 tokensafe install / setup [--all]   Configure detected agent environments
 tokensafe update / check-update     Self-update / check for a newer version
 tokensafe activate <KEY>            Activate a Team or Solo license key
@@ -342,6 +342,26 @@ tokensafe reset                     Reset all local token metrics
 tokensafe --version                 Print version and exit
 ```
 </details>
+
+### Proxy mode & agent coverage (v3.0.0)
+
+Run `tokensafe proxy` (or the bundled docker-compose), then point your agent's base URL at `http://127.0.0.1:8765/v1` — the installer does **not** wire this for you; it is a per-agent setting:
+
+| Agent | Route through proxy? | How |
+|---|---|---|
+| Claude Code | ✅ | `ANTHROPIC_BASE_URL=http://127.0.0.1:8765` (or OpenAI-compatible env) |
+| Cline / Roo Code | ✅ | API Provider → OpenAI-compatible → Base URL |
+| Aider | ✅ | `--openai-api-base http://127.0.0.1:8765/v1` |
+| Cursor (custom models) | ✅ | Add an OpenAI-compatible model with override base URL |
+| Cursor (built-in models) | ❌ | Routed via Cursor's own backend — hooks only |
+| Antigravity / ZCode | ❌ | Hooks only (lifecycle adapters) |
+| Codex CLI | ❌ | stdio MCP + AGENTS.md (no proxy transport) |
+
+What runs where:
+
+- **Proxy-only (A/B/D)**: Tool Result Ledger (folds aged tool results in-flight, `TOKENSAFE_TOOL_LEDGER=0` to disable), session-stable cold-tool pruning (opt-in: `TOKENSAFE_TOOL_PRUNING=1`, `TOKENSAFE_TOOL_PRUNE_KEEP`, `TOKENSAFE_TOOL_PRUNE_ALLOWLIST`), managed-cloud history distillation (paid, opt-in: `TOKENSAFE_HISTORY_DISTILL=1`).
+- **Hooks (all agents)**: PostToolUse stdout compaction, PreToolUse shell/secret guards, Output Guard steering full-file writes to surgical edits, prompt compaction, history folding.
+- Folded originals are archived under `~/.tokensafe/data/tool_ledger/` and every fold carries a deterministic re-hydration anchor — nothing is destroyed, and already-folded results are never re-processed (KV-cache stable).
 
 More documentation: [docs/AGENT_SETUP.md](docs/AGENT_SETUP.md) · [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) · [docs/API.md](docs/API.md) · [METRICS.md](METRICS.md) · [BENCHMARK_REPORT.md](BENCHMARK_REPORT.md)
 

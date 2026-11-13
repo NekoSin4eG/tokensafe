@@ -21,6 +21,7 @@ from src.loop_detector import LoopDetector
 from src.metrics import MetricsTracker
 from src.tokenizer import count_tokens
 from src.license_manager import LicenseManager
+from src.adapter_core import guard_write
 
 
 def _trigger_bg_sync():
@@ -103,43 +104,17 @@ def _handle(payload: dict) -> dict:
             _trigger_bg_sync()
             return {"decision": "deny", "reason": f"🛡️ TokenSafe Guard: {guard_res.reason}"}
 
-    # 3. Output Guard: Block write_file on large existing files to enforce edit_file
+    # 3. Output Guard (shared guard_write, v3.0.0): deny wholesale overwrite of
+    #    large existing files to enforce edit_file; ask on small-delta writes.
     if tool_name == "write_file":
         raw_path = str(args.get("Path") or args.get("path") or "")
         path = _resolve_hook_path(raw_path, hook_cwd)
         content = args.get("Content", "")
         is_append = args.get("Append", False)
-
-        if not is_append and path and os.path.exists(path):
-            try:
-                with open(path, "r", encoding="utf-8", errors="replace") as f:
-                    existing_lines = sum(1 for _ in f)
-            except Exception:
-                existing_lines = 0
-
-            # If file already has >= 40 lines, block wholesale overwrite to save output tokens
-            if existing_lines >= 40:
-                content_tokens = count_tokens(content)
-                tracker.record_event(
-                    session_id=conversation_id,
-                    event_type="OUTPUT_GUARD",
-                    original_tokens=content_tokens,
-                    optimized_tokens=80, # typical edit_file diff tokens
-                    details={
-                        "target_file": os.path.basename(path),
-                        "existing_lines": existing_lines,
-                        "saved_output_tokens": max(0, content_tokens - 80)
-                    }
-                )
-                _trigger_bg_sync()
-                return {
-                    "decision": "deny",
-                    "reason": (
-                        f"Token Optimizer Output Guard: '{os.path.basename(path)}' already exists with {existing_lines} lines. "
-                        f"Wholesale rewriting via write_file burns expensive output tokens. "
-                        f"Please use 'edit_file' with surgical Target and Replacement blocks instead."
-                    )
-                }
+        verdict = guard_write(path, str(content or ""), bool(is_append), "antigravity", conversation_id)
+        if verdict["decision"] in ("deny", "ask"):
+            _trigger_bg_sync()
+            return {"decision": verdict["decision"], "reason": verdict["reason"]}
 
     # 3. read_file Optimization (AST Windowing & Skeletonization).
     #    'view_file' is the IDE-surface name for the same tool (hooks.md) —

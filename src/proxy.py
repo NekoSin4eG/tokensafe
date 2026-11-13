@@ -7,6 +7,7 @@ Endpoint: http://127.0.0.1:8765/v1
 
 import sys
 import os
+import re
 import json
 import time
 import queue
@@ -22,11 +23,12 @@ sys.path.insert(0, BASE_DIR)
 from src.compactor import PromptCompactor
 from src.metrics import MetricsTracker
 from src.dashboard import Dashboard
-from src.loop_detector import LoopDetector
 from src.secret_redactor import SecretRedactor
 from src.graph_engine import GraphEngine
 from src.cache_normalizer import PromptCacheNormalizer
 from src.governor import ContextGovernor
+from src.result_ledger import fold_tool_results
+from src.tool_pruner import _tool_name, apply_subset, detect_prune_miss
 from src.paths import resolve_data_dir
 
 DEFAULT_PORT = 8765
@@ -432,6 +434,18 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             self.wfile.write(payload_bytes)
             return
 
+        if self.path in ("/v1/models", "/models"):
+            # Some agent harnesses probe /v1/models on connect before chatting.
+            # The proxy is transparent about upstream models, so we serve a
+            # minimal OpenAI-shaped empty catalog instead of a 404.
+            body = json.dumps({"object": "list", "data": []}).encode("utf-8")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+
         if self.path in ("/", "/dashboard", "/dashboard.html"):
             tracker = MetricsTracker()
             html_bytes = Dashboard(tracker).render_html().encode("utf-8")
@@ -566,6 +580,21 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             if secrets_scrubbed > 0:
                 print(f"[TokenSafe] Scrubbed {secrets_scrubbed} sensitive secret(s) from payload before transmission.")
 
+        # 1.5 Tool Result Ledger: fold aged, oversized tool results into compact
+        #     anchors + local archive (idempotent via marker; cache-aware). Runs
+        #     before the governor so the governor sees the lightened mass.
+        if messages and not is_quota_exceeded:
+            try:
+                messages, ledger_stats = fold_tool_results(messages)
+                payload["messages"] = messages
+                if ledger_stats.get("folded"):
+                    print(
+                        f"[TokenSafe] Tool Result Ledger: folded {ledger_stats['folded']} result(s), "
+                        f"~{ledger_stats['saved_tokens']} input tokens lighter."
+                    )
+            except Exception:
+                pass
+
         # 2. Ingress Optimization: REPLACE the last user message with its TOCP form.
         #    Paused when Community 500k monthly measured quota is exceeded.
         target_symbol = None
@@ -639,6 +668,27 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
             if gov_stats.get("throttled"):
                 BROADCASTER.publish("governor_throttle", gov_stats)
 
+        # 5.5 Session-stable tool pruning (opt-in, TOKENSAFE_TOOL_PRUNING=1):
+        #     relevance subset chosen once per pseudo-session and kept
+        #     byte-stable for the whole session (KV-cache safe). The agent
+        #     still knows ALL its tools — pruned-tool calls still execute;
+        #     we only measure the miss rate.
+        sent_tool_names = None
+        if isinstance(payload.get("tools"), list) and payload["tools"] and not is_quota_exceeded:
+            sent_tool_names = {n for n in (_tool_name(t) for t in payload["tools"]) if n}
+            try:
+                pruned_tools, prune_meta = apply_subset(
+                    payload["tools"],
+                    payload.get("messages") or [],
+                    str(payload.get("model") or ""),
+                )
+                if prune_meta.get("applied"):
+                    payload["tools"] = pruned_tools
+                    sent_tool_names = {n for n in (_tool_name(t) for t in pruned_tools) if n}
+                    print(f"[TokenSafe] Tool pruning: {prune_meta.get('pool')} → {prune_meta.get('subset')} tools (session-stable).")
+            except Exception:
+                pass
+
         # 6. Prompt Cache Prefix & Tool Normalization (multi-breakpoint + deterministic ordering)
         if not is_quota_exceeded:
             if messages:
@@ -695,10 +745,15 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                     self.end_headers()
                     sse_t = _AnthropicSSETranslator(str(payload.get("model") or "")) if provider == "anthropic" else None
                     reader = getattr(resp, "read1", None) or resp.read
+                    # Best-effort usage capture from the stream tail: Anthropic
+                    # reports final usage in the trailing message_delta events.
+                    sse_tail = bytearray()
                     while True:
                         try:
                             chunk = reader(4096)
                         except TypeError:
+                            # Defensive fallback for readers without sized reads:
+                            # buffer the whole stream, emit once (no streaming).
                             chunk = resp.read()
                             if chunk:
                                 out = sse_t.feed(chunk) if sse_t else chunk
@@ -708,6 +763,10 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                             break
                         if not chunk:
                             break
+                        if sse_tail is not None:
+                            sse_tail.extend(chunk)
+                            if len(sse_tail) > 65536:
+                                del sse_tail[: len(sse_tail) - 65536]
                         out = sse_t.feed(chunk) if sse_t else chunk
                         if out:
                             self.wfile.write(out)
@@ -717,6 +776,21 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                         if tail:
                             self.wfile.write(tail)
                             self.wfile.flush()
+                    # Parse trailing usage (non-fatal; non-Anthropic streams skip)
+                    try:
+                        if sse_t is not None and sse_tail:
+                            tail_text = sse_tail.decode("utf-8", "replace")
+                            m_usage = re.search(
+                                r'"usage":\s*\{[^}]*"(?:cache_read_input_tokens|input_tokens)":\s*(\d+)',
+                                tail_text,
+                            )
+                            m_cached = re.search(r'"cache_read_input_tokens":\s*(\d+)', tail_text)
+                            if m_cached:
+                                BROADCASTER.publish("cache_stats", {"provider": provider, "cached_tokens": int(m_cached.group(1))})
+                            elif m_usage:
+                                BROADCASTER.publish("cache_stats", {"provider": provider, "cached_tokens": 0})
+                    except Exception:
+                        pass
                 else:
                     resp_data = resp.read()
                     if provider == "anthropic":
@@ -743,6 +817,22 @@ class TokenSafeProxyHandler(BaseHTTPRequestHandler):
                         )
                         if cached:
                             BROADCASTER.publish("cache_stats", {"provider": provider, "cached_tokens": int(cached)})
+                        # Prune-miss telemetry: model called a tool outside the
+                        # sent subset (call still flows to the agent).
+                        if sent_tool_names:
+                            miss = detect_prune_miss(resp_json, sent_tool_names)
+                            if miss:
+                                BROADCASTER.publish("prune_miss", {"tool": miss})
+                                try:
+                                    proxy_tracker.record_event(
+                                        session_id="proxy_session",
+                                        event_type="TOOL_PRUNE_MISS",
+                                        original_tokens=0,
+                                        optimized_tokens=0,
+                                        details={"tool": miss, "subset_size": len(sent_tool_names)},
+                                    )
+                                except Exception:
+                                    pass
                     except Exception:
                         pass
 

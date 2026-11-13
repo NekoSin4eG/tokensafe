@@ -48,7 +48,12 @@ EVENT_NAMES = {
     "OUTPUT_GUARD": "Output Token Guard (write_file)",
     "LOOP_GUARD": "Anti-Stuck Loop Guard",
     "HISTORY_FOLD": "Multi-turn History Fold",
-    "COMMAND_OUTPUT": "Terminal Log Sanitizer"
+    "COMMAND_OUTPUT": "Terminal Log Sanitizer",
+    "TOOL_OUTPUT_COMPACT": "PostToolUse Stdout Compact",
+    "TOOL_LEDGER": "Tool Result Ledger (proxy)",
+    "TOOL_PRUNE": "Cold Tool Pruning (proxy)",
+    "TOOL_PRUNE_MISS": "Tool Prune Miss (quality watch)",
+    "EPOCH_ROLLOVER": "Epoch Rollover (80% window)"
 }
 
 class Dashboard:
@@ -110,6 +115,21 @@ class Dashboard:
                 )
             out.append("")
         out.append(f"  {BOLD}Context Traffic:{RESET}     {orig:,} raw ➔ {opt:,} optimized ({events_count} events)\n")
+
+        # Egress economy (v3.0.0): output tokens cost ~4x input — surfaced apart
+        breakdown_early = summary.get("breakdown", {})
+        og = breakdown_early.get("OUTPUT_GUARD") or {}
+        tl = breakdown_early.get("TOOL_LEDGER") or {}
+        tp = breakdown_early.get("TOOL_PRUNE") or {}
+        if og.get("count") or tl.get("count") or tp.get("count"):
+            out.append(f"{BOLD}── Egress Economy (output ≈4× input price) ──────────────────────────{RESET}")
+            if og.get("count"):
+                out.append(f"  • {BOLD}{'Full-file writes steered to Edit':<34}{RESET} : {GREEN}{og['saved']:,} output tokens{RESET} ({og['count']} events)")
+            if tl.get("count"):
+                out.append(f"  • {BOLD}{'Aged tool results folded (proxy)':<34}{RESET} : {GREEN}{tl['saved']:,} input tokens{RESET} ({tl['count']} events)")
+            if tp.get("count"):
+                out.append(f"  • {BOLD}{'Cold MCP tools pruned (proxy)':<34}{RESET} : {GREEN}{tp['saved']:,} floor tokens{RESET} ({tp['count']} events)")
+            out.append("")
 
         # Breakdown by category
         out.append(f"{BOLD}── Breakdown by Source ──────────────────────────────────────────────{RESET}")

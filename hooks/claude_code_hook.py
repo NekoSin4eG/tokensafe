@@ -22,7 +22,7 @@ PROJECT_ROOT = os.path.dirname(HOOK_DIR)
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from src.adapter_core import TOKENSAFE_DIRECTIVES, compact_for_injection, guard_command
+from src.adapter_core import TOKENSAFE_DIRECTIVES, compact_for_injection, guard_command, guard_write
 
 AGENT = "claude_code"
 
@@ -154,6 +154,29 @@ def handle(event: str, payload: dict) -> dict:
         if tool in ("Bash", "Shell", "bash"):
             command = str(tool_input.get("command") or "")
             verdict = guard_command(command, AGENT, session_id, cwd=str(payload.get("cwd") or ""))
+            if verdict["decision"] == "deny":
+                return {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "deny",
+                        "permissionDecisionReason": verdict["reason"],
+                    }
+                }
+            if verdict["decision"] == "ask":
+                return {
+                    "hookSpecificOutput": {
+                        "hookEventName": "PreToolUse",
+                        "permissionDecision": "ask",
+                        "permissionDecisionReason": verdict["reason"],
+                    }
+                }
+        elif tool in ("Write", "write_file", "replace_file_content"):
+            # Egress economy (v3.0.0): full-file writes over existing files
+            # burn expensive output tokens — steer to surgical Edit instead.
+            file_path = str(tool_input.get("file_path") or tool_input.get("Path") or tool_input.get("path") or "")
+            content = tool_input.get("content") or tool_input.get("Content") or tool_input.get("file_text") or ""
+            append = bool(tool_input.get("append") or tool_input.get("Append") or False)
+            verdict = guard_write(file_path, str(content or ""), append, AGENT, session_id)
             if verdict["decision"] == "deny":
                 return {
                     "hookSpecificOutput": {

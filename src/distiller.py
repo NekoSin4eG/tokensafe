@@ -109,10 +109,13 @@ Rules:
         return os.environ.get("TOKENSAFE_SELF_HOSTED", "").lower() in ("1", "true", "yes")
 
     @classmethod
-    def _call_cloud_distill(cls, raw_text: str, lic_key: str) -> Optional[str]:
+    def _call_cloud_distill(cls, raw_text: str, lic_key: str, mode: str = "") -> Optional[str]:
         cloud_url = os.environ.get("TOKENSAFE_CLOUD_URL", "https://api.tokensafe.dev").rstrip("/")
         endpoint = f"{cloud_url}/api/distill"
         payload = {"prompt": raw_text.strip()}
+        if mode:
+            payload["mode"] = mode
+        timeout = cls.HISTORY_DISTILL_TIMEOUT if mode == "history" else cls.DEFAULT_TIMEOUT
         req = urllib.request.Request(
             endpoint,
             data=json.dumps(payload).encode("utf-8"),
@@ -123,13 +126,49 @@ Rules:
             }
         )
         try:
-            with urllib.request.urlopen(req, timeout=cls.DEFAULT_TIMEOUT) as resp:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
                 if resp.status == 200:
                     data = json.loads(resp.read().decode("utf-8"))
                     if data.get("success") and data.get("distilled"):
                         return data["distilled"].strip()
         except Exception:
             return None
+        return None
+
+    HISTORY_DISTILL_TIMEOUT = 8.0
+
+    @classmethod
+    def distill_history(cls, raw_text: str) -> Optional[str]:
+        """
+        Managed-cloud history summarization for the Tool Result Ledger (v3.0.0):
+        compresses an aged tool-result segment into a terse state ledger.
+        Paid license required (free tier = hard-off per the distiller contract);
+        managed cloud only — self-hosted BYOK keeps the mechanical fold.
+        Shares the failure-cooldown breaker with prompt distillation.
+        """
+        if not raw_text or len(raw_text.strip()) < 50:
+            return None
+        if cls._cooldown_active():
+            return None
+        cache_key_text = "HIST:" + raw_text[:4000]
+        cached = DistillationCache.get(cache_key_text)
+        if cached:
+            return cached
+        tier, _ = LicenseManager.get_active_license()
+        if tier == "free":
+            return None
+        providers = cls.get_configured_providers()
+        if "cloud" not in providers:
+            return None  # self-hosted BYOK: mechanical fold stays the contract
+        lic_key = LicenseManager.get_active_license_key()
+        if not lic_key:
+            return None
+        cloud_res = cls._call_cloud_distill(raw_text, lic_key, mode="history")
+        if cloud_res:
+            DistillationCache.set(cache_key_text, cloud_res, provider="cloud-managed")
+            cls._clear_failure()
+            return cloud_res
+        cls._record_failure()
         return None
 
     @classmethod

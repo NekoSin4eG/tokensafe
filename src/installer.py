@@ -225,6 +225,7 @@ class AgentInstaller:
             hooks = data.get("hooks") if isinstance(data.get("hooks"), dict) else {}
             prompt_entry = {"hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
             bash_entry = {"matcher": "Bash", "hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
+            write_entry = {"matcher": "Write", "hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
             session_entry = {"hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
             post_bash_entry = {"matcher": "Bash", "hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
 
@@ -252,13 +253,14 @@ class AgentInstaller:
                 _sync_claude_event("SessionStart", session_entry),
                 _sync_claude_event("UserPromptSubmit", prompt_entry),
                 _sync_claude_event("PreToolUse", bash_entry),
+                _sync_claude_event("PreToolUse", write_entry),
                 _sync_claude_event("PostToolUse", post_bash_entry),
             ])
             if not changed:
                 return True, "TokenSafe Claude Code hooks already registered"
             data["hooks"] = hooks
             cls._atomic_write_json(config_file, data)
-            return True, "hooks registered (SessionStart + UserPromptSubmit + PreToolUse guard + PostToolUse stdout compact)"
+            return True, "hooks registered (SessionStart + UserPromptSubmit + PreToolUse guard/write + PostToolUse stdout compact)"
 
         # cursor
         config_file = os.path.join(HOME, ".cursor", "hooks.json")

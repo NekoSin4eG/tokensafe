@@ -18,6 +18,8 @@ import re
 import json
 from typing import Dict, Any, Optional, Tuple
 
+from src.tokenizer import count_tokens
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -220,3 +222,72 @@ def guard_read(file_path: str, agent: str, session_id: str = "") -> Dict[str, An
             })
             return result
     return result
+
+
+def guard_write(file_path: str, content: str, append: bool = False, agent: str = "", session_id: str = "") -> Dict[str, Any]:
+    """Pre-write egress guard (v3.0.0): full-file Write over an existing file
+    burns expensive OUTPUT tokens. Policy:
+    - new file / append / no content -> allow
+    - wholesale overwrite of a >=40-line file -> deny (parity with the
+      Antigravity Output Guard, hooks/pre_tool_use.py)
+    - small delta vs the current file (<25% of lines AND <80 lines) -> ask,
+      steering the model to a surgical Edit instead (quality untouched).
+    Recorded as OUTPUT_GUARD with honest estimated output-token savings."""
+    result = {"decision": "allow", "reason": "", "saved_tokens": 0}
+    if not file_path or append or not isinstance(content, str) or not content:
+        return result
+    path = file_path.replace("\\", "/")
+    if not os.path.isfile(path):
+        return result
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as f:
+            existing_text = f.read()
+    except Exception:
+        return result
+    existing_lines = existing_text.splitlines()
+    if len(existing_lines) < 40:
+        return result
+
+    new_lines = content.splitlines()
+    import difflib
+    delta_lines = sum(
+        1 for ln in difflib.unified_diff(existing_lines, new_lines, lineterm="", n=0)
+        if ln[:1] in ("+", "-") and ln[:3] not in ("+++", "---")
+    )
+    content_tokens = max(1, count_tokens(content))
+    edit_tokens = max(1, count_tokens("\n".join(new_lines[:80])) // 3)
+    tracker = _get_tracker()
+
+    def _emit(decision: str, reason: str) -> Dict[str, Any]:
+        if tracker:
+            try:
+                tracker.record_event(
+                    session_id=session_id or f"hook_{agent}",
+                    event_type="OUTPUT_GUARD",
+                    original_tokens=content_tokens,
+                    optimized_tokens=edit_tokens if decision == "ask" else 80,
+                    details={
+                        "agent": agent,
+                        "target_file": os.path.basename(path),
+                        "existing_lines": len(existing_lines),
+                        "delta_lines": delta_lines,
+                        "decision": decision,
+                    },
+                )
+            except Exception:
+                pass
+        return {"decision": decision, "reason": reason, "saved_tokens": max(0, content_tokens - edit_tokens)}
+
+    if delta_lines < max(1, int(len(existing_lines) * 0.25)) and delta_lines < 80:
+        return _emit(
+            "ask",
+            f"TokenSafe Output Guard: '{os.path.basename(path)}' already exists ({len(existing_lines)} lines) "
+            f"and your Write is only a ~{delta_lines}-line delta. Use 'edit_file'/Edit with the exact old block "
+            f"instead — wholesale rewrite burns expensive output tokens (~{content_tokens} vs ~{edit_tokens}).",
+        )
+    return _emit(
+        "deny",
+        f"TokenSafe Output Guard: '{os.path.basename(path)}' already exists with {len(existing_lines)} lines. "
+        f"Wholesale rewriting via write_file burns expensive output tokens. "
+        f"Please use 'edit_file' (surgical Edit) with Target and Replacement blocks instead.",
+    )
