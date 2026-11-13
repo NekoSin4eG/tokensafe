@@ -96,6 +96,87 @@ class LicenseManager:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
     @classmethod
+    def ensure_community_license(cls) -> Dict[str, Any]:
+        """
+        Fetches a signed Community Edition license (tier 'free') bound to this
+        machine's anonymized fingerprint. Zero-config: no keys, no user action.
+
+        Contract:
+        - Skipped when any real license is already active (any tier).
+        - Honors TOKENSAFE_TELEMETRY_DISABLED (same global consent switch as
+          telemetry sync — no new flag).
+        - Fully fail-open: any network/validation error leaves the embedded
+          free-tier defaults untouched; nothing ever raises.
+        - 24h retry cooldown so a server outage doesn't ping on every session.
+        """
+        state_path = ""
+        try:
+            state_path = os.path.join(resolve_data_dir(), "community_license_state.json")
+            if os.environ.get("TOKENSAFE_TELEMETRY_DISABLED") in ("1", "true", "yes"):
+                return {"success": False, "reason": "telemetry_disabled"}
+            if cls.get_active_license_key():
+                return {"success": False, "reason": "license_present"}
+
+            try:
+                with open(state_path, "r", encoding="utf-8") as f:
+                    last_attempt = int(json.load(f).get("last_attempt", 0))
+                if time.time() - last_attempt < 86400:
+                    return {"success": False, "reason": "cooldown"}
+            except Exception:
+                pass
+
+            plugin_version = ""
+            try:
+                manifest_path = os.path.join(PROJECT_ROOT, "plugin.json")
+                if os.path.exists(manifest_path):
+                    with open(manifest_path, "r", encoding="utf-8") as mf:
+                        plugin_version = str(json.load(mf).get("version", "") or "")
+            except Exception:
+                plugin_version = ""
+
+            import urllib.request
+
+            cloud_url = os.environ.get("TOKENSAFE_CLOUD_URL", "https://api.tokensafe.dev").rstrip("/")
+            req = urllib.request.Request(
+                f"{cloud_url}/api/community/license",
+                data=json.dumps({
+                    "machine_fp": cls.get_machine_fingerprint(),
+                    "platform": platform.system()[:32],
+                    "arch": platform.machine()[:32],
+                    "agent": os.environ.get("TOKENSAFE_AGENT", "")[:32],
+                    "version": plugin_version[:32],
+                }).encode("utf-8"),
+                headers={"Content-Type": "application/json", "User-Agent": "TokenSafe/Community-License"},
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=2.5) as resp:
+                data = json.loads(resp.read().decode("utf-8") or "{}")
+            license_key = str(data.get("license_key", "") or "")
+            if resp.status != 200 or not data.get("success") or not license_key:
+                raise ValueError(str(data.get("error") or "empty community license response"))
+
+            ok, msg = cls.save_license(license_key)
+            if not ok:
+                raise ValueError(msg)
+
+            try:
+                os.makedirs(os.path.dirname(state_path) or ".", exist_ok=True)
+                with open(state_path, "w", encoding="utf-8") as f:
+                    json.dump({"last_attempt": int(time.time()), "issued": True}, f)
+            except Exception:
+                pass
+            return {"success": True, "reason": "issued"}
+        except Exception as exc:
+            try:
+                if state_path:
+                    os.makedirs(os.path.dirname(state_path) or ".", exist_ok=True)
+                    with open(state_path, "w", encoding="utf-8") as f:
+                        json.dump({"last_attempt": int(time.time()), "error": str(exc)[:200]}, f)
+            except Exception:
+                pass
+            return {"success": False, "reason": "error"}
+
+    @classmethod
     def generate_license(
         cls,
         tier: str,
@@ -105,12 +186,15 @@ class LicenseManager:
         is_trial: bool = False,
         version: int = 2,
         org_id: Optional[str] = None,
-        jti: Optional[str] = None
+        jti: Optional[str] = None,
+        quota_monthly: Optional[int] = None
     ) -> str:
         """
         Generates a tamper-proof cryptographically signed license key.
         - Version 2 (Default): Asymmetric Ed25519 signed (Format: TS2.<b64_payload>.<b64_sig>)
         - Version 1: Legacy HMAC-SHA256 signed (Format: TS1.<b64_payload>.<sig_hex>)
+        quota_monthly: optional server-managed monthly token quota embedded into
+        the signed payload (used for Community Edition remote quota control).
         """
         now = int(time.time())
         expires_at = 0 if duration_days == 0 else now + (duration_days * 86400)
@@ -127,6 +211,8 @@ class LicenseManager:
             payload["org"] = org_id.strip()
         if jti:
             payload["jti"] = jti.strip()
+        if quota_monthly:
+            payload["max_tokens_monthly"] = int(quota_monthly)
 
         payload_bytes = json.dumps(payload, sort_keys=True, separators=(',', ':')).encode("utf-8")
         payload_b64 = base64.urlsafe_b64encode(payload_bytes).decode("ascii").rstrip("=")
@@ -378,6 +464,16 @@ class LicenseManager:
         tier, payload = cls.get_active_license()
         tier_cfg = cls.TIERS.get(tier, cls.TIERS["free"])
         max_tokens = tier_cfg.get("max_tokens_monthly")
+
+        # Server-issued quota (community license payload) overrides the embedded
+        # default — enables remote quota control without a client release.
+        if max_tokens is not None and isinstance(payload, dict):
+            try:
+                server_quota = int(payload.get("max_tokens_monthly") or 0)
+                if server_quota > 0:
+                    max_tokens = server_quota
+            except (TypeError, ValueError):
+                pass
 
         # Paid tiers (solo, team, enterprise) have unlimited local optimization
         if max_tokens is None:

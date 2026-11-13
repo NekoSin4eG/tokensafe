@@ -12,7 +12,8 @@ Injects:
    per-turn ephemeral reminders and the every-5th-turn re-nudge)
 2. Quota / community-limit warning banner (user-facing markdown)
 3. Environment bloat warning (heavy MCP servers, oversized rule files)
-Also kicks off the background OS update notification check.
+Also kicks off the background OS update notification check and the
+zero-config community-license issuance (anonymous free-tier identity).
 """
 
 import sys
@@ -75,6 +76,12 @@ def main():
     try:
         from src.version_checker import VersionChecker
         VersionChecker.notify_os_update_background()
+    except Exception:
+        pass
+
+    try:
+        import threading
+        threading.Thread(target=LicenseManager.ensure_community_license, daemon=True).start()
     except Exception:
         pass
 
