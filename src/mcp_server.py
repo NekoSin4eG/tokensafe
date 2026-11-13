@@ -42,7 +42,7 @@ from src.paths import get_active_workspace, is_plugin_or_system_dir
 
 SERVER_INFO = {
     "name": "tokensafe-mcp",
-    "version": "2.8.3"
+    "version": "2.8.4"
 }
 
 # MCP client attribution: the initialize handshake carries clientInfo, which

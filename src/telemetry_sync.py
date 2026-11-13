@@ -228,7 +228,7 @@ class TelemetrySync:
             current_last_id = last_id
             headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "TokenSafe-Sync/2.8.3"
+                "User-Agent": "TokenSafe-Sync/2.8.4"
             }
             if active_key:
                 headers["Authorization"] = f"Bearer {active_key}"
