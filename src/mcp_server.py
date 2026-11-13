@@ -80,12 +80,12 @@ def _client_supports_pointers() -> bool:
 TOOLS = [
     {
         "name": "smart_read_file",
-        "description": "Reads a code file using AST skeletonization and graph-guided slicing to save 90-99% context tokens. OpenAPI/Swagger, Prisma, GraphQL and SQL files are auto-sliced instead: pass the spec path/model/type/table as 'symbol', or omit it for a compact overview. For 3+ related symbols across files prefer smart_bundle.",
+        "description": "Reads a code file using AST skeletonization and graph-guided slicing to save 90-99% context tokens. Automatically preserves target function/class implementation and 1-line 1-hop dependency signatures while folding inert code. Supports relative paths (e.g. 'src/index.ts'). Declarative schemas (OpenAPI, Prisma, GraphQL, SQL) are auto-sliced: pass model/type/table/endpoint as 'symbol' or omit for a compact overview. For 3+ related symbols across files prefer smart_bundle.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Absolute path to the code file"},
-                "symbol": {"type": "string", "description": "Optional: targeted function or class name for graph-guided skeletonization"},
+                "path": {"type": "string", "description": "File path to read (relative to workspace or absolute, e.g. './src/index.ts')"},
+                "symbol": {"type": "string", "description": "Optional: targeted function, method, class, component, or schema model/type to extract with 1-hop dependencies while folding surrounding code (omit for whole-file AST skeleton or schema overview)"},
                 "include_deps": {"type": "boolean", "description": "Optional: whether to include 1-hop dependencies (default: true). Set false for 0-hop surgical isolation."},
                 "dep_mode": {"type": "string", "enum": ["signature", "full"], "description": "Optional: how 1-hop dependencies are returned when include_deps is true. 'signature' (default, -95%+ tokens) returns compact 1-line signatures; 'full' inlines full dependency bodies."},
                 "force_full": {"type": "boolean", "description": "Optional: bypass session pointer deduplication and return the full skeleton directly (use only if your context was compacted or you are a fresh subagent lacking earlier reads)."},
@@ -97,7 +97,7 @@ TOOLS = [
     },
     {
         "name": "smart_bundle",
-        "description": "Reads 2-8 related symbols across multiple files as ONE merged context bundle: per-file AST skeletons with shared import lines deduplicated and merged 1-hop dependency signatures. Use it instead of 3+ separate smart_read_file calls on related code (one roundtrip, no duplicated imports/types).",
+        "description": "Reads 2-8 related symbols across multiple files as ONE merged context bundle: per-file AST skeletons with shared import lines deduplicated and merged 1-hop dependency signatures. Use it instead of 3+ separate smart_read_file calls on related code (one roundtrip, no duplicated imports/types). Supports relative paths (e.g. targets=[{'path': 'src/api.ts', 'symbol': 'handler'}]).",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -107,8 +107,8 @@ TOOLS = [
                     "items": {
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string", "description": "Absolute path to the code file"},
-                            "symbol": {"type": "string", "description": "Optional symbol to keep unfolded (class/function name)"}
+                            "path": {"type": "string", "description": "File path to code file (relative to workspace or absolute)"},
+                            "symbol": {"type": "string", "description": "Optional symbol to keep unfolded (class, function, or component name)"}
                         },
                         "required": ["path"]
                     },
@@ -123,21 +123,21 @@ TOOLS = [
     },
     {
         "name": "get_architecture_graph",
-        "description": "Returns top architectural God Nodes and dependency topology for the target project. Call this BEFORE reading files or searching.",
+        "description": "Returns top architectural God Nodes and dependency topology for the target project in < 250 tokens without file crawling. Call this BEFORE reading files or searching.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "project_path": {"type": "string", "description": "Absolute root path of the project directory. Highly recommended to pass explicitly."}
+                "project_path": {"type": "string", "description": "Optional root path of the project (defaults to active workspace, or pass '.' or absolute path)"}
             }
         }
     },
     {
         "name": "get_api_surface",
-        "description": "Generates and returns a compact markdown map of all exported interfaces, classes, and types in the project.",
+        "description": "Generates and returns a compact markdown map of all exported interfaces, classes, and types in the project without crawling files.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "project_path": {"type": "string", "description": "Absolute root path of the project directory. Highly recommended to pass explicitly."}
+                "project_path": {"type": "string", "description": "Optional root path of the project (defaults to active workspace, or pass '.' or absolute path)"}
             }
         }
     },
@@ -228,11 +228,11 @@ TOOLS = [
     },
     {
         "name": "list_dir",
-        "description": "Returns a clean, token-efficient directory tree up to depth N without permissions, timestamps, or ignored folders (node_modules, .git, dist, .env). Replaces verbose ls -la.",
+        "description": "Returns a clean, token-efficient directory tree up to depth N without permissions, timestamps, or ignored folders (node_modules, .git, dist, .env). Replaces verbose ls -la. Pass '.' for project root or a subfolder like 'src'.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "Path to the directory (relative to project root or absolute)"},
+                "path": {"type": "string", "description": "Path to the directory (relative to workspace or absolute, e.g. '.', './src')"},
                 "depth": {"type": "integer", "description": "Maximum traversal depth (default: 2, max: 4)"},
                 "max_entries": {"type": "integer", "description": "Maximum entries to display before pruning (default: 80)"}
             },
@@ -742,8 +742,19 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         if start_line is not None:
             start_line = max(1, start_line)
 
+        active_ws = get_active_workspace()
+        if path and not os.path.isabs(path):
+            if active_ws and os.path.exists(os.path.join(active_ws, path)):
+                path = os.path.abspath(os.path.join(active_ws, path))
+            else:
+                path = os.path.abspath(path)
+        elif path:
+            path = os.path.abspath(path)
+
         if not path or not os.path.exists(path):
             return {"isError": True, "content": [{"type": "text", "text": f"File not found: {path}"}]}
+        if is_plugin_or_system_dir(path):
+            return _fallback_error("smart_read_file", f"refusing to read from system root or plugin dir '{path}'")
         try:
             st = os.stat(path)
             if not stat.S_ISREG(st.st_mode):
@@ -945,11 +956,19 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         inc_deps, _eff_dep_mode = _resolve_dep_mode(args)
         max_tokens = _safe_int(os.environ.get("TOKENSAFE_BUNDLE_MAX_TOKENS"), 6000, lo=1000, hi=50000)
 
+        active_ws = get_active_workspace()
         by_file: Dict[str, List[str]] = {}
         for t in targets:
             if not isinstance(t, dict) or not str(t.get("path") or "").strip():
                 return _fallback_error("smart_bundle", "each target must be {path: str, symbol?: str}")
-            by_file.setdefault(os.path.abspath(str(t["path"])), []).append(str(t.get("symbol") or "").strip())
+            raw_p = str(t["path"]).strip()
+            if not os.path.isabs(raw_p) and active_ws and os.path.exists(os.path.join(active_ws, raw_p)):
+                target_p = os.path.abspath(os.path.join(active_ws, raw_p))
+            else:
+                target_p = os.path.abspath(raw_p)
+            if is_plugin_or_system_dir(target_p):
+                return _fallback_error("smart_bundle", f"refusing to read from system root or plugin dir '{raw_p}'")
+            by_file.setdefault(target_p, []).append(str(t.get("symbol") or "").strip())
 
         missing = [p for p in by_file if not os.path.isfile(p)]
         if missing:
@@ -1440,10 +1459,20 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
         if not path:
             return _fallback_error("list_dir", "missing required 'path' argument")
 
-        # Resolve path relative to current working directory or absolute
-        abs_path = os.path.abspath(path)
+        # Resolve path relative to active workspace, cwd, or absolute
+        active_ws = get_active_workspace()
+        if not os.path.isabs(path):
+            if active_ws and os.path.isdir(os.path.join(active_ws, path)):
+                abs_path = os.path.abspath(os.path.join(active_ws, path))
+            else:
+                abs_path = os.path.abspath(path)
+        else:
+            abs_path = os.path.abspath(path)
+
         if not os.path.isdir(abs_path):
             return _fallback_error("list_dir", f"directory not found: {abs_path}")
+        if is_plugin_or_system_dir(abs_path):
+            return _fallback_error("list_dir", f"refusing to inspect system root or plugin dir '{path}'")
         system_roots = {"/", "/Users", "/home", "/root", os.path.expanduser("~")}
         depth = _safe_int(args.get("depth"), 2, lo=1, hi=4)
         if abs_path in system_roots:

@@ -24,7 +24,7 @@ folds multi-turn conversation history, slices verbose tool outputs, and guards a
    - **Mandatory Search Tool (`scoped_search`)**: ALWAYS call `tokensafe:scoped_search(query, path=".", scope="code")` to search for text, identifiers, or symbol definitions across unknown files (-90% tokens). The `path` parameter specifies the search directory or project root (e.g. `"."`, `"./src"`). The `scope` parameter filters files (`"code"`, `"config"`, `"all"`), a file extension (`"go"`, `"ts"`), or a subfolder path (`"internal/promo"`).
 
 2. **SYMBOL & COMPONENT EXTRACTION (`smart_read_file`)**:
-   - When locating or reading any function, component, class, or handler (e.g. `<LuckyWheelTab>`, `areSectorEqual`, `useWallet`), ALWAYS call `tokensafe:smart_read_file` with `path` and `symbol`.
+   - When locating or reading any function, component, class, or handler (e.g. `<LuckyWheelTab>`, `areSectorEqual`, `useWallet`), ALWAYS call `tokensafe:smart_read_file` with `path` (supports relative paths, e.g. `"src/service.ts"`) and `symbol`.
    - **1-Hop Dependency Modes (`dep_mode` & `include_deps`)**: By default (`dep_mode="signature"`), `smart_read_file` returns the full target implementation plus compact 1-line 1-hop dependency signatures and collapsed imports (-95%+ tokens). Pass `"dep_mode": "full"` when full 1-hop dependency bodies are required, or `"include_deps": false` for 0-hop surgical isolation.
    - **Cache Pointer Recovery (`force_full`)**: When repeating an unchanged read in the same MCP session, `smart_read_file` may return a compact pointer referencing the prior output. Reuse that earlier output; only pass `"force_full": true` if your context was compacted or you are a fresh subagent lacking prior turns.
    - **Multi-Symbol Bundles (`smart_bundle`)**: When you need 3+ related symbols across several files, call `tokensafe:smart_bundle(targets=[{path, symbol}])` ONCE instead of chained `smart_read_file` calls (max 8 targets). It merges per-file skeletons, deduplicates shared import/type lines into one block, and unifies 1-hop dependency signatures — one roundtrip instead of many.
@@ -32,31 +32,35 @@ folds multi-turn conversation history, slices verbose tool outputs, and guards a
    - **Result**: Preserves the exact target definition while folding surrounding inert code into clean 1-line signatures without docstrings (-85% to -98% tokens).
 
 3. **ARCHITECTURE SURVEY BEFORE BROWSING (`get_architecture_graph`)**:
-   - Before multi-file exploration or asking where things are located, ALWAYS call `tokensafe:get_architecture_graph(project_path)`.
+   - Before multi-file exploration or asking where things are located, ALWAYS call `tokensafe:get_architecture_graph(project_path=".")` (`project_path` defaults to active workspace).
    - **Result**: Returns top architectural God Nodes, dependency hubs, and centrality rankings in < 250 tokens without file crawling.
 
 4. **API SURFACE INSPECTION (`get_api_surface`)**:
-   - Call `tokensafe:get_api_surface(project_path)` to get all exported classes, types, interfaces, and function signatures in a single compact markdown map.
+   - Call `tokensafe:get_api_surface(project_path=".")` (`project_path` defaults to active workspace) to get all exported classes, types, interfaces, and function signatures in a single compact markdown map.
 
-5. **SURGICAL FILE EDITS (`edit_file`)**:
+5. **DIRECTORY NAVIGATION (`list_dir`)**:
+   - NEVER run `ls -la` or `ls -l` in terminal.
+   - Call `tokensafe:list_dir(path=".", depth=2)` for clean directory trees without permissions, timestamps, or lockfiles (-90% tokens). Supports relative subfolders (`path="src"`).
+
+6. **SURGICAL FILE EDITS (`edit_file`)**:
    - On existing files with >= 40 lines, wholesale rewrites via `write_file` are blocked by **Output Guard**. Always use `edit_file` with precise `Target` and `Replacement` blocks.
 
-6. **SECRET LEAK PREVENTION (ZERO HARDCODED FALLBACKS)**:
+7. **SECRET LEAK PREVENTION (ZERO HARDCODED FALLBACKS)**:
    - Never provide real private keys, API secrets, or credentials as fallback values in `os.environ.get()` or `process.env`. Real credentials must exist strictly in environment variables.
 
-7. **CONTEXT BUDGET BEFORE HEAVY WORK (`context_budget` → `compact_conversation`)**:
+8. **CONTEXT BUDGET BEFORE HEAVY WORK (`context_budget` → `compact_conversation`)**:
    - Before large multi-step tasks, call `tokensafe:context_budget(model=...)` to check the window budget (tools/history/prompts breakdown, 50/80/95% thresholds).
    - When it reports `warning` or `critical`, call `tokensafe:compact_conversation(transcript_path=...)` to fold past turns into a State Ledger before continuing — do not let context exhaustion degrade code quality mid-task.
 
-8. **REPEAT READ DEDUPLICATION & CACHE POINTERS**:
+9. **REPEAT READ DEDUPLICATION & CACHE POINTERS**:
    - Never repeatedly re-read the same file or symbol within an active session.
    - When `smart_read_file` returns a pointer hit (`// [TokenSafe: Pointer Hit for ...]`), reuse earlier context; pass `"force_full": true` only if your context was compacted or you are a fresh subagent lacking prior turns.
 
-9. **ZERO-FLUFF EGRESS & SURGICAL DIFFS**:
-   - Eliminate conversational preambles, courtesy fillers, and trailing sign-offs.
-   - Never reprint full unmodified files or lengthy boilerplate; cite line ranges and provide targeted diffs.
+10. **ZERO-FLUFF EGRESS & SURGICAL DIFFS**:
+    - Eliminate conversational preambles, courtesy fillers, and trailing sign-offs.
+    - Never reprint full unmodified files or lengthy boilerplate; cite line ranges and provide targeted diffs.
 
-10. **COMPACT TEST EXECUTION**:
+11. **COMPACT TEST EXECUTION**:
     - Run unit tests with concise flags or via `tokensafe tests [cmd]` so passing test suites emit a single-line summary (`PASS: ...`) rather than flooding `Messages` history with hundreds of verbose log lines. Full traceback is strictly preserved on failure.
 
 ---

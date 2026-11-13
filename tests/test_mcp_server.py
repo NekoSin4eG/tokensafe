@@ -20,7 +20,8 @@ class TestMCPServer(unittest.TestCase):
         data = json.loads(content)
         self.assertIn("compact_text", data)
 
-    def test_sanitize_command_mcp(self):
+    @patch("src.license_manager.LicenseManager.check_quota", return_value={"is_quota_exceeded": False})
+    def test_sanitize_command_mcp(self, mock_quota):
         res = handle_tool_call("sanitize_command", {"command": "git diff HEAD~1"})
         self.assertNotIn("isError", res)
         content = res["content"][0]["text"]
@@ -225,6 +226,34 @@ class TestMCPServer(unittest.TestCase):
                     os.environ.pop("TOKENSAFE_DB_PATH", None)
                 else:
                     os.environ["TOKENSAFE_DB_PATH"] = old_db
+
+    def test_smart_read_file_relative_path_with_active_workspace(self):
+        import os
+        import tempfile
+        from src.paths import save_active_workspace
+        with tempfile.TemporaryDirectory() as tmpdir:
+            fpath = os.path.join(tmpdir, "service.py")
+            with open(fpath, "w", encoding="utf-8") as f:
+                f.write("def helper():\n    return 42\n")
+            save_active_workspace(tmpdir)
+            res = handle_tool_call("smart_read_file", {"path": "service.py", "symbol": "helper"})
+            self.assertNotIn("isError", res)
+            self.assertIn("def helper", res["content"][0]["text"])
+
+    def test_list_dir_relative_path_with_active_workspace(self):
+        import os
+        import tempfile
+        from src.paths import save_active_workspace
+        with tempfile.TemporaryDirectory() as tmpdir:
+            subdir = os.path.join(tmpdir, "sub")
+            os.makedirs(subdir)
+            with open(os.path.join(subdir, "file.txt"), "w") as f:
+                f.write("hello")
+            save_active_workspace(tmpdir)
+            res = handle_tool_call("list_dir", {"path": "sub"})
+            self.assertNotIn("isError", res)
+            self.assertIn("file.txt", res["content"][0]["text"])
+
 
 if __name__ == "__main__":
     unittest.main()
