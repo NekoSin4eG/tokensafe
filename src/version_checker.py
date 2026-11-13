@@ -52,20 +52,6 @@ YELLOW = "\033[33m"
 RED = "\033[31m"
 DIM = "\033[2m"
 
-def semver_tuple(v_str: str) -> Tuple[int, ...]:
-    """Parses semver string like '1.2.0' into numeric tuple (1, 2, 0)."""
-    if not v_str:
-        return (0, 0, 0)
-    clean = re.sub(r"^[^\d]*", "", str(v_str).strip())
-    parts = clean.split(".")
-    nums = []
-    for p in parts[:3]:
-        m = re.match(r"\d+", p)
-        nums.append(int(m.group(0)) if m else 0)
-    while len(nums) < 3:
-        nums.append(0)
-    return tuple(nums)
-
 class VersionChecker:
     """Manages cached client-side version discovery and CLI banners."""
 

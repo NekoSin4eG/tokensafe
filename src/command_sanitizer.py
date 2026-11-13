@@ -190,32 +190,6 @@ class CommandSanitizer:
                 out += f" {op} {stage}"
         return out
 
-    @staticmethod
-    def _split_pipeline_stages(cmd: str) -> List[str]:
-        """
-        Splits a shell command on single '|' pipe operators while respecting
-        quoting ('...', "...", `...`) and '||' logical OR, so regex patterns like
-        grep "foo|bar" are never torn apart mid-string.
-        """
-        pairs = CommandSanitizer.split_stages(cmd)
-        # Legacy contract: only pipe boundaries split; '&&'/';'/'||' stay inside stages.
-        stages: List[str] = []
-        pipe_open = False
-        for op, stage in pairs:
-            if op in ("", "|"):
-                if pipe_open and stages:
-                    stages[-1] = f"{stages[-1]} | {stage}"
-                else:
-                    stages.append(stage)
-                pipe_open = op == "|"
-            else:
-                # Non-pipe operator: glue operator + stage back into current stage
-                if stages:
-                    stages[-1] = f"{stages[-1]} {op} {stage}"
-                else:
-                    stages.append(stage)
-        return [s for s in (st.strip() for st in stages) if s]
-
     @classmethod
     def _has_redirect(cls, stage: str) -> bool:
         """True if the stage redirects stdout to a file/stream (ignoring 2>&1 merges and quoted '>')."""

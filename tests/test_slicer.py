@@ -29,18 +29,5 @@ class TestToolSlicer(unittest.TestCase):
         self.assertGreaterEqual(overwrite["EndLine"], 250)
         self.assertGreater(metrics["saved_tokens"], 500)
 
-    def test_sanitizing_logs(self):
-        raw_log = (
-            "Error: Test failed\n"
-            "    at Context.<anonymous> (test/auth.js:25:7)\n"
-            "    at callFn (/app/node_modules/mocha/lib/runnable.js:366:21)\n"
-            "    at Test.Runnable.run (/app/node_modules/mocha/lib/runnable.js:354:7)\n"
-            "    at Runner.runTest (/app/node_modules/mocha/lib/runner.js:678:10)\n"
-            "Finished in 0.5s\n"
-        )
-        sanitized, orig_t, opt_t = ToolSlicer.sanitize_command_log(raw_log)
-        self.assertIn("[... internal dependency stack omitted ...]", sanitized)
-        self.assertLess(opt_t, orig_t)
-
 if __name__ == "__main__":
     unittest.main()

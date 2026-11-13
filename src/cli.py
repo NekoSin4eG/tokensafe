@@ -190,6 +190,15 @@ def main():
                 print("  Cloud:     \033[32m✔ telemetry up to date\033[0m")
         except Exception:
             pass
+        # Distillation cache visibility (get_stats existed but was never surfaced anywhere)
+        try:
+            from src.distiller_cache import DistillationCache
+            cstats = DistillationCache.get_stats()
+            lookups = cstats["hits"] + cstats["misses"]
+            if lookups:
+                print(f"  Cache:     \033[32m{cstats['hit_ratio_pct']}% distillation cache hit ratio\033[0m ({cstats['hits']:,}/{lookups:,} lookups · {cstats['persistent_entries']:,} entries on disk)")
+        except Exception:
+            pass
         print()
 
     elif command in ("stats", "dashboard"):
@@ -670,8 +679,11 @@ def main():
         t = MetricsTracker()
         b_before = (os.path.getsize(t.db_path) if os.path.exists(t.db_path) else 0) / 1024.0
         t.vacuum()
+        # Repair pass: rebuild session aggregates straight from events (guards
+        # against sessions/events drift after crashes or manual DB edits).
+        t.recalculate_sessions()
         b_after = (os.path.getsize(t.db_path) if os.path.exists(t.db_path) else 0) / 1024.0
-        print(f"\033[32m✔ Database compacted. Size: {b_before:.1f} KB ➔ {b_after:.1f} KB\033[0m\n")
+        print(f"\033[32m✔ Database compacted + session aggregates rebuilt. Size: {b_before:.1f} KB ➔ {b_after:.1f} KB\033[0m\n")
 
     elif command in ("digest", "weekly-digest"):
         from src.weekly_digest import WeeklyDigestGenerator

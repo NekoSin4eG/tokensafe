@@ -603,8 +603,3 @@ class TokenSafeGuard:
             if "/" not in clean_pattern and rel_path.startswith(clean_pattern + "/"):
                 return True
         return False
-
-    @classmethod
-    def _is_git_ignored(cls, file_path: str, repo_root: str) -> bool:
-        """Checks if a file is covered by .gitignore in the repository."""
-        return cls._matches_gitignore(file_path, repo_root, cls._load_gitignore_patterns(repo_root))

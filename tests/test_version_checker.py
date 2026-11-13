@@ -6,7 +6,7 @@ import time
 import subprocess
 import tempfile
 import shutil
-from src.version_checker import VersionChecker, semver_tuple
+from src.version_checker import VersionChecker
 
 class TestVersionChecker(unittest.TestCase):
     def setUp(self):
@@ -32,15 +32,6 @@ class TestVersionChecker(unittest.TestCase):
                 os.remove(CACHE_FILE)
             except Exception:
                 pass
-
-    def test_semver_tuple_parsing(self):
-        self.assertEqual(semver_tuple("1.2.0"), (1, 2, 0))
-        self.assertEqual(semver_tuple("v1.2.0"), (1, 2, 0))
-        self.assertEqual(semver_tuple("1.10.5"), (1, 10, 5))
-        self.assertEqual(semver_tuple("2.0"), (2, 0, 0))
-        self.assertEqual(semver_tuple(""), (0, 0, 0))
-        self.assertTrue(semver_tuple("1.2.0") > semver_tuple("1.1.9"))
-        self.assertTrue(semver_tuple("1.10.0") > semver_tuple("1.2.0"))
 
     def test_cache_save_and_load(self):
         data = {
