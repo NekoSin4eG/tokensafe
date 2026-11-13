@@ -1,0 +1,385 @@
+{
+ "version": 1,
+ "created": "2026-11-14",
+ "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table.",
+ "pricing": {
+  "sonnet_input_usd_per_mtok": 3.0,
+  "sonnet_cached_usd_per_mtok": 0.3
+ },
+ "results": [
+  {
+   "key": "flask",
+   "url": "https://github.com/pallets/flask",
+   "symbol_read": {
+    "status": "ok",
+    "baseline_tokens": 18864,
+    "optimized_tokens": 5506,
+    "saved_tokens": 13358,
+    "reduction_pct": 70.8,
+    "usd_saved": 0.0401,
+    "gates": {
+     "symbol_present": true,
+     "valid_python": true,
+     "all_top_level_defs_present": true,
+     "signature_line_match": true
+    }
+   },
+   "test_output": {
+    "status": "ok",
+    "baseline_tokens": 6391,
+    "optimized_tokens": 6391,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "failing_test_name_present": true,
+     "error_type_present": true,
+     "first_traceback_frame_present": true
+    },
+    "pytest_targets": [
+     "tests/test_bench_injected.py",
+     "tests/"
+    ],
+    "exit_code": 1
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 45336,
+    "optimized_tokens": 7628,
+    "saved_tokens": 37708,
+    "reduction_pct": 83.2,
+    "usd_saved": 0.1131,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 2
+    },
+    "per_read": [
+     {
+      "file": "src/flask/app.py",
+      "symbol": "Flask.full_dispatch_request",
+      "status": "ok",
+      "baseline_tokens": 18864,
+      "optimized_tokens": 5506
+     },
+     {
+      "file": "src/flask/wrappers.py",
+      "symbol": "Request.full_path",
+      "status": "gate_failed",
+      "baseline_tokens": 2600,
+      "optimized_tokens": 940,
+      "saved_tokens": 1660,
+      "reduction_pct": 63.8,
+      "usd_saved": 0.005,
+      "gates": {
+       "symbol_present": true,
+       "valid_python": true,
+       "all_top_level_defs_present": true,
+       "signature_line_match": false
+      }
+     },
+     {
+      "file": "src/flask/config.py",
+      "symbol": "Config.from_pyfile",
+      "status": "ok",
+      "baseline_tokens": 3804,
+      "optimized_tokens": 2122
+     }
+    ]
+   },
+   "status": "ok"
+  },
+  {
+   "key": "requests",
+   "url": "https://github.com/psf/requests",
+   "symbol_read": {
+    "status": "ok",
+    "baseline_tokens": 9743,
+    "optimized_tokens": 4657,
+    "saved_tokens": 5086,
+    "reduction_pct": 52.2,
+    "usd_saved": 0.0153,
+    "gates": {
+     "symbol_present": true,
+     "valid_python": true,
+     "all_top_level_defs_present": true,
+     "signature_line_match": true
+    }
+   },
+   "test_output": {
+    "status": "gate_failed",
+    "baseline_tokens": 69,
+    "optimized_tokens": 69,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "failing_test_name_present": false,
+     "error_type_present": false,
+     "first_traceback_frame_present": false
+    },
+    "pytest_targets": [
+     "tests/test_bench_injected.py",
+     "tests/"
+    ],
+    "exit_code": 4
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 59380,
+    "optimized_tokens": 13413,
+    "saved_tokens": 45967,
+    "reduction_pct": 77.4,
+    "usd_saved": 0.1379,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 3
+    },
+    "per_read": [
+     {
+      "file": "src/requests/sessions.py",
+      "symbol": "Session.request",
+      "status": "ok",
+      "baseline_tokens": 9743,
+      "optimized_tokens": 4657
+     },
+     {
+      "file": "src/requests/models.py",
+      "symbol": "Response.iter_content",
+      "status": "ok",
+      "baseline_tokens": 12078,
+      "optimized_tokens": 4128
+     },
+     {
+      "file": "src/requests/adapters.py",
+      "symbol": "HTTPAdapter.send",
+      "status": "ok",
+      "baseline_tokens": 7869,
+      "optimized_tokens": 4628
+     }
+    ]
+   },
+   "status": "partial"
+  },
+  {
+   "key": "fastapi",
+   "url": "https://github.com/fastapi/fastapi",
+   "symbol_read": {
+    "status": "ok",
+    "baseline_tokens": 73721,
+    "optimized_tokens": 39420,
+    "saved_tokens": 34301,
+    "reduction_pct": 46.5,
+    "usd_saved": 0.1029,
+    "gates": {
+     "symbol_present": true,
+     "valid_python": true,
+     "all_top_level_defs_present": true,
+     "signature_line_match": true
+    }
+   },
+   "test_output": {
+    "status": "gate_failed",
+    "baseline_tokens": 82,
+    "optimized_tokens": 82,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "failing_test_name_present": false,
+     "error_type_present": false,
+     "first_traceback_frame_present": false
+    },
+    "pytest_targets": [
+     "tests/test_bench_injected.py",
+     "tests/"
+    ],
+    "exit_code": 4
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 147442,
+    "optimized_tokens": 39420,
+    "saved_tokens": 108022,
+    "reduction_pct": 73.3,
+    "usd_saved": 0.3241,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 1
+    },
+    "per_read": [
+     {
+      "file": "fastapi/routing.py",
+      "symbol": "APIRouter.add_api_route",
+      "status": "ok",
+      "baseline_tokens": 73721,
+      "optimized_tokens": 39420
+     },
+     {
+      "file": "fastapi/applications.py",
+      "symbol": "FastAPI.__init__",
+      "status": "failed",
+      "reason": "no skeleton produced"
+     },
+     {
+      "file": "fastapi/params.py",
+      "symbol": "Param.field_info",
+      "status": "gate_failed",
+      "baseline_tokens": 8551,
+      "optimized_tokens": 3921,
+      "saved_tokens": 4630,
+      "reduction_pct": 54.1,
+      "usd_saved": 0.0139,
+      "gates": {
+       "symbol_present": true,
+       "valid_python": true,
+       "all_top_level_defs_present": true,
+       "signature_line_match": false
+      }
+     }
+    ]
+   },
+   "status": "partial"
+  },
+  {
+   "key": "rich",
+   "url": "https://github.com/Textualize/rich",
+   "symbol_read": {
+    "status": "ok",
+    "baseline_tokens": 28675,
+    "optimized_tokens": 9444,
+    "saved_tokens": 19231,
+    "reduction_pct": 67.1,
+    "usd_saved": 0.0577,
+    "gates": {
+     "symbol_present": true,
+     "valid_python": true,
+     "all_top_level_defs_present": true,
+     "signature_line_match": true
+    }
+   },
+   "test_output": {
+    "status": "gate_failed",
+    "baseline_tokens": 1018,
+    "optimized_tokens": 1018,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "failing_test_name_present": false,
+     "error_type_present": false,
+     "first_traceback_frame_present": false
+    },
+    "pytest_targets": [
+     "tests/test_bench_injected.py",
+     "tests/"
+    ],
+    "exit_code": 2
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 80036,
+    "optimized_tokens": 15435,
+    "saved_tokens": 64601,
+    "reduction_pct": 80.7,
+    "usd_saved": 0.1938,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 2
+    },
+    "per_read": [
+     {
+      "file": "rich/console.py",
+      "symbol": "Console.print",
+      "status": "ok",
+      "baseline_tokens": 28675,
+      "optimized_tokens": 9444
+     },
+     {
+      "file": "rich/table.py",
+      "symbol": "Table.add_row",
+      "status": "ok",
+      "baseline_tokens": 11343,
+      "optimized_tokens": 5991
+     },
+     {
+      "file": "rich/panel.py",
+      "symbol": "Panel.render",
+      "status": "gate_failed",
+      "baseline_tokens": 3205,
+      "optimized_tokens": 1092,
+      "saved_tokens": 2113,
+      "reduction_pct": 65.9,
+      "usd_saved": 0.0063,
+      "gates": {
+       "symbol_present": true,
+       "valid_python": true,
+       "all_top_level_defs_present": true,
+       "signature_line_match": false
+      }
+     }
+    ]
+   },
+   "status": "partial"
+  },
+  {
+   "key": "httpie",
+   "url": "https://github.com/httpie/cli",
+   "symbol_read": {
+    "status": "failed",
+    "reason": "no skeleton produced"
+   },
+   "test_output": {
+    "status": "gate_failed",
+    "baseline_tokens": 66,
+    "optimized_tokens": 66,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "failing_test_name_present": false,
+     "error_type_present": false,
+     "first_traceback_frame_present": false
+    },
+    "pytest_targets": [
+     "tests/test_bench_injected.py",
+     "tests/"
+    ],
+    "exit_code": 4
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 5610,
+    "optimized_tokens": 1115,
+    "saved_tokens": 4495,
+    "reduction_pct": 80.1,
+    "usd_saved": 0.0135,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 1
+    },
+    "per_read": [
+     {
+      "file": "httpie/core.py",
+      "symbol": "main",
+      "status": "failed",
+      "reason": "no skeleton produced"
+     },
+     {
+      "file": "httpie/cli/definition.py",
+      "symbol": "HTTPieArgumentParser",
+      "status": "failed",
+      "reason": "no skeleton produced"
+     },
+     {
+      "file": "httpie/sessions.py",
+      "symbol": "Session",
+      "status": "ok",
+      "baseline_tokens": 2805,
+      "optimized_tokens": 1115
+     }
+    ]
+   },
+   "status": "partial"
+  }
+ ]
+}

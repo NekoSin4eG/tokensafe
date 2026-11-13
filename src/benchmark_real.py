@@ -130,10 +130,10 @@ class RealRepoBenchmark:
         return dest
 
     # -- scenario 1: symbol read ------------------------------------------
-    def measure_symbol_read(self, repo_root: str, file_rel: str, symbol: str) -> Dict[str, Any]:
-        full_path = os.path.join(repo_root, file_rel)
+    def measure_symbol_read(self, repo_root: str, file: str, symbol: str) -> Dict[str, Any]:
+        full_path = os.path.join(repo_root, file)
         if not os.path.isfile(full_path):
-            return {"status": "skipped", "reason": f"file not found: {file_rel}"}
+            return {"status": "skipped", "reason": f"file not found: {file}"}
         with open(full_path, "r", encoding="utf-8", errors="replace") as f:
             full_text = f.read()
         baseline = count_tokens(full_text)
@@ -150,7 +150,7 @@ class RealRepoBenchmark:
         return self._finish(baseline, optimized, gates)
 
     # -- scenario 2: real pytest output compaction -------------------------
-    def _venv_python(self, deps: List[str]) -> Optional[str]:
+    def _venv_python(self, repo_root: str, deps: List[str]) -> Optional[str]:
         venv_py = os.path.join(VENV_DIR, "bin", "python")
         marker = os.path.join(VENV_DIR, ".bench-ready")
         if not os.path.exists(venv_py):
@@ -159,14 +159,17 @@ class RealRepoBenchmark:
         if not os.path.exists(venv_py):
             return None
         if not os.path.exists(marker):
-            subprocess.run([venv_py, "-m", "pip", "install", "-q", "pytest", *deps],
+            # The repo itself must be importable for its tests to run at all
+            # (flask tests import flask; fastapi tests import fastapi, ...).
+            # Editable install pulls the repo's own runtime deps too.
+            subprocess.run([venv_py, "-m", "pip", "install", "-q", "pytest", *deps, "-e", repo_root],
                            capture_output=True, timeout=600, check=False)
             with open(marker, "w") as f:
                 f.write(str(int(time.time())))
         return venv_py
 
     def measure_test_output(self, repo_root: str, pytest_cfg: Dict[str, Any]) -> Dict[str, Any]:
-        venv_py = self._venv_python(pytest_cfg.get("deps", []))
+        venv_py = self._venv_python(repo_root, pytest_cfg.get("deps", []))
         if not venv_py:
             return {"status": "skipped", "reason": "venv unavailable"}
         # Pre-registered injected regression (temp clone only, never upstream)
@@ -176,15 +179,10 @@ class RealRepoBenchmark:
         with open(inj_path, "w", encoding="utf-8") as f:
             f.write(inj.get("test_source", "def test_bench_injected_regression():\n    assert False\n"))
         targets = [inj.get("file", "tests/test_bench_injected.py")]
-        subset = sorted(
-            p for p in os.listdir(os.path.join(repo_root, "tests"))
-            if p.startswith(pytest_cfg.get("subset_glob", "tests/").split("/")[-1].replace("*", ""))
-        ) if os.path.isdir(os.path.join(repo_root, "tests")) else []
-        glob_val = pytest_cfg.get("subset_glob", "")
-        if glob_val and os.path.isfile(os.path.join(repo_root, glob_val)):
-            targets.append(glob_val)
-        elif subset:
-            targets.append(os.path.join("tests", subset[0]))
+        if os.path.isdir(os.path.join(repo_root, "tests")):
+            # Full suite: "run the tests" is what an agent actually does.
+            # subset_glob in the registry stays documented for deps context.
+            targets.append("tests/")
         proc = subprocess.run(
             [venv_py, "-m", "pytest", *targets, "-q", "--tb=long", "--no-header", "-p", "no:cacheprovider"],
             cwd=repo_root, capture_output=True, text=True, timeout=300,
