@@ -1,10 +1,11 @@
 {
- "version": 1,
+ "version": 2,
  "created": "2026-11-14",
- "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table.",
+ "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking; v1 scenarios measured in 784628d remain untouched). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table. v2 adds four angles: architecture discovery, raw search leak, git-diff churn, write-egress (output-token axis).",
  "pricing": {
   "sonnet_input_usd_per_mtok": 3.0,
-  "sonnet_cached_usd_per_mtok": 0.3
+  "sonnet_cached_usd_per_mtok": 0.3,
+  "sonnet_output_usd_per_mtok": 15.0
  },
  "results": [
   {
@@ -26,8 +27,8 @@
    },
    "test_output": {
     "status": "ok",
-    "baseline_tokens": 6391,
-    "optimized_tokens": 6391,
+    "baseline_tokens": 6405,
+    "optimized_tokens": 6405,
     "saved_tokens": 0,
     "reduction_pct": 0.0,
     "usd_saved": 0.0,
@@ -85,6 +86,65 @@
       "optimized_tokens": 2122
      }
     ]
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 53237,
+    "optimized_tokens": 176,
+    "saved_tokens": 53061,
+    "reduction_pct": 99.7,
+    "usd_saved": 0.1592,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "src/flask/app.py",
+     "src/flask/sansio/app.py",
+     "src/flask/cli.py",
+     "src/flask/helpers.py",
+     "src/flask/ctx.py"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 7967,
+    "optimized_tokens": 523,
+    "saved_tokens": 7444,
+    "reduction_pct": 93.4,
+    "usd_saved": 0.0223,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 378,
+    "pattern": "def test_"
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 2456,
+    "optimized_tokens": 2236,
+    "saved_tokens": 220,
+    "reduction_pct": 9.0,
+    "usd_saved": 0.0007,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 8381
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 7106,
+    "optimized_tokens": 44,
+    "saved_tokens": 7062,
+    "reduction_pct": 99.4,
+    "usd_saved": 0.1059,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "src/flask/helpers.py",
+    "axis": "output_tokens (write_file vs surgical Edit)"
    },
    "status": "ok"
   },
@@ -157,6 +217,65 @@
       "optimized_tokens": 4628
      }
     ]
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 46841,
+    "optimized_tokens": 180,
+    "saved_tokens": 46661,
+    "reduction_pct": 99.6,
+    "usd_saved": 0.14,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "src/requests/models.py",
+     "src/requests/cookies.py",
+     "src/requests/utils.py",
+     "src/requests/adapters.py",
+     "src/requests/sessions.py"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 737,
+    "optimized_tokens": 614,
+    "saved_tokens": 123,
+    "reduction_pct": 16.7,
+    "usd_saved": 0.0004,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 29,
+    "pattern": "session"
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 728,
+    "optimized_tokens": 704,
+    "saved_tokens": 24,
+    "reduction_pct": 3.3,
+    "usd_saved": 0.0001,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 1845
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 6334,
+    "optimized_tokens": 37,
+    "saved_tokens": 6297,
+    "reduction_pct": 99.4,
+    "usd_saved": 0.0945,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "src/requests/cookies.py",
+    "axis": "output_tokens (write_file vs surgical Edit)"
    },
    "status": "partial"
   },
@@ -237,6 +356,65 @@
       }
      }
     ]
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 92002,
+    "optimized_tokens": 164,
+    "saved_tokens": 91838,
+    "reduction_pct": 99.8,
+    "usd_saved": 0.2755,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "fastapi/__init__.py",
+     "fastapi/testclient.py",
+     "fastapi/routing.py",
+     "fastapi/exceptions.py",
+     "fastapi/dependencies/utils.py"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 1343,
+    "optimized_tokens": 609,
+    "saved_tokens": 734,
+    "reduction_pct": 54.7,
+    "usd_saved": 0.0022,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 56,
+    "pattern": "def get"
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 416,
+    "optimized_tokens": 393,
+    "saved_tokens": 23,
+    "reduction_pct": 5.5,
+    "usd_saved": 0.0001,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 1152
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 2258,
+    "optimized_tokens": 51,
+    "saved_tokens": 2207,
+    "reduction_pct": 97.7,
+    "usd_saved": 0.0331,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "fastapi/exceptions.py",
+    "axis": "output_tokens (write_file vs surgical Edit)"
    },
    "status": "partial"
   },
@@ -319,6 +497,65 @@
      }
     ]
    },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 76172,
+    "optimized_tokens": 158,
+    "saved_tokens": 76014,
+    "reduction_pct": 99.8,
+    "usd_saved": 0.228,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "rich/console.py",
+     "rich/text.py",
+     "rich/style.py",
+     "rich/progress.py",
+     "rich/segment.py"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 3658,
+    "optimized_tokens": 502,
+    "saved_tokens": 3156,
+    "reduction_pct": 86.3,
+    "usd_saved": 0.0095,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 211,
+    "pattern": "class "
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 91307,
+    "optimized_tokens": 88133,
+    "saved_tokens": 3174,
+    "reduction_pct": 3.5,
+    "usd_saved": 0.0095,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 295165
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 8159,
+    "optimized_tokens": 32,
+    "saved_tokens": 8127,
+    "reduction_pct": 99.6,
+    "usd_saved": 0.1219,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "rich/style.py",
+    "axis": "output_tokens (write_file vs surgical Edit)"
+   },
    "status": "partial"
   },
   {
@@ -378,6 +615,65 @@
       "optimized_tokens": 1115
      }
     ]
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 19020,
+    "optimized_tokens": 165,
+    "saved_tokens": 18855,
+    "reduction_pct": 99.1,
+    "usd_saved": 0.0566,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "tests/utils/__init__.py",
+     "httpie/utils.py",
+     "httpie/context.py",
+     "httpie/cli/argparser.py",
+     "httpie/downloads.py"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 9568,
+    "optimized_tokens": 462,
+    "saved_tokens": 9106,
+    "reduction_pct": 95.2,
+    "usd_saved": 0.0273,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 496,
+    "pattern": "import"
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 131,
+    "optimized_tokens": 138,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 380
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 4020,
+    "optimized_tokens": 54,
+    "saved_tokens": 3966,
+    "reduction_pct": 98.7,
+    "usd_saved": 0.0595,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "tests/utils/__init__.py",
+    "axis": "output_tokens (write_file vs surgical Edit)"
    },
    "status": "partial"
   }
