@@ -78,6 +78,28 @@ class TestQuotaCountingAndAntiBypass(unittest.TestCase):
         self.assertEqual(q["monthly_saved"], 525_000)
         self.assertEqual(q["remaining_tokens"], 0)
 
+    def test_check_quota_enforces_max_of_local_and_server_floor_anti_abuse(self):
+        # Even if a caller attempts to reset or pass a tracker reporting 0 or low tokens,
+        # check_quota enforces max(local, server_floor) from the mirror ledger.
+        self.tracker.record_server_quota_floor(525_000)
+        mock_tracker = MagicMock()
+        mock_tracker.get_monthly_saved_tokens.return_value = 12_000
+        mock_tracker.get_server_quota_floor.return_value = 0
+        mock_tracker._quota_mirror_path.return_value = self.tracker._quota_mirror_path()
+
+        with patch.object(LicenseManager, "get_active_license", return_value=("free", {"tier": "free", "max_tokens_monthly": 500_000})):
+            q = LicenseManager.check_quota(mock_tracker)
+        self.assertTrue(q["is_quota_exceeded"])
+        self.assertEqual(q["monthly_saved"], 525_000)
+        self.assertEqual(q["remaining_tokens"], 0)
+
+        # And if local usage is higher than server_floor, local usage takes precedence
+        mock_tracker.get_monthly_saved_tokens.return_value = 600_000
+        with patch.object(LicenseManager, "get_active_license", return_value=("free", {"tier": "free", "max_tokens_monthly": 500_000})):
+            q2 = LicenseManager.check_quota(mock_tracker)
+        self.assertTrue(q2["is_quota_exceeded"])
+        self.assertEqual(q2["monthly_saved"], 600_000)
+
     def test_crypto_lockdown_blocks_ts1_offline_and_env_pubkey_override(self):
         # 1. Test pubkey must not sit in legacy trusted tuple
         self.assertEqual(lm.LEGACY_ED25519_PUBLIC_KEYS, ())

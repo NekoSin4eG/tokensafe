@@ -449,6 +449,43 @@ class LicenseManager:
         return True, f"Successfully activated TokenSafe {tier_name}{trial_note}!"
 
     @classmethod
+    def _get_server_quota_floor(cls, tracker: Optional[Any] = None) -> int:
+        """Reads server-verified quota floor from mirror ledger (.qledger.json) within 30-day window."""
+        if tracker and hasattr(tracker, "get_server_quota_floor"):
+            try:
+                floor = int(tracker.get_server_quota_floor() or 0)
+                if floor > 0:
+                    return floor
+            except Exception:
+                pass
+        try:
+            mirror_paths = []
+            if tracker and hasattr(tracker, "_quota_mirror_path"):
+                try:
+                    mirror_paths.append(tracker._quota_mirror_path())
+                except Exception:
+                    pass
+            base_dir = os.environ.get("TOKENSAFE_DATA_DIR") or (
+                os.path.dirname(os.environ["TOKENSAFE_DB_PATH"]) if os.environ.get("TOKENSAFE_DB_PATH") else None
+            )
+            if base_dir:
+                mirror_paths.append(os.path.join(base_dir, ".qledger.json"))
+            mirror_paths.append(os.path.join(os.path.dirname(DATA_DIR), ".qledger.json"))
+            mirror_paths.append(os.path.join(DATA_DIR, ".qledger.json"))
+
+            for mirror_path in mirror_paths:
+                if os.path.exists(mirror_path):
+                    with open(mirror_path, "r", encoding="utf-8") as f:
+                        data = json.load(f)
+                    if isinstance(data, dict) and time.time() - float(data.get("server_floor_ts", 0)) <= 30 * 86400:
+                        floor = int(data.get("server_floor", 0) or 0)
+                        if floor > 0:
+                            return floor
+        except Exception:
+            pass
+        return 0
+
+    @classmethod
     def check_quota(cls, tracker: Optional[Any] = None) -> Dict[str, Any]:
         """
         Evaluates whether the current active license quota is exceeded.
@@ -493,7 +530,9 @@ class LicenseManager:
             except Exception:
                 tracker = None
 
-        monthly_saved = tracker.get_monthly_saved_tokens() if tracker else 0
+        local_saved = tracker.get_monthly_saved_tokens() if tracker else 0
+        server_floor = cls._get_server_quota_floor(tracker)
+        monthly_saved = max(local_saved, server_floor)
         exceeded = monthly_saved >= max_tokens
 
         warning = None

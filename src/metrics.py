@@ -372,6 +372,20 @@ class MetricsTracker:
         except Exception:
             _do()
 
+    def get_server_quota_floor(self) -> int:
+        """Returns the active server-verified measured quota floor from mirror ledger (within 30-day window)."""
+        mirror_path = self._quota_mirror_path()
+        try:
+            if os.path.exists(mirror_path):
+                with open(mirror_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                if isinstance(data, dict):
+                    if time.time() - float(data.get("server_floor_ts", 0)) <= 30 * 86400:
+                        return int(data.get("server_floor", 0) or 0)
+        except Exception:
+            pass
+        return 0
+
     def record_event(
         self,
         session_id: str,
