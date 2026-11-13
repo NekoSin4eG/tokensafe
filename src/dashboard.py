@@ -83,10 +83,10 @@ class Dashboard:
             q_pct = min(100.0, (monthly_saved / limit * 100.0))
             if monthly_saved >= limit:
                 out.append(f"  {BOLD}Subscription Tier:{RESET}   {YELLOW}COMMUNITY (Free){RESET} • {RED}{BOLD}500k Monthly Measured Quota Reached ({monthly_saved:,}/{limit:,}){RESET}")
-                out.append(f"  {BOLD}Quota Usage:{RESET}         {RED}{render_bar(q_pct)}{RESET} (Pro optimizations paused · Upgrade: tokensafe activate <key> | {CYAN}https://tokensafe.dev/#pricing{RESET})")
+                out.append(f"  {BOLD}Quota Usage:{RESET}         {RED}{render_bar(q_pct)}{RESET} (Pro optimizations paused · Upgrade: tokensafe activate <key> | {CYAN}https://tokensafe.dev/signup{RESET})")
             else:
                 out.append(f"  {BOLD}Subscription Tier:{RESET}   {YELLOW}COMMUNITY (Free){RESET} • {monthly_saved:,} / {limit:,} measured tokens this month")
-                out.append(f"  {BOLD}Quota Usage:{RESET}         {YELLOW}{render_bar(q_pct)}{RESET} (Upgrade to Solo for Unlimited)")
+                out.append(f"  {BOLD}Quota Usage:{RESET}         {YELLOW}{render_bar(q_pct)}{RESET} (Upgrade to Solo for Unlimited · {CYAN}https://tokensafe.dev/signup{RESET})")
         else:
             email_info = f" ({payload.get('email', '')})" if payload.get('email') else ""
             out.append(f"  {BOLD}Subscription Tier:{RESET}   {GREEN}{BOLD}{tier_upper} (Unlimited){RESET}{email_info}")
@@ -95,6 +95,8 @@ class Dashboard:
         out.append(f"  {BOLD}Total Tokens Saved:{RESET}  {GREEN}{BOLD}{total_saved:,}{RESET} tokens")
         out.append(f"  {BOLD}Efficiency Gain:{RESET}     {YELLOW}{BOLD}{render_bar(pct)}{RESET}")
         out.append(f"  {BOLD}Estimated Savings:{RESET}   {GREEN}≈${usd:.4f} USD{RESET} {DIM}(derived: tokens × $1.5/M — approximation, not a bill){RESET}")
+        weekly = self.tracker.get_weekly_saved()
+        out.append(f"  {BOLD}This Week:{RESET}          {GREEN}{BOLD}{weekly['saved_tokens']:,}{RESET} tokens saved across {weekly['events']:,} events (≈${weekly['usd_saved']:.2f})")
 
         # Per-agent breakdown (honest Cumulative Total across ALL agents)
         by_agent = summary.get("by_agent") or {}
@@ -255,7 +257,7 @@ class Dashboard:
       <div>
         <strong style="color: #eab308;">⚡ Community Edition:</strong> {monthly_saved:,} / {limit:,} free measured tokens saved this month ({q_pct}%).
       </div>
-      <a href="https://tokensafe.dev/#pricing" target="_blank" style="background: #10b981; color: #090a0f; font-weight: 700; padding: 6px 14px; border-radius: 8px; text-decoration: none; font-size: 12px;">Upgrade to Solo (Unlimited)</a>
+      <a href="https://tokensafe.dev/signup" target="_blank" style="background: #10b981; color: #090a0f; font-weight: 700; padding: 6px 14px; border-radius: 8px; text-decoration: none; font-size: 12px;">Upgrade to Solo (Unlimited)</a>
     </div>
             """
         else:

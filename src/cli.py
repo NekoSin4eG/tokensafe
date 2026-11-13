@@ -97,6 +97,7 @@ def _print_help():
     print("TokenSafe CLI — usage: tokensafe <command> [args]\n")
     print("Commands:")
     print("  stats / markdown / html        Savings analytics (terminal / .md report / dashboard)")
+    print("  status                         One-screen health check: hooks, weekly savings, tier, sync")
     print("  benchmark                      Zero-context-loss benchmark suite (simulated SWE-bench harness)")
     print("  graph / map / skeleton         Architecture graph / API surface / AST skeleton of a file")
     print("  test <prompt>                  Preview TOCP S-expression prompt compaction")
@@ -139,6 +140,57 @@ def main():
             if "--notify" in args or "--prompt" in args:
                 VersionChecker.notify_os_update(force=True)
         return
+
+    if command in ("status", "health"):
+        from src.installer import AgentInstaller
+        from src.license_manager import LicenseManager
+        from src.telemetry_sync import TelemetrySync
+        tracker = MetricsTracker()
+        print("\n\033[1m\033[36m⚡ TOKENSAFE STATUS ⚡\033[0m\n")
+        # Hooks wiring (best-effort scan of agent config files and plugin dirs)
+        active_agents = []
+        for key, info in AgentInstaller.detect_available_agents().items():
+            hit = any(info.get(pk) and os.path.exists(info[pk]) for pk in
+                      ("target_path", "plugin_path", "skills_path", "agents_md_path", "rules_path", "extension_path"))
+            cfg = info.get("config_path")
+            if not hit and cfg and os.path.exists(cfg):
+                try:
+                    with open(cfg, "r", encoding="utf-8", errors="replace") as f:
+                        hit = "tokensafe" in f.read().lower()
+                except Exception:
+                    pass
+            if hit:
+                active_agents.append(key)
+        if active_agents:
+            print(f"  Hooks:     \033[32m✔ active\033[0m in {len(active_agents)} agent(s): {', '.join(active_agents)}")
+        else:
+            print("  Hooks:     \033[33m○ not detected\033[0m — run \033[1mtokensafe install\033[0m to configure your agents")
+        # The value moment: recent measured savings
+        weekly = tracker.get_weekly_saved()
+        print(f"  This Week: \033[32m\033[1m{weekly['saved_tokens']:,} tokens saved\033[0m across {weekly['events']:,} events (≈${weekly['usd_saved']:.2f})")
+        # Tier + quota state
+        tier, payload = LicenseManager.get_active_license()
+        quota = LicenseManager.check_quota(tracker)
+        if tier == "free":
+            q_saved = int(quota.get("monthly_saved", 0))
+            q_limit = int(quota.get("monthly_limit") or 500_000)
+            q_pct = min(100, int(q_saved / q_limit * 100)) if q_limit else 0
+            q_state = "\033[31mQUOTA REACHED — Pro optimizations paused\033[0m" if quota.get("is_quota_exceeded") else f"{q_pct}% of monthly measured quota"
+            print(f"  Tier:      \033[33mCOMMUNITY (Free)\033[0m — {q_saved:,} / {q_limit:,} tokens ({q_state})")
+            print("  Upgrade:   \033[36mhttps://tokensafe.dev/signup\033[0m ($9/mo Solo · 7-Day Team Trial)")
+        else:
+            print(f"  Tier:      \033[32m{tier.upper()}\033[0m (Unlimited)")
+        # Cloud heartbeat (non-blocking; keeps the machine visible server-side)
+        try:
+            TelemetrySync.sync_background()
+            pending = int(TelemetrySync.get_sync_status().get("pending_events", 0) or 0)
+            if pending:
+                print(f"  Cloud:     {pending:,} events queued for telemetry sync (background)")
+            else:
+                print("  Cloud:     \033[32m✔ telemetry up to date\033[0m")
+        except Exception:
+            pass
+        print()
 
     if command in ("stats", "dashboard"):
         tracker = MetricsTracker()
@@ -460,7 +512,7 @@ def main():
             q_limit = int(quota.get("monthly_limit") or 500_000)
             q_state = "\033[31mQUOTA REACHED (Pro optimizations paused)\033[0m" if quota.get("is_quota_exceeded") else "\033[32mActive\033[0m"
             print(f"  Status:     Free Tier ({q_saved:,} / {q_limit:,} measured tokens this month · {q_state})")
-            print("  Upgrade:    https://tokensafe.dev/#pricing ($9/mo Solo with 7-Day Free Trial)\n")
+            print("  Upgrade:    https://tokensafe.dev/signup ($9/mo Solo with 7-Day Free Trial)\n")
         print()
 
     elif command in ("providers", "models", "keys"):
@@ -660,7 +712,7 @@ def main():
 
     else:
         print(f"Unknown command: {command}")
-        print("Available commands: stats, sync, html, test, tests, doctor, providers, mcp, benchmark, proxy, graph, map, skeleton, guard, vacuum, prune, digest, activate, license, markdown, install, setup, update, check-update, reset. Run 'tokensafe help' for details.")
+        print("Available commands: stats, status, sync, html, test, tests, doctor, providers, mcp, benchmark, proxy, graph, map, skeleton, guard, vacuum, prune, digest, activate, license, markdown, install, setup, update, check-update, reset. Run 'tokensafe help' for details.")
         sys.exit(1)
 
 if __name__ == "__main__":

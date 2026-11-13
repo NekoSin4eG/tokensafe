@@ -106,6 +106,24 @@ class TestMetricsTracker(unittest.TestCase):
         self.assertEqual(summary_reset["total_events"], 0)
         self.assertEqual(summary_reset["breakdown"], {})
 
+    def test_weekly_saved_window(self):
+        from datetime import datetime, timedelta
+        # Old event (10 days ago) must fall outside the rolling 7-day window
+        self.tracker.record_event("w_old", "TOOL_READ", 200, 50)
+        old_time = (datetime.now() - timedelta(days=10)).isoformat()
+        with self.tracker._get_connection() as conn:
+            conn.execute("UPDATE events SET timestamp = ? WHERE session_id = 'w_old'", (old_time,))
+        self.tracker.record_event("w_new", "TOOL_READ", 300, 100)
+
+        weekly = self.tracker.get_weekly_saved()
+        self.assertEqual(weekly["events"], 1)
+        self.assertEqual(weekly["saved_tokens"], 200)
+        self.assertGreater(weekly["usd_saved"], 0)
+
+    def test_weekly_saved_empty_db(self):
+        weekly = self.tracker.get_weekly_saved()
+        self.assertEqual(weekly, {"events": 0, "saved_tokens": 0, "usd_saved": 0.0})
+
     def test_vacuum(self):
         self.tracker.record_event("s1", "PROMPT", 100, 40)
         self.tracker.vacuum()  # Should execute without errors

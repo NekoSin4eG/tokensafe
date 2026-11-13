@@ -81,6 +81,58 @@ class TestEnsureCommunityLicense(unittest.TestCase):
             res = LicenseManager.ensure_community_license()
         self.assertEqual(res, {"success": False, "reason": "error"})
 
+    def test_request_carries_agent_and_version_attribution(self):
+        os.environ["TOKENSAFE_AGENT"] = "claude-code"
+        self.addCleanup(os.environ.pop, "TOKENSAFE_AGENT", None)
+        with mock.patch.object(LicenseManager, "get_active_license_key", return_value=""), \
+             mock.patch.object(LicenseManager, "save_license", return_value=(True, "ok")), \
+             mock.patch("urllib.request.urlopen", return_value=_fake_response({"success": True, "license_key": "TS2.xyz.sig"})) as m_urlopen:
+            res = LicenseManager.ensure_community_license()
+        self.assertEqual(res, {"success": True, "reason": "issued"})
+        body = json.loads(m_urlopen.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(body["agent"], "claude-code")
+        # version: plugin.json (repo checkout) or importlib.metadata fallback — never missing
+        self.assertIsInstance(body["version"], str)
+        self.assertTrue(body["version"])
+
+    def test_explicit_agent_param_beats_env_and_detect(self):
+        os.environ["TOKENSAFE_AGENT"] = "cursor"
+        self.addCleanup(os.environ.pop, "TOKENSAFE_AGENT", None)
+        with mock.patch.object(LicenseManager, "get_active_license_key", return_value=""), \
+             mock.patch.object(LicenseManager, "save_license", return_value=(True, "ok")), \
+             mock.patch("urllib.request.urlopen", return_value=_fake_response({"success": True, "license_key": "TS2.xyz.sig"})) as m_urlopen:
+            LicenseManager.ensure_community_license(agent="gemini-cli")
+        body = json.loads(m_urlopen.call_args.args[0].data.decode("utf-8"))
+        self.assertEqual(body["agent"], "gemini-cli")
+
+    def test_detect_agent_env_markers_and_fallback(self):
+        os.environ.pop("TOKENSAFE_AGENT", None)
+        os.environ["CLAUDECODE"] = "1"
+        self.addCleanup(os.environ.pop, "CLAUDECODE", None)
+        self.assertEqual(LicenseManager.detect_agent(), "claude-code")
+        os.environ.pop("CLAUDECODE", None)
+        os.environ["CURSOR_TRACE_ID"] = "trace-1"
+        self.addCleanup(os.environ.pop, "CURSOR_TRACE_ID", None)
+        self.assertEqual(LicenseManager.detect_agent(), "cursor")
+        os.environ.pop("CURSOR_TRACE_ID", None)
+        os.environ["CODEX_HOME"] = "/home/u/.codex"
+        self.addCleanup(os.environ.pop, "CODEX_HOME", None)
+        self.assertEqual(LicenseManager.detect_agent(), "codex")
+        os.environ.pop("CODEX_HOME", None)
+        self.assertEqual(LicenseManager.detect_agent(), "antigravity")
+
+    def test_quota_banner_points_to_signup(self):
+        tracker = mock.Mock()
+        tracker.get_monthly_saved_tokens.return_value = 500_000
+        with mock.patch.object(
+            LicenseManager,
+            "get_active_license",
+            return_value=("free", {"tier": "free"}),
+        ):
+            res = LicenseManager.check_quota(tracker)
+        self.assertIn("https://tokensafe.dev/signup", res["warning"])
+        self.assertNotIn("#pricing", res["warning"])
+
     def test_server_rejection_is_fail_open(self):
         with mock.patch.object(LicenseManager, "get_active_license_key", return_value=""), \
              mock.patch("urllib.request.urlopen", return_value=_fake_response({"success": False, "error": "denied"}, status=403)):

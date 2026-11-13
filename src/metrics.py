@@ -516,6 +516,31 @@ class MetricsTracker:
         # Largest contributor first
         return dict(sorted(by_agent.items(), key=lambda kv: kv[1]["saved_tokens"], reverse=True))
 
+    def get_weekly_saved(self, days: int = 7) -> Dict[str, Any]:
+        """Rolling-window savings totals for the quick `tokensafe status` view.
+        Reads raw events only (lifetime rollups have no timestamp and are
+        deliberately excluded — this is the recent-activity signal)."""
+        days = max(1, int(days))
+        cutoff = (datetime.now() - timedelta(days=days)).isoformat()
+        try:
+            with self._get_connection() as conn:
+                row = conn.cursor().execute(
+                    """
+                    SELECT COUNT(*) AS events,
+                           COALESCE(SUM(saved_tokens), 0) AS saved_tokens,
+                           COALESCE(SUM(est_usd_saved), 0.0) AS usd_saved
+                    FROM events
+                    WHERE timestamp >= ? AND saved_tokens > 0
+                    """, (cutoff,)
+                ).fetchone()
+                return {
+                    "events": int(row["events"] or 0),
+                    "saved_tokens": int(row["saved_tokens"] or 0),
+                    "usd_saved": round(float(row["usd_saved"] or 0.0), 4),
+                }
+        except Exception:
+            return {"events": 0, "saved_tokens": 0, "usd_saved": 0.0}
+
     def get_summary(self) -> Dict[str, Any]:
         """Returns cumulative statistics across all sessions, including lifetime rollups."""
         with self._get_connection() as conn:

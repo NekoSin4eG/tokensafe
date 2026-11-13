@@ -96,10 +96,30 @@ class LicenseManager:
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
 
     @classmethod
-    def ensure_community_license(cls) -> Dict[str, Any]:
+    def detect_agent(cls) -> str:
+        """Best-effort agent attribution for adoption analytics: explicit
+        TOKENSAFE_AGENT env wins, then well-known agent env markers, then the
+        historic default (mirrors MetricsTracker._infer_agent conventions)."""
+        explicit = os.environ.get("TOKENSAFE_AGENT", "").strip()
+        if explicit:
+            return explicit[:32]
+        for env_key, tag in (
+            ("CLAUDECODE", "claude-code"),
+            ("CURSOR_TRACE_ID", "cursor"),
+            ("CODEX_HOME", "codex"),
+            ("GEMINI_CLI", "gemini-cli"),
+        ):
+            if os.environ.get(env_key):
+                return tag
+        return "antigravity"
+
+    @classmethod
+    def ensure_community_license(cls, agent: str = "") -> Dict[str, Any]:
         """
         Fetches a signed Community Edition license (tier 'free') bound to this
         machine's anonymized fingerprint. Zero-config: no keys, no user action.
+        `agent` (or TOKENSAFE_AGENT env / detect_agent() markers) attributes the
+        machine in server-side adoption analytics.
 
         Contract:
         - Skipped when any real license is already active (any tier).
@@ -133,6 +153,13 @@ class LicenseManager:
                         plugin_version = str(json.load(mf).get("version", "") or "")
             except Exception:
                 plugin_version = ""
+            if not plugin_version:
+                # PyPI/npm installs ship without plugin.json next to the package
+                try:
+                    from importlib.metadata import version as _pkg_version
+                    plugin_version = str(_pkg_version("tokensafe"))
+                except Exception:
+                    plugin_version = ""
 
             import urllib.request
 
@@ -143,7 +170,7 @@ class LicenseManager:
                     "machine_fp": cls.get_machine_fingerprint(),
                     "platform": platform.system()[:32],
                     "arch": platform.machine()[:32],
-                    "agent": os.environ.get("TOKENSAFE_AGENT", "")[:32],
+                    "agent": str(agent or cls.detect_agent())[:32],
                     "version": plugin_version[:32],
                 }).encode("utf-8"),
                 headers={"Content-Type": "application/json", "User-Agent": "TokenSafe/Community-License"},
@@ -542,13 +569,13 @@ class LicenseManager:
                 f"({monthly_saved:,}/{max_tokens:,} measured tokens saved this month). "
                 f"Graph/signature AST slicing, pointer dedup, history compaction & KV-cache prefix locking are paused "
                 f"(Security Guard stays active). Upgrade to Solo ($9/mo) or 7-Day Team Trial: "
-                f"`tokensafe activate <key>` or visit https://tokensafe.dev/#pricing"
+                f"`tokensafe activate <key>` or create your account at https://tokensafe.dev/signup"
             )
         elif monthly_saved >= int(max_tokens * 0.85):
             warning = (
                 f"⚡ **TokenSafe Quota Notice**: Community Edition is at {int(monthly_saved / max_tokens * 100)}% of monthly limit "
                 f"({monthly_saved:,}/{max_tokens:,} measured tokens). "
-                f"Upgrade to Solo for unlimited optimization: `tokensafe activate <key>` or https://tokensafe.dev/#pricing"
+                f"Upgrade to Solo for unlimited optimization: `tokensafe activate <key>` or https://tokensafe.dev/signup"
             )
 
         return {
