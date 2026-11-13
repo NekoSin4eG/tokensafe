@@ -30,7 +30,7 @@ from src.governor import ContextGovernor
 from src.paths import resolve_data_dir
 
 DEFAULT_PORT = 8765
-DEFAULT_HOST = os.environ.get("HOST", os.environ.get("TOKENSAFE_HOST", "0.0.0.0"))
+DEFAULT_HOST = os.environ.get("HOST", os.environ.get("TOKENSAFE_HOST", "127.0.0.1"))
 DEFAULT_UPSTREAM = "https://api.deepseek.com/v1"
 
 class EventBroadcaster:
