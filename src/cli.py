@@ -99,6 +99,7 @@ def _print_help():
     print("  stats / markdown / html        Savings analytics (terminal / .md report / dashboard)")
     print("  status                         One-screen health check: hooks, weekly savings, tier, sync")
     print("  benchmark                      Zero-context-loss benchmark suite (simulated SWE-bench harness)")
+    print("  bench --real [--repo=key]      Measured benchmark on real repos (pre-registered, zero-loss gates)")
     print("  graph / map / skeleton         Architecture graph / API surface / AST skeleton of a file")
     print("  test <prompt>                  Preview TOCP S-expression prompt compaction")
     print("  digest [--send] [--email=...]  Compile (and optionally dispatch) the weekly team digest")
@@ -237,6 +238,24 @@ def main():
                 pass
 
     elif command in ("benchmark", "bench"):
+        if "--real" in args:
+            # Measured real-repo mode: pre-registered scenarios (src/bench_scenarios.json),
+            # zero-loss gates, real clones — see src/benchmark_real.py methodology header.
+            from src.benchmark_real import RealRepoBenchmark
+            repo_keys = [a.split("=", 1)[1] for a in args if a.startswith("--repo=")]
+            print("\n⚡ Running REAL-REPO benchmark (measured on live clones, pre-registered scenarios)...")
+            bench = RealRepoBenchmark()
+            data = bench.run_all(repo_keys or None)
+            print()
+            print(bench.render_markdown(data))
+            out = bench.export(data)
+            print(f"📊 JSON: {out['json']}")
+            print(f"📊 MD:   {out['md']}\n")
+            sys.exit(0 if all(
+                (s.get("status") == "ok")
+                for r in data["results"] for s in (r.get("symbol_read"), r.get("test_output"), r.get("multiturn"))
+                if s
+            ) else 1)
         from src.benchmark import BenchmarkSuite
         from src.paths import resolve_data_dir
         print("\n⚡ Running Zero-Loss SWE-bench Benchmark Suite across real-world scenarios...")

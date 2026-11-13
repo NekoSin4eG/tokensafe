@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "created": "2026-11-14",
+  "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table.",
+  "metrics": ["token_reduction_pct", "usd_saved_sonnet_input", "cache_hit_ratio", "zero_loss_gates"],
+  "pricing": { "sonnet_input_usd_per_mtok": 3.0, "sonnet_cached_usd_per_mtok": 0.3 },
+  "repos": [
+    {
+      "key": "flask",
+      "url": "https://github.com/pallets/flask",
+      "symbol_read": { "file": "src/flask/app.py", "symbol": "Flask.full_dispatch_request" },
+      "pytest": { "subset_glob": "tests/test_basic.py", "deps": ["werkzeug", "jinja2", "itsdangerous", "click", "blinker"] },
+      "multiturn_reads": [
+        { "file": "src/flask/app.py", "symbol": "Flask.full_dispatch_request" },
+        { "file": "src/flask/wrappers.py", "symbol": "Request.full_path" },
+        { "file": "src/flask/config.py", "symbol": "Config.from_pyfile" }
+      ]
+    },
+    {
+      "key": "requests",
+      "url": "https://github.com/psf/requests",
+      "symbol_read": { "file": "src/requests/sessions.py", "symbol": "Session.request" },
+      "pytest": { "subset_glob": "tests/test_requests.py", "deps": ["charset_normalizer", "idna", "urllib3", "certifi", "pytest-httpbin"] },
+      "multiturn_reads": [
+        { "file": "src/requests/sessions.py", "symbol": "Session.request" },
+        { "file": "src/requests/models.py", "symbol": "Response.iter_content" },
+        { "file": "src/requests/adapters.py", "symbol": "HTTPAdapter.send" }
+      ]
+    },
+    {
+      "key": "fastapi",
+      "url": "https://github.com/fastapi/fastapi",
+      "symbol_read": { "file": "fastapi/routing.py", "symbol": "APIRouter.add_api_route" },
+      "pytest": { "subset_glob": "tests/test_router_events.py", "deps": ["pydantic", "starlette", "email-validator"] },
+      "multiturn_reads": [
+        { "file": "fastapi/routing.py", "symbol": "APIRouter.add_api_route" },
+        { "file": "fastapi/applications.py", "symbol": "FastAPI.__init__" },
+        { "file": "fastapi/params.py", "symbol": "Param.field_info" }
+      ]
+    },
+    {
+      "key": "rich",
+      "url": "https://github.com/Textualize/rich",
+      "symbol_read": { "file": "rich/console.py", "symbol": "Console.print" },
+      "pytest": { "subset_glob": "tests/test_console.py", "deps": [] },
+      "multiturn_reads": [
+        { "file": "rich/console.py", "symbol": "Console.print" },
+        { "file": "rich/table.py", "symbol": "Table.add_row" },
+        { "file": "rich/panel.py", "symbol": "Panel.render" }
+      ]
+    },
+    {
+      "key": "httpie",
+      "url": "https://github.com/httpie/cli",
+      "symbol_read": { "file": "httpie/core.py", "symbol": "main" },
+      "pytest": { "subset_glob": "tests/test_cli.py", "deps": ["requests", "pygments", "multidict", "rich"] },
+      "multiturn_reads": [
+        { "file": "httpie/core.py", "symbol": "main" },
+        { "file": "httpie/cli/definition.py", "symbol": "HTTPieArgumentParser" },
+        { "file": "httpie/sessions.py", "symbol": "Session" }
+      ]
+    }
+  ],
+  "injected_failure": {
+    "note": "CI-failure triage scenario: a deterministic failing test file is written into the temp clone (never committed upstream) to produce a REAL pytest failure output on real code — standard SWE-bench-style regression injection, pre-registered here.",
+    "test_source": "def test_bench_injected_regression():\n    assert False, \"bench: pre-registered injected regression\"\n",
+    "file": "tests/test_bench_injected.py"
+  },
+  "zero_loss_gates": {
+    "symbol_read": ["symbol_present", "valid_python", "all_top_level_defs_present", "signature_line_match"],
+    "test_output": ["failing_test_name_present", "error_type_present", "first_traceback_frame_present"],
+    "multiturn": ["all_reads_lossless"]
+  }
+}
