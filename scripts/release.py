@@ -432,15 +432,22 @@ def resolve_cloud_repo() -> Optional[str]:
 def wait_for_pypi_simple(version: str, attempts: int = 18, delay: int = 10) -> bool:
     """Waits for PyPI's Simple Index CDN to serve `version` before triggering cloud CI/Docker builds."""
     import urllib.request
+    found = False
     for _ in range(attempts):
         try:
-            with urllib.request.urlopen("https://pypi.org/simple/tokensafe/", timeout=10) as r:
+            req = urllib.request.Request("https://pypi.org/simple/tokensafe/", headers={"Cache-Control": "no-cache"})
+            with urllib.request.urlopen(req, timeout=10) as r:
                 body = r.read().decode("utf-8", errors="ignore")
             if version in body:
-                return True
+                found = True
+                break
         except Exception:
             pass
         time.sleep(delay)
+    if found:
+        # Give global Fastly CDN edges across AWS/Azure data centers 30s to replicate before Docker builds run
+        time.sleep(30)
+        return True
     return False
 
 
