@@ -80,15 +80,15 @@ def _client_supports_pointers() -> bool:
 TOOLS = [
     {
         "name": "smart_read_file",
-        "description": "Reads a code file using AST skeletonization and graph-guided slicing to save 90-99% context tokens. Automatically preserves target function/class implementation and 1-line 1-hop dependency signatures while folding inert code. Supports relative paths (e.g. 'src/index.ts'). Declarative schemas (OpenAPI, Prisma, GraphQL, SQL) are auto-sliced: pass model/type/table/endpoint as 'symbol' or omit for a compact overview. For 3+ related symbols across files prefer smart_bundle.",
+        "description": "AST-skeleton file reader: keeps the target function/class body + 1-line 1-hop dependency signatures, folds inert code (-90-99% tokens). Relative or absolute paths. Schema files (OpenAPI/Prisma/GraphQL/SQL) auto-slice via 'symbol'. For 3+ related symbols use smart_bundle instead.",
         "inputSchema": {
             "type": "object",
             "properties": {
-                "path": {"type": "string", "description": "File path to read (relative to workspace or absolute, e.g. './src/index.ts')"},
-                "symbol": {"type": "string", "description": "Optional: targeted function, method, class, component, or schema model/type to extract with 1-hop dependencies while folding surrounding code (omit for whole-file AST skeleton or schema overview)"},
-                "include_deps": {"type": "boolean", "description": "Optional: whether to include 1-hop dependencies (default: true). Set false for 0-hop surgical isolation."},
-                "dep_mode": {"type": "string", "enum": ["signature", "full"], "description": "Optional: how 1-hop dependencies are returned when include_deps is true. 'signature' (default, -95%+ tokens) returns compact 1-line signatures; 'full' inlines full dependency bodies."},
-                "force_full": {"type": "boolean", "description": "Optional: bypass session pointer deduplication and return the full skeleton directly (use only if your context was compacted or you are a fresh subagent lacking earlier reads)."},
+                "path": {"type": "string", "description": "File path (relative to workspace or absolute)"},
+                "symbol": {"type": "string", "description": "Optional: function/method/class/component or schema model/type/table to extract (omit for whole-file skeleton)"},
+                "include_deps": {"type": "boolean", "description": "Include 1-hop dependency signatures (default true)"},
+                "dep_mode": {"type": "string", "enum": ["signature", "full"], "description": "'signature' (default) = 1-line dep signatures; 'full' = inline dependency bodies"},
+                "force_full": {"type": "boolean", "description": "Bypass pointer dedup — use only after context compaction or as a fresh subagent"},
                 "start_line": {"type": "integer", "description": "Optional: starting line number"},
                 "end_line": {"type": "integer", "description": "Optional: ending line number"}
             },
@@ -97,7 +97,7 @@ TOOLS = [
     },
     {
         "name": "smart_bundle",
-        "description": "Reads 2-8 related symbols across multiple files as ONE merged context bundle: per-file AST skeletons with shared import lines deduplicated and merged 1-hop dependency signatures. Use it instead of 3+ separate smart_read_file calls on related code (one roundtrip, no duplicated imports/types). Supports relative paths (e.g. targets=[{'path': 'src/api.ts', 'symbol': 'handler'}]).",
+        "description": "Reads 2-8 related symbols across files as ONE merged bundle: per-file skeletons, deduplicated shared imports, merged 1-hop dep signatures. Replaces 3+ separate smart_read_file calls in a single roundtrip.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -107,16 +107,16 @@ TOOLS = [
                     "items": {
                         "type": "object",
                         "properties": {
-                            "path": {"type": "string", "description": "File path to code file (relative to workspace or absolute)"},
-                            "symbol": {"type": "string", "description": "Optional symbol to keep unfolded (class, function, or component name)"}
+                            "path": {"type": "string", "description": "File path (relative or absolute)"},
+                            "symbol": {"type": "string", "description": "Optional symbol to keep unfolded"}
                         },
                         "required": ["path"]
                     },
-                    "description": "Up to 8 {path, symbol} targets; list several symbols of the same file as separate entries"
+                    "description": "Up to 8 {path, symbol} targets; several symbols of one file = separate entries"
                 },
-                "include_deps": {"type": "boolean", "description": "Optional: include merged 1-hop dependency signatures (default: true)"},
-                "dep_mode": {"type": "string", "enum": ["signature", "full"], "description": "Optional: kept for parity with smart_read_file; signatures are always merged for bundles"},
-                "force_full": {"type": "boolean", "description": "Optional: bypass session pointer deduplication"}
+                "include_deps": {"type": "boolean", "description": "Include merged 1-hop dep signatures (default true)"},
+                "dep_mode": {"type": "string", "enum": ["signature", "full"], "description": "Parity only; bundles always merge signatures"},
+                "force_full": {"type": "boolean", "description": "Bypass session pointer dedup"}
             },
             "required": ["targets"]
         }
@@ -241,37 +241,37 @@ TOOLS = [
     },
     {
         "name": "scoped_search",
-        "description": "Safe, token-bounded symbol and text search across the codebase. Replaces raw grep/find with clean, line-numbered markdown matches (-90% tokens).",
+        "description": "Safe, token-bounded symbol/text search replacing raw grep/find (-90% tokens). '|' or \\d in query auto-enables regex when use_regex is omitted; false forces literal.",
         "inputSchema": {
             "type": "object",
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": "Text, identifier, or symbol name to search for"
+                    "description": "Text, identifier, or symbol name"
                 },
                 "scope": {
                     "type": "string",
-                    "description": "Filter scope: 'code', 'config', 'all', a file extension (e.g. 'go', 'ts', '*.py'), or a subfolder path (e.g. 'internal/promo') (default: 'all')"
+                    "description": "Filter: 'code', 'config', 'all', extension ('go', '*.py'), or subfolder ('internal/promo') (default 'all')"
                 },
                 "path": {
                     "type": "string",
-                    "description": "Directory or project path to search (alias for project_path, e.g. '.', './src', 'internal/promo')"
+                    "description": "Directory to search (alias for project_path; relative or absolute)"
                 },
                 "project_path": {
                     "type": "string",
-                    "description": "Optional root directory path (defaults to current project)"
+                    "description": "Optional root directory (defaults to current project)"
                 },
                 "max_results": {
                     "type": "integer",
-                    "description": "Maximum matching lines to return (default: 25, max: 100)"
+                    "description": "Max matching lines (default 25, max 100)"
                 },
                 "case_sensitive": {
                     "type": "boolean",
-                    "description": "Whether search is case-sensitive (default: false)"
+                    "description": "Case-sensitive search (default false)"
                 },
                 "use_regex": {
                     "type": "boolean",
-                    "description": "Whether query is a regular expression (default: false)"
+                    "description": "Omit = auto-detect ('|', \\d → regex); false = literal; true = regex"
                 }
             },
             "required": ["query"]
@@ -1536,7 +1536,8 @@ def _dispatch_tool_call(name: str, args: dict) -> dict:
 
         max_res = _safe_int(args.get("max_results"), 25, lo=1, hi=100)
         c_sens = bool(args.get("case_sensitive", False))
-        u_regex = bool(args.get("use_regex", False))
+        raw_regex = args.get("use_regex")
+        u_regex = None if raw_regex is None else bool(raw_regex)
 
         res = ScopedSearch.search(
             query=query,

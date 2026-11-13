@@ -651,3 +651,70 @@ class CommandSanitizer:
             return f"PASS: {lines[0]} ... {lines[-1]} (exit code 0)"
 
         return raw
+
+    # PostToolUse shell tools whose stdout can be compacted (hook payload tool_name)
+    SHELL_TOOL_NAMES = {
+        "Bash", "bash", "Shell", "shell", "sh",
+        "run_command", "RunCommand", "execute_command", "ExecuteCommand", "terminal", "Terminal",
+    }
+
+    @staticmethod
+    def _extract_tool_stdout(response: Any) -> Tuple[str, Optional[int]]:
+        """Extracts (stdout_text, exit_code_or_None) from a PostToolUse tool_response payload.
+        Handles plain strings, {stdout|output|content|text|result} dicts, content-block lists,
+        and common exit-code keys (exit_code/exitCode/returncode/code, success booleans)."""
+        if isinstance(response, str):
+            return response, None
+        if isinstance(response, dict):
+            stdout = ""
+            for key in ("stdout", "output", "content", "text", "result"):
+                val = response.get(key)
+                if isinstance(val, str) and val:
+                    stdout = val
+                    break
+            if not stdout:
+                blocks = response.get("content")
+                if isinstance(blocks, list):
+                    texts = [
+                        b.get("text", "") for b in blocks
+                        if isinstance(b, dict) and isinstance(b.get("text"), str)
+                    ]
+                    stdout = "\n".join(t for t in texts if t)
+            exit_code = None
+            for key in ("exit_code", "exitCode", "returncode", "return_code", "code"):
+                val = response.get(key)
+                if isinstance(val, (int, float)) and not isinstance(val, bool):
+                    exit_code = int(val)
+                    break
+            if exit_code is None:
+                if response.get("success") is True:
+                    exit_code = 0
+                elif response.get("success") is False or response.get("error"):
+                    exit_code = 1
+            return stdout, exit_code
+        return "", None
+
+    @classmethod
+    def compact_tool_output(cls, tool_name: str, tool_response: Any) -> Optional[Tuple[str, int, int]]:
+        """
+        PostToolUse helper: compacts verbose successful shell output before the model reads it.
+        Returns (compacted_text, original_chars, compacted_chars), or None when not applicable:
+        non-shell tool, short output, failed command, or when compaction saves too little.
+        Fail-open by design — callers must degrade to the raw output on None.
+        """
+        if str(tool_name or "") not in cls.SHELL_TOOL_NAMES:
+            return None
+        raw, resolved_exit = cls._extract_tool_stdout(tool_response)
+        if not raw or len(raw) < 400:
+            return None
+        if resolved_exit is None:
+            # Unknown exit status: refuse to mute anything that looks like a failure
+            if re.search(r"Traceback|AssertionError|\bERROR\b|FAILED|exit code [1-9]", raw):
+                return None
+            resolved_exit = 0
+        elif resolved_exit != 0:
+            return None
+        compacted = cls.compact_test_output(raw, resolved_exit)
+        if compacted is raw or len(compacted) >= len(raw) * 0.6:
+            return None
+        return compacted, len(raw), len(compacted)

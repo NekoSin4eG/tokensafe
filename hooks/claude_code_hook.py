@@ -172,6 +172,41 @@ def handle(event: str, payload: dict) -> dict:
                 }
         return {}
 
+    if event == "PostToolUse":
+        # Auto-mute noisy stdout of successful shell commands (tests/linters/builds):
+        # feed the model a compact summary instead of letting it parse the full dump.
+        # Fail-open: {} leaves the raw output untouched.
+        tool = str(payload.get("tool_name") or "")
+        compacted, orig, new = None, 0, 0
+        try:
+            from src.command_sanitizer import CommandSanitizer
+            res = CommandSanitizer.compact_tool_output(tool, payload.get("tool_response"))
+            if res:
+                compacted, orig, new = res
+        except Exception:
+            compacted = None
+        if compacted:
+            try:
+                from src.metrics import MetricsTracker
+                from src.tokenizer import count_tokens
+                MetricsTracker().record_event(
+                    session_id=session_id,
+                    event_type="TOOL_OUTPUT_COMPACT",
+                    original_tokens=count_tokens(str(payload.get("tool_response") or "")),
+                    optimized_tokens=count_tokens(compacted),
+                    details={"agent": AGENT, "tool": tool, "chars": f"{orig}->{new}"},
+                )
+            except Exception:
+                pass
+            return {
+                "decision": "block",
+                "reason": (
+                    f"[TokenSafe] {tool} succeeded (exit 0) — verbose stdout auto-compacted "
+                    f"({orig:,} → {new:,} chars). Command already completed; do not retry. Summary:\n{compacted}"
+                ),
+            }
+        return {}
+
     return {}
 
 

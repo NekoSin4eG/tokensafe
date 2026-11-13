@@ -78,6 +78,17 @@ class ScopedSearch:
         return True
 
     @classmethod
+    def _looks_like_regex(cls, query: str) -> bool:
+        """Conservative auto-detection for use_regex=None (omitted): only
+        unambiguous regex constructs switch the mode — alternation pipes and
+        backslash character classes. Plain dots/brackets stay literal."""
+        if "|" in query:
+            return True
+        if re.search(r"\\[dwsbDWSB]", query):
+            return True
+        return False
+
+    @classmethod
     def search(
         cls,
         query: str,
@@ -85,7 +96,7 @@ class ScopedSearch:
         scope: str = "all",
         max_results: int = 25,
         case_sensitive: bool = False,
-        use_regex: bool = False
+        use_regex: Optional[bool] = None
     ) -> Dict[str, Any]:
         """
         Executes a bounded code/config search and returns structured results and compact markdown.
@@ -121,6 +132,9 @@ class ScopedSearch:
 
         query = query.strip()
         scope = (scope or "all").lower().strip()
+        # use_regex=None (omitted) -> auto-detect; explicit False forces literal, True forces regex
+        auto_regex = use_regex is None and cls._looks_like_regex(query)
+        regex_mode = bool(use_regex) if use_regex is not None else auto_regex
         if max_results is None or isinstance(max_results, bool):
             max_results = 25
         else:
@@ -132,18 +146,24 @@ class ScopedSearch:
         # Compile search pattern
         flags = 0 if case_sensitive else re.IGNORECASE
         try:
-            if use_regex:
+            if regex_mode:
                 pattern = re.compile(query, flags)
             else:
                 pattern = re.compile(re.escape(query), flags)
         except Exception as e:
-            return {
-                "success": False,
-                "error": f"Invalid regex pattern: {str(e)}",
-                "matches": [],
-                "total_matches": 0,
-                "markdown": f"Regex compilation error: {str(e)}"
-            }
+            if regex_mode and use_regex is None:
+                # Malformed auto-detected regex: degrade to literal instead of failing
+                regex_mode = False
+                auto_regex = False
+                pattern = re.compile(re.escape(query), flags)
+            else:
+                return {
+                    "success": False,
+                    "error": f"Invalid regex pattern: {str(e)}",
+                    "matches": [],
+                    "total_matches": 0,
+                    "markdown": f"Regex compilation error: {str(e)}"
+                }
 
         matches: List[Dict[str, Any]] = []
         total_scanned_files = 0
@@ -222,11 +242,14 @@ class ScopedSearch:
 
         # Generate ultra-compact Markdown output (< 150 tokens)
         display_root = os.path.basename(root_dir) or root_dir
+        mode_suffix = ", auto-regex" if auto_regex and regex_mode else ""
         lines = [
-            f"### TokenSafe Scoped Search: '{query}' ({len(matches)} match{'es' if len(matches) != 1 else ''} in {len(hit_files)} file{'s' if len(hit_files) != 1 else ''}, dir: `{display_root}`, scope: {scope})"
+            f"### TokenSafe Scoped Search: '{query}' ({len(matches)} match{'es' if len(matches) != 1 else ''} in {len(hit_files)} file{'s' if len(hit_files) != 1 else ''}, dir: `{display_root}`, scope: {scope}{mode_suffix})"
         ]
         if not matches:
             lines.append(f"_No matches found across {total_scanned_files} scanned files in `{root_dir}`._")
+            if auto_regex and regex_mode:
+                lines.append("_Auto-regex mode found nothing; pass use_regex=false to force a literal search._")
         else:
             for m in matches:
                 lines.append(f"- `{m['file']}:{m['line']}`: `{m['text']}`")

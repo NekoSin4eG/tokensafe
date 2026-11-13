@@ -63,6 +63,20 @@ UNIFIED_TOKENSAFE_RULE = (
     "`⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens (≈$<usd> approx)`\n"
 )
 
+# Short pointer written into PROJECT-level rule files when the full protocol is
+# already installed at the agent-global level (~/.zcode/AGENTS.md etc.).
+# Keeps every session's meta-context lean: ~110 tokens instead of ~850.
+POINTER_RULE = (
+    "## TOKENSAFE GRAPH-FIRST OPTIMIZATION PROTOCOL\n"
+    "The full 12-point protocol is installed globally in the agent-level instructions "
+    "(~/.zcode/AGENTS.md, ~/.claude/CLAUDE.md, ~/.codex/AGENTS.md) and applies to this project. "
+    "Core rules: never raw grep/find or `ls -la` — use `tokensafe:scoped_search`, "
+    "`tokensafe:smart_read_file(path, symbol)`, `tokensafe:smart_bundle` and `tokensafe:list_dir`; "
+    "sanitize high-output commands via `tokensafe:sanitize_command`; check `tokensafe:context_budget` "
+    "before large tasks and compact via `tokensafe:compact_conversation`; never hardcode secret "
+    "fallbacks; append the `⚡ TokenSafe Turn Savings` footer on tool-using turns.\n"
+)
+
 AGENTS_REGISTRY = {
     "antigravity": {
         "name": "Google Antigravity",
@@ -191,7 +205,7 @@ class AgentInstaller:
     def install_hooks_config(cls, agent_key: str) -> Tuple[bool, str]:
         """Registers TokenSafe lifecycle-hook adapters with agents that support them.
         Claude Code: SessionStart (one-shot directives) + UserPromptSubmit (TOCP
-        injection) + PreToolUse (shell guard).
+        injection) + PreToolUse (shell guard) + PostToolUse (stdout compaction).
         Cursor: beforeShellExecution / beforeReadFile guards.
         Codex has no lifecycle hooks (MCP + AGENTS.md remain the integration)."""
         if agent_key == "codex":
@@ -212,6 +226,7 @@ class AgentInstaller:
             prompt_entry = {"hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
             bash_entry = {"matcher": "Bash", "hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
             session_entry = {"hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
+            post_bash_entry = {"matcher": "Bash", "hooks": [{"type": "command", "command": claude_cmd, "timeout": 10}]}
 
             def _sync_claude_event(event_name: str, default_entry: dict) -> bool:
                 entries = hooks.get(event_name)
@@ -237,12 +252,13 @@ class AgentInstaller:
                 _sync_claude_event("SessionStart", session_entry),
                 _sync_claude_event("UserPromptSubmit", prompt_entry),
                 _sync_claude_event("PreToolUse", bash_entry),
+                _sync_claude_event("PostToolUse", post_bash_entry),
             ])
             if not changed:
                 return True, "TokenSafe Claude Code hooks already registered"
             data["hooks"] = hooks
             cls._atomic_write_json(config_file, data)
-            return True, "hooks registered (SessionStart + UserPromptSubmit + PreToolUse guard)"
+            return True, "hooks registered (SessionStart + UserPromptSubmit + PreToolUse guard + PostToolUse stdout compact)"
 
         # cursor
         config_file = os.path.join(HOME, ".cursor", "hooks.json")
@@ -594,6 +610,23 @@ class AgentInstaller:
         cls._symlink_dir(skill_src, target_path)
 
     @classmethod
+    def _global_rule_installed(cls) -> bool:
+        """True if any agent-global rules file already carries the tokensafe block,
+        meaning project-level files can reference it instead of duplicating it."""
+        for info in AGENTS_REGISTRY.values():
+            for key in ("agents_md_path", "rules_path"):
+                path = info.get(key)
+                if not path or not os.path.isfile(path):
+                    continue
+                try:
+                    with open(path, "r", encoding="utf-8", errors="replace") as f:
+                        if "<!-- tokensafe -->" in f.read():
+                            return True
+                except Exception:
+                    continue
+        return False
+
+    @classmethod
     def install_project(
         cls,
         project_dir: Optional[str] = None,
@@ -627,13 +660,17 @@ class AgentInstaller:
             "---\n\n"
         )
 
+        # Rules dedup: when the full protocol is already installed globally,
+        # project files get the short pointer instead of the ~850-token block.
+        project_rule = POINTER_RULE if cls._global_rule_installed() else UNIFIED_TOKENSAFE_RULE
+
         created = []
         for rf in rule_files:
             try:
                 if rf.endswith(".mdc"):
-                    cls._write_file_safely(rf, cursor_mdc_header + UNIFIED_TOKENSAFE_RULE)
+                    cls._write_file_safely(rf, cursor_mdc_header + project_rule)
                 else:
-                    cls._inject_global_rule(rf, UNIFIED_TOKENSAFE_RULE)
+                    cls._inject_global_rule(rf, project_rule)
                 created.append(os.path.relpath(rf, project_dir))
             except Exception:
                 pass

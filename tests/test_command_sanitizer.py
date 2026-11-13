@@ -301,6 +301,39 @@ class TestTestRunnerWatchGuard(unittest.TestCase):
         res = CommandSanitizer.compact_test_output(raw, exit_code=1)
         self.assertEqual(res, raw)
 
+    def test_compact_tool_output_shell_dict_stdout(self):
+        raw = "rootdir: /app\ncollected 5 items\n" + "x" * 500 + "\n==== 5 passed in 0.15s ===="
+        res = CommandSanitizer.compact_tool_output("Bash", {"stdout": raw, "exit_code": 0})
+        self.assertIsNotNone(res)
+        compacted, orig, new = res
+        self.assertTrue(compacted.startswith("PASS: 5 passed"))
+        self.assertEqual(orig, len(raw))
+        self.assertLess(new, orig)
+
+    def test_compact_tool_output_string_response(self):
+        raw = "Ran 3 tests in 0.002s\nOK\n" + "z" * 450
+        res = CommandSanitizer.compact_tool_output("bash", raw)
+        self.assertIsNotNone(res)
+        self.assertIn("PASS: Ran 3 tests in 0.002s", res[0])
+
+    def test_compact_tool_output_non_shell_ignored(self):
+        self.assertIsNone(CommandSanitizer.compact_tool_output("Read", {"content": "x" * 900}))
+        self.assertIsNone(CommandSanitizer.compact_tool_output("", {"stdout": "x" * 900}))
+
+    def test_compact_tool_output_short_ignored(self):
+        self.assertIsNone(CommandSanitizer.compact_tool_output("Bash", {"stdout": "OK", "exit_code": 0}))
+
+    def test_compact_tool_output_failure_untouched(self):
+        raw = "Traceback (most recent call last):\n" + "y" * 500
+        # exit code 1 explicitly
+        self.assertIsNone(CommandSanitizer.compact_tool_output("Bash", {"stdout": raw, "exitCode": 1}))
+        # unknown exit code + failure markers
+        self.assertIsNone(CommandSanitizer.compact_tool_output("Bash", {"stdout": raw}))
+
+    def test_compact_tool_output_error_key_means_failure(self):
+        raw = "some verbose output\n" + "e" * 500
+        self.assertIsNone(CommandSanitizer.compact_tool_output("Bash", {"stdout": raw, "error": "oom"}))
+
 
 if __name__ == "__main__":
     unittest.main()

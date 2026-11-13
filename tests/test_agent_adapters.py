@@ -125,6 +125,36 @@ class TestClaudeCodeAdapter(AdapterBase):
         })
         self.assertEqual(out, {})
 
+    def test_posttooluse_compacts_verbose_success_output(self):
+        raw = "\n".join(f"ok line {i}" for i in range(40)) + "\n==== 40 passed in 0.10s ===="
+        out = self._run_hook({
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_response": {"stdout": raw, "exit_code": 0},
+            "session_id": "cc_test_session",
+        })
+        self.assertEqual(out.get("decision"), "block")
+        self.assertIn("PASS: 40 passed in 0.10s", out["reason"])
+        self.assertIn("auto-compacted", out["reason"])
+        s = self._summary()
+        self.assertEqual(s["breakdown"].get("TOOL_OUTPUT_COMPACT", {}).get("count", 0), 1)
+
+    def test_posttooluse_failed_or_short_output_untouched(self):
+        out = self._run_hook({
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_response": {"stdout": "all good", "exit_code": 0},
+            "session_id": "cc_test_session",
+        })
+        self.assertEqual(out, {})
+        out_fail = self._run_hook({
+            "hook_event_name": "PostToolUse",
+            "tool_name": "Bash",
+            "tool_response": {"stdout": "Traceback (most recent call last):\n" + "x" * 500, "exit_code": 1},
+            "session_id": "cc_test_session",
+        })
+        self.assertEqual(out_fail, {})
+
     def test_fail_open_on_garbage(self):
         import subprocess
         res = subprocess.run(
