@@ -459,16 +459,20 @@ def update_cloud_repo_version(cloud_root: str, next_v: str) -> None:
         rf'\g<1>"{next_v}"',
         root_dir=cloud_root,
     )
+    # Upper bound must track the NEW major (>=3.0.0,<4) — a hardcoded ",<3"
+    # would make the constraint empty after a major bump (3.0.0 excluded by
+    # its own cap; v3.0.0 cloud CI/deploy failure on 2026-11-14).
+    _client_upper = int(next_v.split(".")[0]) + 1
     replace_in_file(
         "Dockerfile.cloud",
-        r'tokensafe>=[0-9]+\.[0-9]+\.[0-9]+,<3',
-        f"tokensafe>={next_v},<3",
+        r'tokensafe>=[0-9]+\.[0-9]+\.[0-9]+,<\d+',
+        f"tokensafe>={next_v},<{_client_upper}",
         root_dir=cloud_root,
     )
     replace_in_file(
         ".github/workflows/test.yml",
-        r'tokensafe>=[0-9]+\.[0-9]+\.[0-9]+,<3',
-        f"tokensafe>={next_v},<3",
+        r'tokensafe>=[0-9]+\.[0-9]+\.[0-9]+,<\d+',
+        f"tokensafe>={next_v},<{_client_upper}",
         root_dir=cloud_root,
     )
     replace_in_file("package.json", r'("version"\s*:\s*)"[^"]+"', rf'\g<1>"{next_v}"', root_dir=cloud_root)
