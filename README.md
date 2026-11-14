@@ -245,7 +245,7 @@ No modeling: five popular repositories cloned at HEAD, scenarios **pre-registere
 | flask | Full-suite pytest output | 6,391 | 6,391 | **0.0%** | PASS |
 | fastapi | Git diff churn → slice | 416 | 393 | **-5.5%** | PASS |
 
-Aggregate: **~670,000 measured tokens saved** per traced pass over all 5 repositories (input at `$3/M`, output axis at `$15/M`). A clean pytest suite honestly scores **0.0%** — savings are never invented. Four gate-failed scenarios (env issues) are published as FAIL rows, not counted. Full table + raw JSON: [docs/BENCHMARK_REAL.md](docs/BENCHMARK_REAL.md) · live page: <https://tokensafe.dev/bench> · methodology post: <https://tokensafe.dev/blog/real-repo-benchmark-5-repos>. Reproduce:
+Aggregate: **~670,000 measured tokens saved** per traced pass over all 5 repositories (input at `$3/M`, output axis at `$15/M`). A clean pytest suite honestly scores **0.0%** — savings are never invented. One scenario is published as **FAIL** with its reason: fastapi's test-output — fastapi's strict warning filters escalate a `pytest-asyncio` configuration deprecation into a pytest `INTERNALERROR`, so the suite cannot be collected in the bench venv; the gate rejects the output and no savings are claimed for it. Full table + raw JSON: [docs/BENCHMARK_REAL.md](docs/BENCHMARK_REAL.md) · live page: <https://tokensafe.dev/bench> · methodology post: <https://tokensafe.dev/blog/real-repo-benchmark-5-repos>. Reproduce:
 
 ```bash
 tokensafe bench --real                        # all 5 pre-registered repos

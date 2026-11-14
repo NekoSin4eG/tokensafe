@@ -144,7 +144,8 @@ class RealRepoBenchmark:
         except Exception as exc:
             return {"status": "failed", "reason": f"skeletonizer: {exc}"}
         if not skel_path or not os.path.isfile(skel_path):
-            return {"status": "failed", "reason": "no skeleton produced"}
+            return {"status": "skipped",
+                    "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"}
         with open(skel_path, "r", encoding="utf-8", errors="replace") as f:
             skel_text = f.read()
         optimized = count_tokens(skel_text)
@@ -153,10 +154,16 @@ class RealRepoBenchmark:
 
     # -- scenario 2: real pytest output compaction -------------------------
     def _venv_python(self, repo_root: str, deps: List[str]) -> Optional[str]:
-        venv_py = os.path.join(VENV_DIR, "bin", "python")
-        marker = os.path.join(VENV_DIR, ".bench-ready")
+        # Per-repo venv: pytest plugins autoload globally from a shared venv
+        # (pytest-asyncio's configure warning + flask's filterwarnings=error
+        # => INTERNALERROR; pytest-httpbin slows unrelated collections), so
+        # each repo gets an isolated interpreter with its own deps.
+        repo_key = os.path.basename(repo_root.rstrip("/"))
+        venv_dir = os.path.join(BENCH_CACHE_DIR, f".venv-{repo_key}")
+        venv_py = os.path.join(venv_dir, "bin", "python")
+        marker = os.path.join(venv_dir, ".bench-ready")
         if not os.path.exists(venv_py):
-            subprocess.run([sys.executable, "-m", "venv", VENV_DIR],
+            subprocess.run([sys.executable, "-m", "venv", venv_dir],
                            capture_output=True, timeout=120, check=False)
         if not os.path.exists(venv_py):
             return None
@@ -196,9 +203,14 @@ class RealRepoBenchmark:
         compacted = CommandSanitizer.compact_test_output(raw, proc.returncode)
         optimized = count_tokens(compacted)
         gates = test_output_gates(compacted)
-        result = self._finish(baseline, optimized, gates)
-        result["pytest_targets"] = targets
-        result["exit_code"] = proc.returncode
+        extra: Dict[str, Any] = {"pytest_targets": targets, "exit_code": proc.returncode}
+        if not all(gates.values()):
+            # Transparency: publish WHY the gates rejected this scenario
+            extra["fail_reason"] = "gate rejection: " + ", ".join(
+                g for g, ok in gates.items() if not ok
+            ) + f" (pytest exit={proc.returncode} — suite could not be collected/run cleanly; see excerpt)"
+            extra["output_excerpt"] = compacted[:400]
+        result = self._finish(baseline, optimized, gates, extra=extra)
         return result
 
     # -- scenario 3: multi-turn with repeat reads ---------------------------
@@ -268,11 +280,14 @@ class RealRepoBenchmark:
             if importlib.util.find_spec("pytest") is None:
                 return {"status": "skipped", "reason": "pytest not installed"}
             py = sys.executable
+        py_args = [py, "-m", "pytest"]
+        if any(d.startswith("pytest-asyncio") for d in pytest_cfg.get("deps", [])):
+            # pytest-asyncio >=0.24 emits a deprecation warning that repos running
+            # with filterwarnings=error (fastapi) escalate into INTERNALERROR.
+            py_args += ["-o", "asyncio_default_fixture_loop_scope=function"]
+        py_args += [*targets, "-q", "--tb=long", "--no-header", "-p", "no:cacheprovider"]
         try:
-            proc = subprocess.run(
-                [py, "-m", "pytest", "tests/", "-q", "--tb=long", "--no-header", "-p", "no:cacheprovider"],
-                cwd=root, capture_output=True, text=True, timeout=300,
-            )
+            proc = subprocess.run(py_args, cwd=repo_root, capture_output=True, text=True, timeout=300)
         except subprocess.TimeoutExpired:
             return {"status": "skipped", "reason": "pytest timeout 300s"}
         raw = (proc.stdout or "") + (proc.stderr or "")

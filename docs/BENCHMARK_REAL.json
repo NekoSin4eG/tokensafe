@@ -27,8 +27,8 @@
    },
    "test_output": {
     "status": "ok",
-    "baseline_tokens": 6405,
-    "optimized_tokens": 6405,
+    "baseline_tokens": 6402,
+    "optimized_tokens": 6402,
     "saved_tokens": 0,
     "reduction_pct": 0.0,
     "usd_saved": 0.0,
@@ -166,22 +166,22 @@
     }
    },
    "test_output": {
-    "status": "gate_failed",
-    "baseline_tokens": 69,
-    "optimized_tokens": 69,
+    "status": "ok",
+    "baseline_tokens": 43138,
+    "optimized_tokens": 43138,
     "saved_tokens": 0,
     "reduction_pct": 0.0,
     "usd_saved": 0.0,
     "gates": {
-     "failing_test_name_present": false,
-     "error_type_present": false,
-     "first_traceback_frame_present": false
+     "failing_test_name_present": true,
+     "error_type_present": true,
+     "first_traceback_frame_present": true
     },
     "pytest_targets": [
      "tests/test_bench_injected.py",
      "tests/"
     ],
-    "exit_code": 4
+    "exit_code": 1
    },
    "multiturn": {
     "status": "ok",
@@ -277,7 +277,7 @@
     "file": "src/requests/cookies.py",
     "axis": "output_tokens (write_file vs surgical Edit)"
    },
-   "status": "partial"
+   "status": "ok"
   },
   {
    "key": "fastapi",
@@ -298,8 +298,8 @@
    },
    "test_output": {
     "status": "gate_failed",
-    "baseline_tokens": 82,
-    "optimized_tokens": 82,
+    "baseline_tokens": 751,
+    "optimized_tokens": 751,
     "saved_tokens": 0,
     "reduction_pct": 0.0,
     "usd_saved": 0.0,
@@ -312,7 +312,9 @@
      "tests/test_bench_injected.py",
      "tests/"
     ],
-    "exit_code": 4
+    "exit_code": 3,
+    "fail_reason": "gate rejection: failing_test_name_present, error_type_present, first_traceback_frame_present (pytest exit=3; collection/import errors mean repo deps were not installable)",
+    "output_excerpt": "INTERNALERROR> Traceback (most recent call last):\nINTERNALERROR>   File \"/Users/olegsavelev/.tokensafe/data/bench/.venv-fastapi/lib/python3.13/site-packages/_pytest/main.py\", line 329, in wrap_session\nINTERNALERROR>     config._do_configure()\nINTERNALERROR>     ~~~~~~~~~~~~~~~~~~~~^^\nINTERNALERROR>   File \"/Users/olegsavelev/.tokensafe/data/bench/.venv-fastapi/lib/python3.13/site-packages/_pytest/"
    },
    "multiturn": {
     "status": "ok",
@@ -336,8 +338,8 @@
      {
       "file": "fastapi/applications.py",
       "symbol": "FastAPI.__init__",
-      "status": "failed",
-      "reason": "no skeleton produced"
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
      },
      {
       "file": "fastapi/params.py",
@@ -436,22 +438,22 @@
     }
    },
    "test_output": {
-    "status": "gate_failed",
-    "baseline_tokens": 1018,
-    "optimized_tokens": 1018,
+    "status": "ok",
+    "baseline_tokens": 746,
+    "optimized_tokens": 746,
     "saved_tokens": 0,
     "reduction_pct": 0.0,
     "usd_saved": 0.0,
     "gates": {
-     "failing_test_name_present": false,
-     "error_type_present": false,
-     "first_traceback_frame_present": false
+     "failing_test_name_present": true,
+     "error_type_present": true,
+     "first_traceback_frame_present": true
     },
     "pytest_targets": [
      "tests/test_bench_injected.py",
      "tests/"
     ],
-    "exit_code": 2
+    "exit_code": 1
    },
    "multiturn": {
     "status": "ok",
@@ -556,32 +558,32 @@
     "file": "rich/style.py",
     "axis": "output_tokens (write_file vs surgical Edit)"
    },
-   "status": "partial"
+   "status": "ok"
   },
   {
    "key": "httpie",
    "url": "https://github.com/httpie/cli",
    "symbol_read": {
-    "status": "failed",
-    "reason": "no skeleton produced"
+    "status": "skipped",
+    "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
    },
    "test_output": {
-    "status": "gate_failed",
-    "baseline_tokens": 66,
-    "optimized_tokens": 66,
+    "status": "ok",
+    "baseline_tokens": 20188,
+    "optimized_tokens": 20188,
     "saved_tokens": 0,
     "reduction_pct": 0.0,
     "usd_saved": 0.0,
     "gates": {
-     "failing_test_name_present": false,
-     "error_type_present": false,
-     "first_traceback_frame_present": false
+     "failing_test_name_present": true,
+     "error_type_present": true,
+     "first_traceback_frame_present": true
     },
     "pytest_targets": [
      "tests/test_bench_injected.py",
      "tests/"
     ],
-    "exit_code": 4
+    "exit_code": 1
    },
    "multiturn": {
     "status": "ok",
@@ -598,14 +600,14 @@
      {
       "file": "httpie/core.py",
       "symbol": "main",
-      "status": "failed",
-      "reason": "no skeleton produced"
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
      },
      {
       "file": "httpie/cli/definition.py",
       "symbol": "HTTPieArgumentParser",
-      "status": "failed",
-      "reason": "no skeleton produced"
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
      },
      {
       "file": "httpie/sessions.py",

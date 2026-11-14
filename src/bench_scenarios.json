@@ -37,7 +37,7 @@
       "clone_depth": 50,
       "raw_search": { "pattern": "def get", "dir": "fastapi" },
       "symbol_read": { "file": "fastapi/routing.py", "symbol": "APIRouter.add_api_route" },
-      "pytest": { "subset_glob": "tests/", "deps": ["pydantic", "starlette", "email-validator"] },
+      "pytest": { "subset_glob": "tests/", "deps": ["pydantic", "starlette", "email-validator", "httpx", "opentelemetry-sdk", "pytest-asyncio"] },
       "multiturn_reads": [
         { "file": "fastapi/routing.py", "symbol": "APIRouter.add_api_route" },
         { "file": "fastapi/applications.py", "symbol": "FastAPI.__init__" },
@@ -50,7 +50,7 @@
       "clone_depth": 50,
       "raw_search": { "pattern": "class ", "dir": "rich" },
       "symbol_read": { "file": "rich/console.py", "symbol": "Console.print" },
-      "pytest": { "subset_glob": "tests/", "deps": [] },
+      "pytest": { "subset_glob": "tests/", "deps": ["attrs"] },
       "multiturn_reads": [
         { "file": "rich/console.py", "symbol": "Console.print" },
         { "file": "rich/table.py", "symbol": "Table.add_row" },
@@ -63,7 +63,7 @@
       "clone_depth": 50,
       "raw_search": { "pattern": "import", "dir": "httpie" },
       "symbol_read": { "file": "httpie/core.py", "symbol": "main" },
-      "pytest": { "subset_glob": "tests/", "deps": ["requests", "pygments", "multidict", "rich"] },
+      "pytest": { "subset_glob": "tests/", "deps": ["requests", "pygments", "multidict", "rich", "pytest-httpbin", "responses"] },
       "multiturn_reads": [
         { "file": "httpie/core.py", "symbol": "main" },
         { "file": "httpie/cli/definition.py", "symbol": "HTTPieArgumentParser" },
