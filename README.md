@@ -232,21 +232,30 @@ No modeling: five popular repositories cloned at HEAD, scenarios **pre-registere
 
 | Repo | Scenario | Baseline tok | TokenSafe tok | Reduction | Gates |
 |---|---|---:|---:|---:|:---|
-| flask | Architecture discovery (hub crawl → map) | 53,237 | **176** | **-99.7%** | PASS |
+| fastapi | Architecture discovery (hub crawl → map) | 92,002 | **164** | **-99.8%** | PASS |
+| fastapi | Junk-read guard (uv.lock → 30-line cap) | 367,129 | **855** | **-99.8%** | PASS |
+| rich | Architecture discovery | 76,172 | 158 | **-99.8%** | PASS |
+| fastapi | Write egress (output axis, $15/M) | 2,258 | **51** | **-97.7%** | PASS |
+| rich | Junk-read guard (uv.lock) | 128,203 | 2,642 | **-97.9%** | PASS |
 | flask | Write egress (output axis, $15/M) | 7,106 | **44** | **-99.4%** | PASS |
+| flask | Junk-read guard (uv.lock) | 133,015 | **780** | **-99.4%** | PASS |
+| flask | Architecture discovery | 53,237 | 176 | **-99.7%** | PASS |
+| rich | KV-cache prefix locking (10-turn bill) | 846,669 | 199,282 | **-76.5%** | PASS |
+| flask | KV-cache prefix locking (10-turn bill) | 562,777 | 124,150 | **-77.9%** | PASS |
+| fastapi | KV-cache prefix locking (10-turn bill) | 781,038 | 178,835 | **-77.1%** | PASS |
 | flask | Multi-turn + repeat reads | 45,336 | 5,304 | **-88.3%** | PASS |
-| httpie | Multi-turn + repeat reads | 5,610 | 1,115 | **-84.6%** | PASS |
-| flask | Symbol read (AST skeleton) | 18,864 | 3,784 | **-79.9%** | PASS |
-| flask | Raw search → scoped results | 7,967 | 523 | **-93.4%** | PASS |
-| rich | Symbol read (AST skeleton) | 28,675 | 7,710 | **-73.1%** | PASS |
 | requests | Multi-turn + repeat reads | 59,380 | 9,561 | **-83.9%** | PASS |
+| flask | Symbol read (AST skeleton) | 18,864 | 3,784 | **-79.9%** | PASS |
+| rich | Symbol read (AST skeleton) | 28,675 | 7,710 | **-73.1%** | PASS |
 | requests | Symbol read (AST skeleton) | 9,743 | 2,849 | **-70.8%** | PASS |
+| httpie | Prompt compaction (TOCP) | 129 | 36 | **-72.1%** | PASS |
 | fastapi | Symbol read (`routing.py`, 73.7K tok) | 73,721 | 39,529 | **-46.4%** | PASS |
+| flask | Secret guard (`cat .env` → deny, 0 leak) | 153 | 82 | **-46.4%** | PASS |
 | rich | Verbose test output (noise strip) | 746 | 385 | **-48.4%** | PASS |
 | flask | Full-suite pytest output | 6,402 | 6,191 | **-3.3%** | PASS |
 | fastapi | Git diff churn → slice | 416 | 393 | **-5.5%** | PASS |
 
-Aggregate: **~693,900 measured tokens saved** per traced pass over all 5 repositories (input at `$3/M`, output axis at `$15/M`). Test-output rows are honest about noise: a clean suite scores ~0-3% (only true noise is stripped), a verbose failing run scores -48%. One scenario is published as **FAIL** with its reason: fastapi's test-output — fastapi's strict warning filters escalate a `pytest-asyncio` configuration deprecation into a pytest `INTERNALERROR`, so the suite cannot be collected in the bench venv; the gate rejects the output and no savings are claimed for it. Full table + raw JSON: [docs/BENCHMARK_REAL.md](docs/BENCHMARK_REAL.md) · live page: <https://tokensafe.dev/bench> · methodology post: <https://tokensafe.dev/blog/real-repo-benchmark-5-repos>. Reproduce:
+Aggregate: **~3.06M measured tokens saved** per traced pass over all 5 repositories (input at `$3/M`, output axis at `$15/M`, KV-cache hits billed at `$0.30/M`). Clean pytest suites honestly score ~0-3% — savings are never invented. Five scenarios are published as **FAIL with reasons attached** (e.g. fastapi's test-output: strict warning filters escalate a `pytest-asyncio` deprecation into a pytest `INTERNALERROR`; whole-repo API surfaces bigger than hub crawls for fastapi/httpie) — gates reject them and no savings are claimed. Full table + raw JSON: [docs/BENCHMARK_REAL.md](docs/BENCHMARK_REAL.md) · live page: <https://tokensafe.dev/bench> · methodology post: <https://tokensafe.dev/blog/real-repo-benchmark-5-repos>. Reproduce:
 
 ```bash
 tokensafe bench --real                        # all 5 pre-registered repos

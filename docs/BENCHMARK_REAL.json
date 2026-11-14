@@ -1,7 +1,7 @@
 {
- "version": 2,
+ "version": 3,
  "created": "2026-11-14",
- "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking; v1 scenarios measured in 784628d remain untouched). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table. v2 adds four angles: architecture discovery, raw search leak, git-diff churn, write-egress (output-token axis).",
+ "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking; v1/v2 rows stay frozen). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table. v3 adds: API surface map, KV-cache prefix locking replay, secret-guard interception, junk-read guard, prompt compaction (TOCP).",
  "pricing": {
   "sonnet_input_usd_per_mtok": 3.0,
   "sonnet_cached_usd_per_mtok": 0.3,
@@ -27,8 +27,8 @@
    },
    "test_output": {
     "status": "ok",
-    "baseline_tokens": 6402,
-    "optimized_tokens": 6191,
+    "baseline_tokens": 6407,
+    "optimized_tokens": 6196,
     "saved_tokens": 211,
     "reduction_pct": 3.3,
     "usd_saved": 0.0006,
@@ -76,7 +76,8 @@
        "valid_python": true,
        "all_top_level_defs_present": true,
        "signature_line_match": false
-      }
+      },
+      "fail_reason": "gate rejection: signature_line_match"
      },
      {
       "file": "src/flask/config.py",
@@ -146,6 +147,84 @@
     "file": "src/flask/helpers.py",
     "axis": "output_tokens (write_file vs surgical Edit)"
    },
+   "api_surface": {
+    "status": "ok",
+    "baseline_tokens": 53237,
+    "optimized_tokens": 39810,
+    "saved_tokens": 13427,
+    "reduction_pct": 25.2,
+    "usd_saved": 0.0403,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": true
+    },
+    "hub_files": [
+     "src/flask/app.py",
+     "src/flask/sansio/app.py",
+     "src/flask/cli.py",
+     "src/flask/helpers.py",
+     "src/flask/ctx.py"
+    ]
+   },
+   "kv_cache": {
+    "status": "ok",
+    "baseline_tokens": 562777,
+    "optimized_tokens": 124150,
+    "saved_tokens": 438627,
+    "reduction_pct": 77.9,
+    "kv_cache_hit_rate_pct": 86.6,
+    "usd_saved": 1.3159,
+    "gates": {
+     "prefix_hit_rate_ge_85": true,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 82,
+    "saved_tokens": 71,
+    "reduction_pct": 46.4,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "ok",
+    "baseline_tokens": 133015,
+    "optimized_tokens": 780,
+    "saved_tokens": 132235,
+    "reduction_pct": 99.4,
+    "usd_saved": 0.3967,
+    "gates": {
+     "capped_output": true,
+     "junk_file_named": true
+    },
+    "junk_file": "uv.lock",
+    "note": "command passes as-is; output capped to 30 lines (junk-read cap)"
+   },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 134,
+    "optimized_tokens": 42,
+    "saved_tokens": 92,
+    "reduction_pct": 68.7,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
    "status": "ok"
   },
   {
@@ -167,8 +246,8 @@
    },
    "test_output": {
     "status": "ok",
-    "baseline_tokens": 43130,
-    "optimized_tokens": 42725,
+    "baseline_tokens": 43200,
+    "optimized_tokens": 42795,
     "saved_tokens": 405,
     "reduction_pct": 0.9,
     "usd_saved": 0.0012,
@@ -277,7 +356,75 @@
     "file": "src/requests/cookies.py",
     "axis": "output_tokens (write_file vs surgical Edit)"
    },
-   "status": "ok"
+   "api_surface": {
+    "status": "ok",
+    "baseline_tokens": 46841,
+    "optimized_tokens": 23762,
+    "saved_tokens": 23079,
+    "reduction_pct": 49.3,
+    "usd_saved": 0.0692,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": true
+    },
+    "hub_files": [
+     "src/requests/models.py",
+     "src/requests/cookies.py",
+     "src/requests/utils.py",
+     "src/requests/adapters.py",
+     "src/requests/sessions.py"
+    ]
+   },
+   "kv_cache": {
+    "status": "gate_failed",
+    "baseline_tokens": 472751,
+    "optimized_tokens": 134748,
+    "saved_tokens": 338003,
+    "reduction_pct": 71.5,
+    "kv_cache_hit_rate_pct": 79.4,
+    "usd_saved": 1.014,
+    "gates": {
+     "prefix_hit_rate_ge_85": false,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 84,
+    "saved_tokens": 69,
+    "reduction_pct": 45.1,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "skipped",
+    "reason": "no lockfile in clone"
+   },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 133,
+    "optimized_tokens": 42,
+    "saved_tokens": 91,
+    "reduction_pct": 68.4,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
+   "status": "partial"
   },
   {
    "key": "fastapi",
@@ -308,12 +455,12 @@
      "error_type_present": false,
      "first_traceback_frame_present": false
     },
+    "fail_reason": "gate rejection: failing_test_name_present, error_type_present, first_traceback_frame_present (pytest exit=3 — suite could not be collected/run cleanly; see excerpt)",
     "pytest_targets": [
      "tests/test_bench_injected.py",
      "tests/"
     ],
     "exit_code": 3,
-    "fail_reason": "gate rejection: failing_test_name_present, error_type_present, first_traceback_frame_present (pytest exit=3 — suite could not be collected/run cleanly; see excerpt)",
     "output_excerpt": "INTERNALERROR> Traceback (most recent call last):\nINTERNALERROR>   File \"/Users/olegsavelev/.tokensafe/data/bench/.venv-fastapi/lib/python3.13/site-packages/_pytest/main.py\", line 329, in wrap_session\nINTERNALERROR>     config._do_configure()\nINTERNALERROR>     ~~~~~~~~~~~~~~~~~~~~^^\nINTERNALERROR>   File \"/Users/olegsavelev/.tokensafe/data/bench/.venv-fastapi/lib/python3.13/site-packages/_pytest/"
    },
    "multiturn": {
@@ -355,7 +502,8 @@
        "valid_python": true,
        "all_top_level_defs_present": true,
        "signature_line_match": false
-      }
+      },
+      "fail_reason": "gate rejection: signature_line_match"
      }
     ]
    },
@@ -417,6 +565,85 @@
     },
     "file": "fastapi/exceptions.py",
     "axis": "output_tokens (write_file vs surgical Edit)"
+   },
+   "api_surface": {
+    "status": "gate_failed",
+    "baseline_tokens": 92002,
+    "optimized_tokens": 220463,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": false
+    },
+    "fail_reason": "gate rejection: smaller_than_crawl",
+    "hub_files": [
+     "fastapi/__init__.py",
+     "fastapi/testclient.py",
+     "fastapi/routing.py",
+     "fastapi/exceptions.py",
+     "fastapi/dependencies/utils.py"
+    ]
+   },
+   "kv_cache": {
+    "status": "ok",
+    "baseline_tokens": 781038,
+    "optimized_tokens": 178835,
+    "saved_tokens": 602203,
+    "reduction_pct": 77.1,
+    "kv_cache_hit_rate_pct": 85.7,
+    "usd_saved": 1.8066,
+    "gates": {
+     "prefix_hit_rate_ge_85": true,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 82,
+    "saved_tokens": 71,
+    "reduction_pct": 46.4,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "ok",
+    "baseline_tokens": 367129,
+    "optimized_tokens": 855,
+    "saved_tokens": 366274,
+    "reduction_pct": 99.8,
+    "usd_saved": 1.0988,
+    "gates": {
+     "capped_output": true,
+     "junk_file_named": true
+    },
+    "junk_file": "uv.lock",
+    "note": "command passes as-is; output capped to 30 lines (junk-read cap)"
+   },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 131,
+    "optimized_tokens": 39,
+    "saved_tokens": 92,
+    "reduction_pct": 70.2,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
    },
    "status": "partial"
   },
@@ -495,7 +722,8 @@
        "valid_python": true,
        "all_top_level_defs_present": true,
        "signature_line_match": false
-      }
+      },
+      "fail_reason": "gate rejection: signature_line_match"
      }
     ]
    },
@@ -558,6 +786,84 @@
     "file": "rich/style.py",
     "axis": "output_tokens (write_file vs surgical Edit)"
    },
+   "api_surface": {
+    "status": "ok",
+    "baseline_tokens": 76172,
+    "optimized_tokens": 56399,
+    "saved_tokens": 19773,
+    "reduction_pct": 26.0,
+    "usd_saved": 0.0593,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": true
+    },
+    "hub_files": [
+     "rich/console.py",
+     "rich/text.py",
+     "rich/style.py",
+     "rich/progress.py",
+     "rich/segment.py"
+    ]
+   },
+   "kv_cache": {
+    "status": "ok",
+    "baseline_tokens": 846669,
+    "optimized_tokens": 199282,
+    "saved_tokens": 647387,
+    "reduction_pct": 76.5,
+    "kv_cache_hit_rate_pct": 85.0,
+    "usd_saved": 1.9422,
+    "gates": {
+     "prefix_hit_rate_ge_85": true,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 82,
+    "saved_tokens": 71,
+    "reduction_pct": 46.4,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "ok",
+    "baseline_tokens": 128203,
+    "optimized_tokens": 2642,
+    "saved_tokens": 125561,
+    "reduction_pct": 97.9,
+    "usd_saved": 0.3767,
+    "gates": {
+     "capped_output": true,
+     "junk_file_named": true
+    },
+    "junk_file": "uv.lock",
+    "note": "command passes as-is; output capped to 30 lines (junk-read cap)"
+   },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 129,
+    "optimized_tokens": 44,
+    "saved_tokens": 85,
+    "reduction_pct": 65.9,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
    "status": "ok"
   },
   {
@@ -579,8 +885,8 @@
    },
    "test_output": {
     "status": "ok",
-    "baseline_tokens": 20395,
-    "optimized_tokens": 20141,
+    "baseline_tokens": 20385,
+    "optimized_tokens": 20131,
     "saved_tokens": 254,
     "reduction_pct": 1.2,
     "usd_saved": 0.0008,
@@ -688,7 +994,76 @@
     "file": "tests/utils/__init__.py",
     "axis": "output_tokens (write_file vs surgical Edit)"
    },
-   "status": "ok"
+   "api_surface": {
+    "status": "gate_failed",
+    "baseline_tokens": 19020,
+    "optimized_tokens": 38997,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": false
+    },
+    "fail_reason": "gate rejection: smaller_than_crawl",
+    "hub_files": [
+     "tests/utils/__init__.py",
+     "httpie/utils.py",
+     "httpie/context.py",
+     "httpie/cli/argparser.py",
+     "httpie/downloads.py"
+    ]
+   },
+   "kv_cache": {
+    "status": "gate_failed",
+    "baseline_tokens": 199896,
+    "optimized_tokens": 50579,
+    "saved_tokens": 149317,
+    "reduction_pct": 74.7,
+    "kv_cache_hit_rate_pct": 83.0,
+    "usd_saved": 0.448,
+    "gates": {
+     "prefix_hit_rate_ge_85": false,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 82,
+    "saved_tokens": 71,
+    "reduction_pct": 46.4,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "skipped",
+    "reason": "no lockfile in clone"
+   },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 129,
+    "optimized_tokens": 36,
+    "saved_tokens": 93,
+    "reduction_pct": 72.1,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
+   "status": "partial"
   }
  ]
 }

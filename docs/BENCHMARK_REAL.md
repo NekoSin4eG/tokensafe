@@ -1,23 +1,32 @@
 # TokenSafe Real-Repo Benchmark (measured)
 
-> Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking; v1 scenarios measured in 784628d remain untouched). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table. v2 adds four angles: architecture discovery, raw search leak, git-diff churn, write-egress (output-token axis).
+> Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking; v1/v2 rows stay frozen). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table. v3 adds: API surface map, KV-cache prefix locking replay, secret-guard interception, junk-read guard, prompt compaction (TOCP).
 
 | Repo | Scenario | Baseline tok | Optimized tok | Saved | % | USD (Sonnet input) | Gates |
 | :--- | :--- | ---: | ---: | ---: | ---: | ---: | :--- |
 | flask | symbol_read | 18,864 | 3,784 | 15,080 | 79.9% | $0.0452 | PASS |
-| flask | test_output | 6,402 | 6,191 | 211 | 3.3% | $0.0006 | PASS |
+| flask | test_output | 6,407 | 6,196 | 211 | 3.3% | $0.0006 | PASS |
 | flask | multiturn | 45,336 | 5,304 | 40,032 | 88.3% | $0.1201 | PASS |
 | flask | architecture | 53,237 | 176 | 53,061 | 99.7% | $0.1592 | PASS |
 | flask | raw_search | 7,967 | 523 | 7,444 | 93.4% | $0.0223 | PASS |
 | flask | git_diff | 2,456 | 2,236 | 220 | 9.0% | $0.0007 | PASS |
 | flask | write_egress | 7,106 | 44 | 7,062 | 99.4% | $0.1059 | PASS |
+| flask | api_surface | 53,237 | 39,810 | 13,427 | 25.2% | $0.0403 | PASS |
+| flask | kv_cache | 562,777 | 124,150 | 438,627 | 77.9% | $1.3159 | PASS |
+| flask | secret_guard | 153 | 82 | 71 | 46.4% | $0.0002 | PASS |
+| flask | junk_read | 133,015 | 780 | 132,235 | 99.4% | $0.3967 | PASS |
+| flask | prompt_compaction | 134 | 42 | 92 | 68.7% | $0.0003 | PASS |
 | requests | symbol_read | 9,743 | 2,849 | 6,894 | 70.8% | $0.0207 | PASS |
-| requests | test_output | 43,130 | 42,725 | 405 | 0.9% | $0.0012 | PASS |
+| requests | test_output | 43,200 | 42,795 | 405 | 0.9% | $0.0012 | PASS |
 | requests | multiturn | 59,380 | 9,561 | 49,819 | 83.9% | $0.1495 | PASS |
 | requests | architecture | 46,841 | 180 | 46,661 | 99.6% | $0.14 | PASS |
 | requests | raw_search | 737 | 614 | 123 | 16.7% | $0.0004 | PASS |
 | requests | git_diff | 728 | 704 | 24 | 3.3% | $0.0001 | PASS |
 | requests | write_egress | 6,334 | 37 | 6,297 | 99.4% | $0.0945 | PASS |
+| requests | api_surface | 46,841 | 23,762 | 23,079 | 49.3% | $0.0692 | PASS |
+| requests | kv_cache | 472,751 | 134,748 | 338,003 | 71.5% | $1.014 | FAIL |
+| requests | secret_guard | 153 | 84 | 69 | 45.1% | $0.0002 | PASS |
+| requests | prompt_compaction | 133 | 42 | 91 | 68.4% | $0.0003 | PASS |
 | fastapi | symbol_read | 73,721 | 39,529 | 34,192 | 46.4% | $0.1026 | PASS |
 | fastapi | test_output | 751 | 750 | 1 | 0.1% | $0.0 | FAIL |
 | fastapi | multiturn | 147,442 | 39,529 | 107,913 | 73.2% | $0.3237 | PASS |
@@ -25,6 +34,11 @@
 | fastapi | raw_search | 1,343 | 609 | 734 | 54.7% | $0.0022 | PASS |
 | fastapi | git_diff | 416 | 393 | 23 | 5.5% | $0.0001 | PASS |
 | fastapi | write_egress | 2,258 | 51 | 2,207 | 97.7% | $0.0331 | PASS |
+| fastapi | api_surface | 92,002 | 220,463 | 0 | 0.0% | $0.0 | FAIL |
+| fastapi | kv_cache | 781,038 | 178,835 | 602,203 | 77.1% | $1.8066 | PASS |
+| fastapi | secret_guard | 153 | 82 | 71 | 46.4% | $0.0002 | PASS |
+| fastapi | junk_read | 367,129 | 855 | 366,274 | 99.8% | $1.0988 | PASS |
+| fastapi | prompt_compaction | 131 | 39 | 92 | 70.2% | $0.0003 | PASS |
 | rich | symbol_read | 28,675 | 7,710 | 20,965 | 73.1% | $0.0629 | PASS |
 | rich | test_output | 746 | 385 | 361 | 48.4% | $0.0011 | PASS |
 | rich | multiturn | 80,036 | 12,329 | 67,707 | 84.6% | $0.2031 | PASS |
@@ -32,10 +46,19 @@
 | rich | raw_search | 3,658 | 502 | 3,156 | 86.3% | $0.0095 | PASS |
 | rich | git_diff | 91,307 | 88,133 | 3,174 | 3.5% | $0.0095 | PASS |
 | rich | write_egress | 8,159 | 32 | 8,127 | 99.6% | $0.1219 | PASS |
+| rich | api_surface | 76,172 | 56,399 | 19,773 | 26.0% | $0.0593 | PASS |
+| rich | kv_cache | 846,669 | 199,282 | 647,387 | 76.5% | $1.9422 | PASS |
+| rich | secret_guard | 153 | 82 | 71 | 46.4% | $0.0002 | PASS |
+| rich | junk_read | 128,203 | 2,642 | 125,561 | 97.9% | $0.3767 | PASS |
+| rich | prompt_compaction | 129 | 44 | 85 | 65.9% | $0.0003 | PASS |
 | httpie | symbol_read | 2,933 | 689 | 2,244 | 76.5% | $0.0067 | PASS |
-| httpie | test_output | 20,395 | 20,141 | 254 | 1.2% | $0.0008 | PASS |
+| httpie | test_output | 20,385 | 20,131 | 254 | 1.2% | $0.0008 | PASS |
 | httpie | multiturn | 11,476 | 1,767 | 9,709 | 84.6% | $0.0291 | PASS |
 | httpie | architecture | 19,020 | 165 | 18,855 | 99.1% | $0.0566 | PASS |
 | httpie | raw_search | 9,568 | 462 | 9,106 | 95.2% | $0.0273 | PASS |
 | httpie | git_diff | 131 | 138 | 0 | 0.0% | $0.0 | PASS |
 | httpie | write_egress | 4,020 | 54 | 3,966 | 98.7% | $0.0595 | PASS |
+| httpie | api_surface | 19,020 | 38,997 | 0 | 0.0% | $0.0 | FAIL |
+| httpie | kv_cache | 199,896 | 50,579 | 149,317 | 74.7% | $0.448 | FAIL |
+| httpie | secret_guard | 153 | 82 | 71 | 46.4% | $0.0002 | PASS |
+| httpie | prompt_compaction | 129 | 36 | 93 | 72.1% | $0.0003 | PASS |
