@@ -17,7 +17,7 @@ import urllib.request
 import urllib.error
 from typing import Dict, Any, Optional, Tuple
 
-CURRENT_VERSION = "3.1.0"
+CURRENT_VERSION = "3.1.1"
 CACHE_TTL = 86400  # 24 hours
 # When the cloud is unreachable we must NOT cache the synthesized "up to date"
 # answer for a full day — otherwise an update released right after an outage
