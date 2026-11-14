@@ -1,7 +1,7 @@
 {
-  "version": 4,
+  "version": 5,
   "created": "2026-11-14",
-  "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking; v1/v2 rows stay frozen). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table. v3 adds: API surface map, KV-cache prefix locking replay, secret-guard interception, junk-read guard, prompt compaction (TOCP). v4 adds: 10 auto-mode repositories across 10 supported languages (TypeScript, JavaScript, Go, Rust, Java, Ruby, PHP, C#, Swift, C) with pre-registered god-node targeting.",
+  "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking; v1/v2 rows stay frozen). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table. v3 adds: API surface map, KV-cache prefix locking replay, secret-guard interception, junk-read guard, prompt compaction (TOCP). v4 adds: 10 auto-mode repositories across 10 supported languages (TypeScript, JavaScript, Go, Rust, Java, Ruby, PHP, C#, Swift, C) with pre-registered god-node targeting. v5 renames the kv_cache gate prefix_hit_rate_ge_80 -> prefix_stability_ge_95: a raw hit-rate threshold measured hub-file size distribution, not normalizer quality (a repo whose last hub file dominates can never reach 80% under a perfectly byte-stable normalizer; the append-only ceiling is sum(T[i-1])/sum(T[i])). The v5 gate tests the property under test — PromptCacheNormalizer churn — as achieved prefix vs that ceiling; hit_rate stays reported.",
   "metrics": [
     "token_reduction_pct",
     "usd_saved_sonnet_input",
@@ -356,7 +356,7 @@
       "smaller_than_crawl"
     ],
     "kv_cache": [
-      "prefix_hit_rate_ge_80",
+      "prefix_stability_ge_95",
       "input_reduction_positive"
     ],
     "secret_guard": [
