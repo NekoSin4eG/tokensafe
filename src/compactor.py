@@ -267,7 +267,7 @@ class PromptCompactor:
     )
     FILE_REGEX = re.compile(
         r'(?:'
-        r'(?:[\w\-\./\\@+][\w\-\./\\@+ ]*[\/\\])?[\w\-\.+]+\.(?:' + "|".join(_FILE_EXTS) + r')\b'
+        r'(?:[\w\-\./\\@+（）()][\w\-\./\\@+（）() ]*[\/\\])?[\w\-\.+（）()]+\.(?:' + "|".join(_FILE_EXTS) + r')\b'
         r'|(?:\.env(?:\.[\w\-]+)?|\.gitignore|\.dockerignore|\.prettierrc[\w\.\-]*|\.eslintrc[\w\.\-]*|\.npmignore|\.npmrc|\.yarnrc)'
         r'|\b(?:Dockerfile(?:\.[\w\-]+)?|Makefile|Procfile|Gemfile|Vagrantfile|Containerfile)\b'
         r'|\b(?:README(?:\.md)?|LICENSE|CHANGELOG(?:\.md)?)\b'
@@ -473,8 +473,16 @@ class PromptCompactor:
                         # verbatim in the source prompt, prefer the original's
                         # own first file match (deterministic, no LLM trust).
                         orig_files = cls.FILE_REGEX.findall(raw_text)
-                        if orig_files and (not target_file or target_file not in raw_text):
-                            target_file = cls._trim_path_noise(orig_files[0])
+                        if orig_files:
+                            orig_first = cls._trim_path_noise(orig_files[0])
+                            if not target_file:
+                                target_file = orig_first
+                            elif target_file != orig_first and orig_first.endswith(target_file):
+                                # Partial path: the LLM dropped leading segments
+                                # ('lib/x.py' for 'activesupport/lib/x.py') —
+                                # upgrade to the full original path (QA sweep:
+                                # rails/linkswift).
+                                target_file = orig_first
 
                         # Extract symbol
                         symbol = cls.extract_symbol(raw_text, target_file)

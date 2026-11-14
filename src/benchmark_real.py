@@ -86,10 +86,16 @@ def _gate_all_top_level_defs_present(full_text: str, skel_text: str, ext: str = 
 
 
 def _def_line_for(full_text: str, short: str) -> Optional[str]:
-    """Language-agnostic: the first structural-definition line naming the symbol."""
+    """Language-agnostic: the first line that DEFINES the symbol — the keyword
+    followed by the symbol name as a word. A bare `short in s` also matches
+    annotation usages ('def connect(self, node: "Node", ...)') and picked the
+    WRONG line, failing the signature gate on real repos (QA sweep:
+    diagrams/__init__.py)."""
+    pattern = re.compile(
+        rf"\b(?:{_DEF_KEYWORD_RE.pattern[2:-2]})\s+{re.escape(short)}\b")
     for line in full_text.splitlines():
         s = line.strip()
-        if short in s and _DEF_KEYWORD_RE.search(s):
+        if pattern.search(s):
             return s
     return None
 
@@ -99,7 +105,12 @@ def _gate_signature_line_match(full_text: str, skel_text: str, symbol: str) -> b
     (normalized) in the skeleton."""
     short = symbol.rsplit(".", 1)[-1]
     line = _def_line_for(full_text, short)
-    return bool(line) and line in skel_text
+    if not line:
+        return False
+    # The skeletonizer normalizes signature quotes to single style
+    # (model="large" -> model='large') — compare modulo quote style
+    # (QA sweep: face_recognition/api.py).
+    return line in skel_text or line.replace('"', "'") in skel_text.replace('"', "'")
 
 
 def symbol_read_gates(full_text: str, skel_text: str, symbol: str, ext: str = ".py") -> Dict[str, bool]:

@@ -40,6 +40,45 @@ def parse_tool_arguments(raw: Any) -> Optional[dict]:
         return None
 
 
+def _py_literals_outside_strings(s: str) -> str:
+    """Replaces Python literals (True/False/None) with JSON equivalents ONLY
+    outside string literals; string content is copied verbatim."""
+    out: List[str] = []
+    buf: List[str] = []
+    in_str = False
+    quote = ""
+    escaped = False
+
+    def _flush() -> None:
+        if buf:
+            seg = "".join(buf)
+            buf.clear()
+            seg = re.sub(r"\bTrue\b", "true", seg)
+            seg = re.sub(r"\bFalse\b", "false", seg)
+            seg = re.sub(r"\bNone\b", "null", seg)
+            out.append(seg)
+
+    for ch in s:
+        if in_str:
+            out.append(ch)  # string content is data — copied verbatim
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                in_str = False
+            continue
+        if ch in ('"', "'"):
+            _flush()
+            in_str = True
+            quote = ch
+            out.append(ch)
+            continue
+        buf.append(ch)
+    _flush()
+    return "".join(out)
+
+
 def repair_json(s: str) -> Optional[str]:
     """Best-effort repair of a broken JSON string. Returns repaired text that
     strict json.loads accepts, or None when nothing sensible can be produced."""
@@ -47,9 +86,12 @@ def repair_json(s: str) -> Optional[str]:
     if not s:
         return None
 
-    py_fixed = re.sub(r"\bTrue\b", "true", s)
-    py_fixed = re.sub(r"\bFalse\b", "false", py_fixed)
-    py_fixed = re.sub(r"\bNone\b", "null", py_fixed)
+    # Python-literal replacement is STRING-AWARE: blind re.sub rewrote
+    # 'None'/'True' INSIDE string values — a music-index fixture keyed by
+    # artist names turned "Sixpence None the Richer" into "Sixpence null the
+    # Richer" and fabricated keys (QA sweep). Only literals OUTSIDE strings
+    # are Python dialect.
+    py_fixed = _py_literals_outside_strings(s)
 
     ctrl_fixed = _escape_control_chars_in_strings(py_fixed)
 
