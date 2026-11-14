@@ -134,10 +134,13 @@ class RealRepoBenchmark:
     def __init__(self, registry: Optional[Dict[str, Any]] = None):
         self.reg = registry or load_registry()
         self.pricing = self.reg.get("pricing", PUBLISHED_PIN)
+        # Clone destination; the QA sweep (bench_sweep.py) redirects this to its
+        # own cache dir without touching the published benchmark's cache.
+        self.repos_dir = REPOS_DIR
 
     # -- repo cache ------------------------------------------------------
     def ensure_repo(self, repo: Dict[str, Any]) -> str:
-        dest = os.path.join(REPOS_DIR, repo["key"])
+        dest = os.path.join(self.repos_dir, repo["key"])
         depth = str(repo.get("clone_depth", 1))
         if os.path.isdir(os.path.join(dest, ".git")):
             subprocess.run(["git", "fetch", "--depth", depth, "origin"], cwd=dest,
@@ -145,7 +148,7 @@ class RealRepoBenchmark:
             subprocess.run(["git", "reset", "--hard", "-q", "origin/HEAD"], cwd=dest,
                            capture_output=True, timeout=60)
         else:
-            os.makedirs(REPOS_DIR, exist_ok=True)
+            os.makedirs(self.repos_dir, exist_ok=True)
             subprocess.run(["git", "clone", "--depth", depth, "-q", repo["url"], dest],
                            capture_output=True, timeout=600, check=True)
         return dest
@@ -297,14 +300,33 @@ class RealRepoBenchmark:
             if importlib.util.find_spec("pytest") is None:
                 return {"status": "skipped", "reason": "pytest not installed"}
             py = sys.executable
+        # Local mode runs the suite AS-IS (no injected regression, no deps venv).
+        targets = ["tests/"]
         py_args = [py, "-m", "pytest"]
-        if any(d.startswith("pytest-asyncio") for d in pytest_cfg.get("deps", [])):
-            # pytest-asyncio >=0.24 emits a deprecation warning that repos running
-            # with filterwarnings=error (fastapi) escalate into INTERNALERROR.
-            py_args += ["-o", "asyncio_default_fixture_loop_scope=function"]
+        # pytest-asyncio >=0.24 emits a deprecation warning that repos running
+        # with filterwarnings=error (fastapi) escalate into INTERNALERROR. The
+        # published path knows the deps from the registry; local mode infers
+        # asyncio usage from the repo's own pytest config and only applies the
+        # override when pytest-asyncio is importable in the chosen interpreter.
+        asyncio_hint = False
+        for cfg_name in ("pytest.ini", "pyproject.toml", "setup.cfg", "tox.ini"):
+            cfg_path = os.path.join(root, cfg_name)
+            if os.path.isfile(cfg_path):
+                try:
+                    with open(cfg_path, "r", encoding="utf-8", errors="replace") as f:
+                        if "asyncio" in f.read():
+                            asyncio_hint = True
+                            break
+                except Exception:
+                    pass
+        if asyncio_hint:
+            probe = subprocess.run([py, "-c", "import pytest_asyncio"],
+                                   capture_output=True, timeout=30)
+            if probe.returncode == 0:
+                py_args += ["-o", "asyncio_default_fixture_loop_scope=function"]
         py_args += [*targets, "-q", "--tb=long", "--no-header", "-p", "no:cacheprovider"]
         try:
-            proc = subprocess.run(py_args, cwd=repo_root, capture_output=True, text=True, timeout=300)
+            proc = subprocess.run(py_args, cwd=root, capture_output=True, text=True, timeout=300)
         except subprocess.TimeoutExpired:
             return {"status": "skipped", "reason": "pytest timeout 300s"}
         raw = (proc.stdout or "") + (proc.stderr or "")
