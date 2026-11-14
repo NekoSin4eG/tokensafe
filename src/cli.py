@@ -99,7 +99,7 @@ def _print_help():
     print("  stats / markdown / html        Savings analytics (terminal / .md report / dashboard)")
     print("  status                         One-screen health check: hooks, weekly savings, tier, sync")
     print("  benchmark                      Zero-context-loss benchmark suite (simulated SWE-bench harness)")
-    print("  bench --real [--repo=key]      Measured benchmark on real repos (pre-registered, zero-loss gates)")
+    print("  bench --real [--repo=key|--here]  Measured benchmark on real repos (zero-loss gates)")
     print("  graph / map / skeleton         Architecture graph / API surface / AST skeleton of a file")
     print("  test <prompt>                  Preview TOCP S-expression prompt compaction")
     print("  digest [--send] [--email=...]  Compile (and optionally dispatch) the weekly team digest")
@@ -241,11 +241,17 @@ def main():
         if "--real" in args:
             # Measured real-repo mode: pre-registered scenarios (src/bench_scenarios.json),
             # zero-loss gates, real clones — see src/benchmark_real.py methodology header.
+            # --here: measure the CURRENT repository instead (god-node hot symbols,
+            # suite as-is without mutation — self-measurement, not the published set).
             from src.benchmark_real import RealRepoBenchmark
-            repo_keys = [a.split("=", 1)[1] for a in args if a.startswith("--repo=")]
-            print("\n⚡ Running REAL-REPO benchmark (measured on live clones, pre-registered scenarios)...")
             bench = RealRepoBenchmark()
-            data = bench.run_all(repo_keys or None)
+            if "--here" in args:
+                print("\n⚡ Running REAL-REPO benchmark on the CURRENT repository (measured, zero-loss gates)...")
+                data = bench.run_local(os.getcwd())
+            else:
+                repo_keys = [a.split("=", 1)[1] for a in args if a.startswith("--repo=")]
+                print("\n⚡ Running REAL-REPO benchmark (measured on live clones, pre-registered scenarios)...")
+                data = bench.run_all(repo_keys or None)
             print()
             print(bench.render_markdown(data))
             out = bench.export(data)
