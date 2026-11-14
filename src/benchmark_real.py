@@ -442,7 +442,7 @@ class RealRepoBenchmark:
         if not pattern:
             return {"status": "skipped", "reason": "no pattern pre-registered"}
         proc = subprocess.run(["git", "grep", "-n", pattern, "--", search_dir],
-                              cwd=root, capture_output=True, text=True, timeout=120)
+                              cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
         raw_lines = [ln for ln in (proc.stdout or "").splitlines() if ln.strip()]
         if not raw_lines:
             return {"status": "skipped", "reason": f"no matches for '{pattern}'"}
@@ -474,7 +474,7 @@ class RealRepoBenchmark:
 
     def measure_git_diff(self, root: str) -> Dict[str, Any]:
         count = subprocess.run(["git", "rev-list", "--count", "HEAD"], cwd=root,
-                               capture_output=True, text=True, timeout=60)
+                               capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
         try:
             if int((count.stdout or "0").strip() or 0) < 2:
                 return {"status": "skipped", "reason": "insufficient history for git diff"}
@@ -707,7 +707,7 @@ class RealRepoBenchmark:
             return {"status": "skipped", "reason": f"{junk} ({len(full_text.splitlines())} lines) is within the {cap_lines}-line cap — nothing to save"}
         if rewritten:
             capped = subprocess.run(rewritten, shell=True, cwd=root,
-                                    capture_output=True, text=True, timeout=60)
+                                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
             capped_text = capped.stdout or ""
             note = f"rewritten: {rewritten}"
         else:
