@@ -1,7 +1,7 @@
 {
-  "version": 3,
+  "version": 4,
   "created": "2026-11-14",
-  "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking; v1/v2 rows stay frozen). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table. v3 adds: API surface map, KV-cache prefix locking replay, secret-guard interception, junk-read guard, prompt compaction (TOCP).",
+  "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking; v1/v2 rows stay frozen). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table. v3 adds: API surface map, KV-cache prefix locking replay, secret-guard interception, junk-read guard, prompt compaction (TOCP). v4 adds: 10 auto-mode repositories across 10 supported languages (TypeScript, JavaScript, Go, Rust, Java, Ruby, PHP, C#, Swift, C) with pre-registered god-node targeting.",
   "metrics": [
     "token_reduction_pct",
     "usd_saved_sonnet_input",
