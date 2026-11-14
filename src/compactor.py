@@ -267,7 +267,7 @@ class PromptCompactor:
     )
     FILE_REGEX = re.compile(
         r'(?:'
-        r'(?:[\w\-\./\\@+（）()][\w\-\./\\@+（）() ]*[\/\\])?[\w\-\.+（）()]+\.(?:' + "|".join(_FILE_EXTS) + r')\b'
+        r'(?:[\w\-\./\\@+（）()][\w\-\./\\@+（）() ]*[\/\\])?[\w\-\.+（）()@]+\.(?:' + "|".join(_FILE_EXTS) + r')\b'
         r'|(?:\.env(?:\.[\w\-]+)?|\.gitignore|\.dockerignore|\.prettierrc[\w\.\-]*|\.eslintrc[\w\.\-]*|\.npmignore|\.npmrc|\.yarnrc)'
         r'|\b(?:Dockerfile(?:\.[\w\-]+)?|Makefile|Procfile|Gemfile|Vagrantfile|Containerfile)\b'
         r'|\b(?:README(?:\.md)?|LICENSE|CHANGELOG(?:\.md)?)\b'
