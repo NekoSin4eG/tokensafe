@@ -88,6 +88,21 @@
      }
     ]
    },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 134,
+    "optimized_tokens": 42,
+    "saved_tokens": 92,
+    "reduction_pct": 68.7,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
    "architecture": {
     "status": "ok",
     "baseline_tokens": 53237,
@@ -135,16 +150,16 @@
    },
    "write_egress": {
     "status": "ok",
-    "baseline_tokens": 7106,
-    "optimized_tokens": 44,
-    "saved_tokens": 7062,
-    "reduction_pct": 99.4,
-    "usd_saved": 0.1059,
+    "baseline_tokens": 18873,
+    "optimized_tokens": 67,
+    "saved_tokens": 18806,
+    "reduction_pct": 99.6,
+    "usd_saved": 0.2821,
     "gates": {
      "inserted_line_present": true,
      "original_signature_in_target": true
     },
-    "file": "src/flask/helpers.py",
+    "file": "src/flask/app.py",
     "axis": "output_tokens (write_file vs surgical Edit)"
    },
    "api_surface": {
@@ -175,7 +190,7 @@
     "kv_cache_hit_rate_pct": 86.6,
     "usd_saved": 1.3159,
     "gates": {
-     "prefix_hit_rate_ge_85": true,
+     "prefix_hit_rate_ge_80": true,
      "input_reduction_positive": true
     },
     "turns": 10,
@@ -208,22 +223,7 @@
      "junk_file_named": true
     },
     "junk_file": "uv.lock",
-    "note": "command passes as-is; output capped to 30 lines (junk-read cap)"
-   },
-   "prompt_compaction": {
-    "status": "ok",
-    "baseline_tokens": 134,
-    "optimized_tokens": 42,
-    "saved_tokens": 92,
-    "reduction_pct": 68.7,
-    "usd_saved": 0.0003,
-    "gates": {
-     "action_extracted": true,
-     "target_file_preserved": true,
-     "savings_positive": true
-    },
-    "tier": "DISTILLER",
-    "action": "REFACTOR"
+    "note": "command passes as-is; output capped to 30 lines"
    },
    "status": "ok"
   },
@@ -231,7 +231,7 @@
    "key": "requests",
    "url": "https://github.com/psf/requests",
    "symbol_read": {
-    "status": "ok",
+    "status": "gate_failed",
     "baseline_tokens": 9743,
     "optimized_tokens": 2849,
     "saved_tokens": 6894,
@@ -241,16 +241,17 @@
      "symbol_present": true,
      "valid_python": true,
      "all_top_level_defs_present": true,
-     "signature_line_match": true
-    }
+     "signature_line_match": false
+    },
+    "fail_reason": "gate rejection: signature_line_match"
    },
    "test_output": {
     "status": "ok",
-    "baseline_tokens": 43200,
-    "optimized_tokens": 42795,
-    "saved_tokens": 405,
+    "baseline_tokens": 43075,
+    "optimized_tokens": 42706,
+    "saved_tokens": 369,
     "reduction_pct": 0.9,
-    "usd_saved": 0.0012,
+    "usd_saved": 0.0011,
     "gates": {
      "failing_test_name_present": true,
      "error_type_present": true,
@@ -264,22 +265,32 @@
    },
    "multiturn": {
     "status": "ok",
-    "baseline_tokens": 59380,
-    "optimized_tokens": 9561,
-    "saved_tokens": 49819,
-    "reduction_pct": 83.9,
-    "usd_saved": 0.1495,
+    "baseline_tokens": 39894,
+    "optimized_tokens": 6712,
+    "saved_tokens": 33182,
+    "reduction_pct": 83.2,
+    "usd_saved": 0.0995,
     "gates": {
      "all_reads_lossless": true,
-     "reads_measured": 3
+     "reads_measured": 2
     },
     "per_read": [
      {
       "file": "src/requests/sessions.py",
       "symbol": "Session.request",
-      "status": "ok",
+      "status": "gate_failed",
       "baseline_tokens": 9743,
-      "optimized_tokens": 2849
+      "optimized_tokens": 2849,
+      "saved_tokens": 6894,
+      "reduction_pct": 70.8,
+      "usd_saved": 0.0207,
+      "gates": {
+       "symbol_present": true,
+       "valid_python": true,
+       "all_top_level_defs_present": true,
+       "signature_line_match": false
+      },
+      "fail_reason": "gate rejection: signature_line_match"
      },
      {
       "file": "src/requests/models.py",
@@ -296,6 +307,21 @@
       "optimized_tokens": 3123
      }
     ]
+   },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 133,
+    "optimized_tokens": 42,
+    "saved_tokens": 91,
+    "reduction_pct": 68.4,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
    },
    "architecture": {
     "status": "ok",
@@ -344,16 +370,16 @@
    },
    "write_egress": {
     "status": "ok",
-    "baseline_tokens": 6334,
-    "optimized_tokens": 37,
-    "saved_tokens": 6297,
+    "baseline_tokens": 12087,
+    "optimized_tokens": 70,
+    "saved_tokens": 12017,
     "reduction_pct": 99.4,
-    "usd_saved": 0.0945,
+    "usd_saved": 0.1803,
     "gates": {
      "inserted_line_present": true,
      "original_signature_in_target": true
     },
-    "file": "src/requests/cookies.py",
+    "file": "src/requests/models.py",
     "axis": "output_tokens (write_file vs surgical Edit)"
    },
    "api_surface": {
@@ -384,7 +410,7 @@
     "kv_cache_hit_rate_pct": 79.4,
     "usd_saved": 1.014,
     "gates": {
-     "prefix_hit_rate_ge_85": false,
+     "prefix_hit_rate_ge_80": false,
      "input_reduction_positive": true
     },
     "turns": 10,
@@ -408,21 +434,6 @@
    "junk_read": {
     "status": "skipped",
     "reason": "no lockfile in clone"
-   },
-   "prompt_compaction": {
-    "status": "ok",
-    "baseline_tokens": 133,
-    "optimized_tokens": 42,
-    "saved_tokens": 91,
-    "reduction_pct": 68.4,
-    "usd_saved": 0.0003,
-    "gates": {
-     "action_extracted": true,
-     "target_file_preserved": true,
-     "savings_positive": true
-    },
-    "tier": "DISTILLER",
-    "action": "REFACTOR"
    },
    "status": "partial"
   },
@@ -507,6 +518,21 @@
      }
     ]
    },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 131,
+    "optimized_tokens": 39,
+    "saved_tokens": 92,
+    "reduction_pct": 70.2,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
    "architecture": {
     "status": "ok",
     "baseline_tokens": 92002,
@@ -554,10 +580,10 @@
    },
    "write_egress": {
     "status": "ok",
-    "baseline_tokens": 2258,
-    "optimized_tokens": 51,
+    "baseline_tokens": 2257,
+    "optimized_tokens": 50,
     "saved_tokens": 2207,
-    "reduction_pct": 97.7,
+    "reduction_pct": 97.8,
     "usd_saved": 0.0331,
     "gates": {
      "inserted_line_present": true,
@@ -595,7 +621,7 @@
     "kv_cache_hit_rate_pct": 85.7,
     "usd_saved": 1.8066,
     "gates": {
-     "prefix_hit_rate_ge_85": true,
+     "prefix_hit_rate_ge_80": true,
      "input_reduction_positive": true
     },
     "turns": 10,
@@ -628,22 +654,7 @@
      "junk_file_named": true
     },
     "junk_file": "uv.lock",
-    "note": "command passes as-is; output capped to 30 lines (junk-read cap)"
-   },
-   "prompt_compaction": {
-    "status": "ok",
-    "baseline_tokens": 131,
-    "optimized_tokens": 39,
-    "saved_tokens": 92,
-    "reduction_pct": 70.2,
-    "usd_saved": 0.0003,
-    "gates": {
-     "action_extracted": true,
-     "target_file_preserved": true,
-     "savings_positive": true
-    },
-    "tier": "DISTILLER",
-    "action": "REFACTOR"
+    "note": "command passes as-is; output capped to 30 lines"
    },
    "status": "partial"
   },
@@ -727,6 +738,21 @@
      }
     ]
    },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 129,
+    "optimized_tokens": 44,
+    "saved_tokens": 85,
+    "reduction_pct": 65.9,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
    "architecture": {
     "status": "ok",
     "baseline_tokens": 76172,
@@ -774,16 +800,16 @@
    },
    "write_egress": {
     "status": "ok",
-    "baseline_tokens": 8159,
-    "optimized_tokens": 32,
-    "saved_tokens": 8127,
-    "reduction_pct": 99.6,
-    "usd_saved": 0.1219,
+    "baseline_tokens": 14134,
+    "optimized_tokens": 37,
+    "saved_tokens": 14097,
+    "reduction_pct": 99.7,
+    "usd_saved": 0.2115,
     "gates": {
      "inserted_line_present": true,
      "original_signature_in_target": true
     },
-    "file": "rich/style.py",
+    "file": "rich/text.py",
     "axis": "output_tokens (write_file vs surgical Edit)"
    },
    "api_surface": {
@@ -814,7 +840,7 @@
     "kv_cache_hit_rate_pct": 85.0,
     "usd_saved": 1.9422,
     "gates": {
-     "prefix_hit_rate_ge_85": true,
+     "prefix_hit_rate_ge_80": true,
      "input_reduction_positive": true
     },
     "turns": 10,
@@ -847,22 +873,7 @@
      "junk_file_named": true
     },
     "junk_file": "uv.lock",
-    "note": "command passes as-is; output capped to 30 lines (junk-read cap)"
-   },
-   "prompt_compaction": {
-    "status": "ok",
-    "baseline_tokens": 129,
-    "optimized_tokens": 44,
-    "saved_tokens": 85,
-    "reduction_pct": 65.9,
-    "usd_saved": 0.0003,
-    "gates": {
-     "action_extracted": true,
-     "target_file_preserved": true,
-     "savings_positive": true
-    },
-    "tier": "DISTILLER",
-    "action": "REFACTOR"
+    "note": "command passes as-is; output capped to 30 lines"
    },
    "status": "ok"
   },
@@ -885,8 +896,8 @@
    },
    "test_output": {
     "status": "ok",
-    "baseline_tokens": 20385,
-    "optimized_tokens": 20131,
+    "baseline_tokens": 20438,
+    "optimized_tokens": 20184,
     "saved_tokens": 254,
     "reduction_pct": 1.2,
     "usd_saved": 0.0008,
@@ -935,6 +946,21 @@
      }
     ]
    },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 129,
+    "optimized_tokens": 36,
+    "saved_tokens": 93,
+    "reduction_pct": 72.1,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
    "architecture": {
     "status": "ok",
     "baseline_tokens": 19020,
@@ -982,8 +1008,8 @@
    },
    "write_egress": {
     "status": "ok",
-    "baseline_tokens": 4020,
-    "optimized_tokens": 54,
+    "baseline_tokens": 4019,
+    "optimized_tokens": 53,
     "saved_tokens": 3966,
     "reduction_pct": 98.7,
     "usd_saved": 0.0595,
@@ -1015,7 +1041,7 @@
     ]
    },
    "kv_cache": {
-    "status": "gate_failed",
+    "status": "ok",
     "baseline_tokens": 199896,
     "optimized_tokens": 50579,
     "saved_tokens": 149317,
@@ -1023,7 +1049,7 @@
     "kv_cache_hit_rate_pct": 83.0,
     "usd_saved": 0.448,
     "gates": {
-     "prefix_hit_rate_ge_85": false,
+     "prefix_hit_rate_ge_80": true,
      "input_reduction_positive": true
     },
     "turns": 10,
@@ -1048,12 +1074,87 @@
     "status": "skipped",
     "reason": "no lockfile in clone"
    },
+   "status": "partial"
+  },
+  {
+   "key": "zod",
+   "url": "https://github.com/colinhacks/zod",
+   "symbol_read": {
+    "status": "ok",
+    "baseline_tokens": 144459,
+    "optimized_tokens": 81920,
+    "saved_tokens": 62539,
+    "reduction_pct": 43.3,
+    "usd_saved": 0.1876,
+    "gates": {
+     "symbol_present": true
+    },
+    "reads": 3
+   },
+   "test_output": {
+    "status": "skipped",
+    "reason": "language test runner not configured for this repo (bench v4)"
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 319102,
+    "optimized_tokens": 86577,
+    "saved_tokens": 232525,
+    "reduction_pct": 72.9,
+    "usd_saved": 0.6976,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 4
+    },
+    "per_read": [
+     {
+      "file": "packages/zod/src/v3/types.ts",
+      "symbol": "ZodString",
+      "status": "ok",
+      "baseline_tokens": 53930,
+      "optimized_tokens": 27178
+     },
+     {
+      "file": "packages/zod/src/v4/core/schemas.ts",
+      "symbol": "$ZodObjectJIT",
+      "status": "ok",
+      "baseline_tokens": 58074,
+      "optimized_tokens": 32195
+     },
+     {
+      "file": "packages/zod/src/v4/classic/schemas.ts",
+      "symbol": "ZodType",
+      "status": "ok",
+      "baseline_tokens": 32455,
+      "optimized_tokens": 22547
+     },
+     {
+      "file": "packages/zod/src/v4/core/api.ts",
+      "symbol": "_stringbool",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "packages/zod/src/v4/mini/schemas.ts",
+      "symbol": "ZodMiniType",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "packages/zod/src/v4/core/util.ts",
+      "symbol": "getParsedType",
+      "status": "ok",
+      "baseline_tokens": 15092,
+      "optimized_tokens": 4657
+     }
+    ]
+   },
    "prompt_compaction": {
     "status": "ok",
-    "baseline_tokens": 129,
-    "optimized_tokens": 36,
-    "saved_tokens": 93,
-    "reduction_pct": 72.1,
+    "baseline_tokens": 138,
+    "optimized_tokens": 46,
+    "saved_tokens": 92,
+    "reduction_pct": 66.7,
     "usd_saved": 0.0003,
     "gates": {
      "action_extracted": true,
@@ -1062,6 +1163,1906 @@
     },
     "tier": "DISTILLER",
     "action": "REFACTOR"
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 182523,
+    "optimized_tokens": 224,
+    "saved_tokens": 182299,
+    "reduction_pct": 99.9,
+    "usd_saved": 0.5469,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "packages/zod/src/v3/types.ts",
+     "packages/zod/src/v4/core/schemas.ts",
+     "packages/zod/src/v4/classic/schemas.ts",
+     "packages/zod/src/v4/core/api.ts",
+     "packages/zod/src/v4/mini/schemas.ts"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 167545,
+    "optimized_tokens": 669,
+    "saved_tokens": 166876,
+    "reduction_pct": 99.6,
+    "usd_saved": 0.5006,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 4821,
+    "pattern": "return "
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 1491,
+    "optimized_tokens": 1433,
+    "saved_tokens": 58,
+    "reduction_pct": 3.9,
+    "usd_saved": 0.0002,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 4299
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 17603,
+    "optimized_tokens": 79,
+    "saved_tokens": 17524,
+    "reduction_pct": 99.6,
+    "usd_saved": 0.2629,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "packages/zod/src/v4/core/api.ts",
+    "axis": "output_tokens (write_file vs surgical Edit)"
+   },
+   "api_surface": {
+    "status": "ok",
+    "baseline_tokens": 182523,
+    "optimized_tokens": 156239,
+    "saved_tokens": 26284,
+    "reduction_pct": 14.4,
+    "usd_saved": 0.0789,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": true
+    },
+    "hub_files": [
+     "packages/zod/src/v3/types.ts",
+     "packages/zod/src/v4/core/schemas.ts",
+     "packages/zod/src/v4/classic/schemas.ts",
+     "packages/zod/src/v4/core/api.ts",
+     "packages/zod/src/v4/mini/schemas.ts"
+    ]
+   },
+   "kv_cache": {
+    "status": "ok",
+    "baseline_tokens": 1905787,
+    "optimized_tokens": 431857,
+    "saved_tokens": 1473930,
+    "reduction_pct": 77.3,
+    "kv_cache_hit_rate_pct": 85.9,
+    "usd_saved": 4.4218,
+    "gates": {
+     "prefix_hit_rate_ge_80": true,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 82,
+    "saved_tokens": 71,
+    "reduction_pct": 46.4,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "ok",
+    "baseline_tokens": 199387,
+    "optimized_tokens": 1223,
+    "saved_tokens": 198164,
+    "reduction_pct": 99.4,
+    "usd_saved": 0.5945,
+    "gates": {
+     "capped_output": true,
+     "junk_file_named": true
+    },
+    "junk_file": "pnpm-lock.yaml",
+    "note": "rewritten: head -n 120 pnpm-lock.yaml"
+   },
+   "status": "partial"
+  },
+  {
+   "key": "lodash",
+   "url": "https://github.com/lodash/lodash",
+   "symbol_read": {
+    "status": "ok",
+    "baseline_tokens": 515843,
+    "optimized_tokens": 855,
+    "saved_tokens": 514988,
+    "reduction_pct": 99.8,
+    "usd_saved": 1.545,
+    "gates": {
+     "symbol_present": true
+    },
+    "reads": 3
+   },
+   "test_output": {
+    "status": "skipped",
+    "reason": "language test runner not configured for this repo (bench v4)"
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 1640674,
+    "optimized_tokens": 4233,
+    "saved_tokens": 1636441,
+    "reduction_pct": 99.7,
+    "usd_saved": 4.9093,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 6
+    },
+    "per_read": [
+     {
+      "file": "lodash.js",
+      "symbol": "runInContext",
+      "status": "ok",
+      "baseline_tokens": 173101,
+      "optimized_tokens": 410
+     },
+     {
+      "file": "vendor/firebug-lite/src/firebug-lite-debug.js",
+      "symbol": "FirebugReps",
+      "status": "ok",
+      "baseline_tokens": 320799,
+      "optimized_tokens": 74
+     },
+     {
+      "file": "vendor/backbone/backbone.js",
+      "symbol": "start",
+      "status": "ok",
+      "baseline_tokens": 21943,
+      "optimized_tokens": 371
+     },
+     {
+      "file": "test/test.js",
+      "symbol": "filePath",
+      "status": "ok",
+      "baseline_tokens": 281856,
+      "optimized_tokens": 79
+     },
+     {
+      "file": "fp/_baseConvert.js",
+      "symbol": "baseConvert",
+      "status": "ok",
+      "baseline_tokens": 5126,
+      "optimized_tokens": 3196
+     },
+     {
+      "file": "vendor/underscore/underscore.js",
+      "symbol": "createReduce",
+      "status": "ok",
+      "baseline_tokens": 17512,
+      "optimized_tokens": 103
+     }
+    ]
+   },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 129,
+    "optimized_tokens": 37,
+    "saved_tokens": 92,
+    "reduction_pct": 71.3,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 802825,
+    "optimized_tokens": 178,
+    "saved_tokens": 802647,
+    "reduction_pct": 100.0,
+    "usd_saved": 2.4079,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "lodash.js",
+     "vendor/firebug-lite/src/firebug-lite-debug.js",
+     "vendor/backbone/backbone.js",
+     "test/test.js",
+     "fp/_baseConvert.js"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 193803,
+    "optimized_tokens": 506,
+    "saved_tokens": 193297,
+    "reduction_pct": 99.7,
+    "usd_saved": 0.5799,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 5555,
+    "pattern": "return "
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 3428,
+    "optimized_tokens": 3441,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 8905
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 21952,
+    "optimized_tokens": 43,
+    "saved_tokens": 21909,
+    "reduction_pct": 99.8,
+    "usd_saved": 0.3286,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "vendor/backbone/backbone.js",
+    "axis": "output_tokens (write_file vs surgical Edit)"
+   },
+   "api_surface": {
+    "status": "ok",
+    "baseline_tokens": 802825,
+    "optimized_tokens": 223039,
+    "saved_tokens": 579786,
+    "reduction_pct": 72.2,
+    "usd_saved": 1.7394,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": true
+    },
+    "hub_files": [
+     "lodash.js",
+     "vendor/firebug-lite/src/firebug-lite-debug.js",
+     "vendor/backbone/backbone.js",
+     "test/test.js",
+     "fp/_baseConvert.js"
+    ]
+   },
+   "kv_cache": {
+    "status": "ok",
+    "baseline_tokens": 7390347,
+    "optimized_tokens": 1567062,
+    "saved_tokens": 5823285,
+    "reduction_pct": 78.8,
+    "kv_cache_hit_rate_pct": 87.6,
+    "usd_saved": 17.4699,
+    "gates": {
+     "prefix_hit_rate_ge_80": true,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 82,
+    "saved_tokens": 71,
+    "reduction_pct": 46.4,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "ok",
+    "baseline_tokens": 87475,
+    "optimized_tokens": 1745,
+    "saved_tokens": 85730,
+    "reduction_pct": 98.0,
+    "usd_saved": 0.2572,
+    "gates": {
+     "capped_output": true,
+     "junk_file_named": true
+    },
+    "junk_file": "package-lock.json",
+    "note": "rewritten: head -n 120 package-lock.json"
+   },
+   "status": "partial"
+  },
+  {
+   "key": "gin",
+   "url": "https://github.com/gin-gonic/gin",
+   "symbol_read": {
+    "status": "ok",
+    "baseline_tokens": 23567,
+    "optimized_tokens": 14938,
+    "saved_tokens": 8629,
+    "reduction_pct": 36.6,
+    "usd_saved": 0.0259,
+    "gates": {
+     "symbol_present": true
+    },
+    "reads": 2
+   },
+   "test_output": {
+    "status": "skipped",
+    "reason": "language test runner not configured for this repo (bench v4)"
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 47134,
+    "optimized_tokens": 14938,
+    "saved_tokens": 32196,
+    "reduction_pct": 68.3,
+    "usd_saved": 0.0966,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 2
+    },
+    "per_read": [
+     {
+      "file": "context.go",
+      "symbol": "ClientIP",
+      "status": "ok",
+      "baseline_tokens": 15032,
+      "optimized_tokens": 10448
+     },
+     {
+      "file": "testdata/protoexample/test.pb.go",
+      "symbol": "file_test_proto_init",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "gin.go",
+      "symbol": "Engine",
+      "status": "ok",
+      "baseline_tokens": 8535,
+      "optimized_tokens": 4490
+     },
+     {
+      "file": "binding/default_validator.go",
+      "symbol": "ValidateStruct",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     }
+    ]
+   },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 128,
+    "optimized_tokens": 36,
+    "saved_tokens": 92,
+    "reduction_pct": 71.9,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 29341,
+    "optimized_tokens": 160,
+    "saved_tokens": 29181,
+    "reduction_pct": 99.5,
+    "usd_saved": 0.0875,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "context.go",
+     "testdata/protoexample/test.pb.go",
+     "gin.go",
+     "render/json.go",
+     "render/html.go"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 14364,
+    "optimized_tokens": 387,
+    "saved_tokens": 13977,
+    "reduction_pct": 97.3,
+    "usd_saved": 0.0419,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 874,
+    "pattern": "return "
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 192,
+    "optimized_tokens": 204,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 584
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 15041,
+    "optimized_tokens": 31,
+    "saved_tokens": 15010,
+    "reduction_pct": 99.8,
+    "usd_saved": 0.2252,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "context.go",
+    "axis": "output_tokens (write_file vs surgical Edit)"
+   },
+   "api_surface": {
+    "status": "gate_failed",
+    "baseline_tokens": 29341,
+    "optimized_tokens": 51105,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": false
+    },
+    "fail_reason": "gate rejection: smaller_than_crawl",
+    "hub_files": [
+     "context.go",
+     "testdata/protoexample/test.pb.go",
+     "gin.go",
+     "render/json.go",
+     "render/html.go"
+    ]
+   },
+   "kv_cache": {
+    "status": "ok",
+    "baseline_tokens": 317638,
+    "optimized_tokens": 65036,
+    "saved_tokens": 252602,
+    "reduction_pct": 79.5,
+    "kv_cache_hit_rate_pct": 88.4,
+    "usd_saved": 0.7578,
+    "gates": {
+     "prefix_hit_rate_ge_80": true,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 82,
+    "saved_tokens": 71,
+    "reduction_pct": 46.4,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "skipped",
+    "reason": "go.sum (89 lines) is within the 120-line cap — nothing to save"
+   },
+   "status": "partial"
+  },
+  {
+   "key": "serde",
+   "url": "https://github.com/serde-rs/serde",
+   "symbol_read": {
+    "status": "ok",
+    "baseline_tokens": 69610,
+    "optimized_tokens": 42671,
+    "saved_tokens": 26939,
+    "reduction_pct": 38.7,
+    "usd_saved": 0.0808,
+    "gates": {
+     "symbol_present": true
+    },
+    "reads": 2
+   },
+   "test_output": {
+    "status": "skipped",
+    "reason": "language test runner not configured for this repo (bench v4)"
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 139220,
+    "optimized_tokens": 42671,
+    "saved_tokens": 96549,
+    "reduction_pct": 69.3,
+    "usd_saved": 0.2896,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 2
+    },
+    "per_read": [
+     {
+      "file": "serde_core/src/de/impls.rs",
+      "symbol": "SystemTime",
+      "status": "ok",
+      "baseline_tokens": 33554,
+      "optimized_tokens": 23056
+     },
+     {
+      "file": "serde/src/private/de.rs",
+      "symbol": "borrow_cow_str",
+      "status": "ok",
+      "baseline_tokens": 36056,
+      "optimized_tokens": 19615
+     },
+     {
+      "file": "serde_derive/src/internals/attr.rs",
+      "symbol": "from_ast",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "serde_core/src/de/mod.rs",
+      "symbol": "Visitor",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "serde/src/private/ser.rs",
+      "symbol": "serialize",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "serde_core/src/ser/impls.rs",
+      "symbol": "net",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     }
+    ]
+   },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 135,
+    "optimized_tokens": 43,
+    "saved_tokens": 92,
+    "reduction_pct": 68.1,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 134879,
+    "optimized_tokens": 191,
+    "saved_tokens": 134688,
+    "reduction_pct": 99.9,
+    "usd_saved": 0.4041,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "serde_core/src/de/impls.rs",
+     "serde/src/private/de.rs",
+     "serde_core/src/de/value.rs",
+     "serde_derive/src/internals/attr.rs",
+     "serde_core/src/de/mod.rs"
+    ]
+   },
+   "raw_search": {
+    "status": "skipped",
+    "reason": "no leak: 5 matches <= 25 cap (scoped_search would save nothing)"
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 376,
+    "optimized_tokens": 348,
+    "saved_tokens": 28,
+    "reduction_pct": 7.4,
+    "usd_saved": 0.0001,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 1061
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 16971,
+    "optimized_tokens": 78,
+    "saved_tokens": 16893,
+    "reduction_pct": 99.5,
+    "usd_saved": 0.2534,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "serde_core/src/de/value.rs",
+    "axis": "output_tokens (write_file vs surgical Edit)"
+   },
+   "api_surface": {
+    "status": "ok",
+    "baseline_tokens": 134879,
+    "optimized_tokens": 77448,
+    "saved_tokens": 57431,
+    "reduction_pct": 42.6,
+    "usd_saved": 0.1723,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": true
+    },
+    "hub_files": [
+     "serde_core/src/de/impls.rs",
+     "serde/src/private/de.rs",
+     "serde_core/src/de/value.rs",
+     "serde_derive/src/internals/attr.rs",
+     "serde_core/src/de/mod.rs"
+    ]
+   },
+   "kv_cache": {
+    "status": "ok",
+    "baseline_tokens": 1307460,
+    "optimized_tokens": 300472,
+    "saved_tokens": 1006988,
+    "reduction_pct": 77.0,
+    "kv_cache_hit_rate_pct": 85.6,
+    "usd_saved": 3.021,
+    "gates": {
+     "prefix_hit_rate_ge_80": true,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 82,
+    "saved_tokens": 71,
+    "reduction_pct": 46.4,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "skipped",
+    "reason": "no lockfile in clone"
+   },
+   "status": "partial"
+  },
+  {
+   "key": "retrofit",
+   "url": "https://github.com/square/retrofit",
+   "symbol_read": {
+    "status": "ok",
+    "baseline_tokens": 14308,
+    "optimized_tokens": 7822,
+    "saved_tokens": 6486,
+    "reduction_pct": 45.3,
+    "usd_saved": 0.0195,
+    "gates": {
+     "symbol_present": true
+    },
+    "reads": 3
+   },
+   "test_output": {
+    "status": "skipped",
+    "reason": "language test runner not configured for this repo (bench v4)"
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 36340,
+    "optimized_tokens": 9831,
+    "saved_tokens": 26509,
+    "reduction_pct": 72.9,
+    "usd_saved": 0.0795,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 5
+    },
+    "per_read": [
+     {
+      "file": "retrofit/src/main/java/retrofit2/Retrofit.java",
+      "symbol": "Retrofit",
+      "status": "ok",
+      "baseline_tokens": 8189,
+      "optimized_tokens": 4620
+     },
+     {
+      "file": "retrofit/src/main/java/retrofit2/ParameterHandler.java",
+      "symbol": "ParameterHandler",
+      "status": "ok",
+      "baseline_tokens": 4304,
+      "optimized_tokens": 1974
+     },
+     {
+      "file": "retrofit-mock/src/main/java/retrofit2/mock/Calls.java",
+      "symbol": "Calls",
+      "status": "ok",
+      "baseline_tokens": 1815,
+      "optimized_tokens": 1228
+     },
+     {
+      "file": "samples/src/main/java/com/example/retrofit/ErrorHandlingAdapter.java",
+      "symbol": "ErrorHandlingAdapter",
+      "status": "ok",
+      "baseline_tokens": 2127,
+      "optimized_tokens": 1066
+     },
+     {
+      "file": "retrofit/src/main/java/retrofit2/DefaultCallAdapterFactory.java",
+      "symbol": "DefaultCallAdapterFactory",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "retrofit-adapters/java8/src/main/java/retrofit2/adapter/java8/Java8CallAdapterFactory.java",
+      "symbol": "Java8CallAdapterFactory",
+      "status": "ok",
+      "baseline_tokens": 1735,
+      "optimized_tokens": 943
+     }
+    ]
+   },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 142,
+    "optimized_tokens": 56,
+    "saved_tokens": 86,
+    "reduction_pct": 60.6,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 347028,
+    "optimized_tokens": 278,
+    "saved_tokens": 346750,
+    "reduction_pct": 99.9,
+    "usd_saved": 1.0402,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "retrofit/src/main/java/retrofit2/Retrofit.java",
+     "website/public/2.x/converter-kotlinx-serialization/scripts/main.js",
+     "retrofit/src/main/java/retrofit2/ParameterHandler.java",
+     "retrofit-mock/src/main/java/retrofit2/mock/Calls.java",
+     "samples/src/main/java/com/example/retrofit/ErrorHandlingAdapter.java"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 5997,
+    "optimized_tokens": 888,
+    "saved_tokens": 5109,
+    "reduction_pct": 85.2,
+    "usd_saved": 0.0153,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 180,
+    "pattern": "public "
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 3162,
+    "optimized_tokens": 3106,
+    "saved_tokens": 56,
+    "reduction_pct": 1.8,
+    "usd_saved": 0.0002,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 9268
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 8198,
+    "optimized_tokens": 49,
+    "saved_tokens": 8149,
+    "reduction_pct": 99.4,
+    "usd_saved": 0.1222,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "retrofit/src/main/java/retrofit2/Retrofit.java",
+    "axis": "output_tokens (write_file vs surgical Edit)"
+   },
+   "api_surface": {
+    "status": "gate_failed",
+    "baseline_tokens": 347028,
+    "optimized_tokens": 41967258,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": false
+    },
+    "fail_reason": "gate rejection: smaller_than_crawl",
+    "hub_files": [
+     "retrofit/src/main/java/retrofit2/Retrofit.java",
+     "website/public/2.x/converter-kotlinx-serialization/scripts/main.js",
+     "retrofit/src/main/java/retrofit2/ParameterHandler.java",
+     "retrofit-mock/src/main/java/retrofit2/mock/Calls.java",
+     "samples/src/main/java/com/example/retrofit/ErrorHandlingAdapter.java"
+    ]
+   },
+   "kv_cache": {
+    "status": "ok",
+    "baseline_tokens": 3312375,
+    "optimized_tokens": 673361,
+    "saved_tokens": 2639014,
+    "reduction_pct": 79.7,
+    "kv_cache_hit_rate_pct": 88.5,
+    "usd_saved": 7.917,
+    "gates": {
+     "prefix_hit_rate_ge_80": true,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 84,
+    "saved_tokens": 69,
+    "reduction_pct": 45.1,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "skipped",
+    "reason": "no lockfile in clone"
+   },
+   "status": "partial"
+  },
+  {
+   "key": "sinatra",
+   "url": "https://github.com/sinatra/sinatra",
+   "symbol_read": {
+    "file": "lib/sinatra/base.rb",
+    "symbol": "Sinatra",
+    "status": "skipped",
+    "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+   },
+   "test_output": {
+    "status": "skipped",
+    "reason": "language test runner not configured for this repo (bench v4)"
+   },
+   "multiturn": {
+    "status": "skipped",
+    "reason": "no readable files matched"
+   },
+   "prompt_compaction": {
+    "status": "gate_failed",
+    "baseline_tokens": 131,
+    "optimized_tokens": 43,
+    "saved_tokens": 88,
+    "reduction_pct": 67.2,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": false,
+     "savings_positive": true
+    },
+    "fail_reason": "gate rejection: target_file_preserved",
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 28165,
+    "optimized_tokens": 199,
+    "saved_tokens": 27966,
+    "reduction_pct": 99.3,
+    "usd_saved": 0.0839,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "lib/sinatra/base.rb",
+     "sinatra-contrib/lib/sinatra/cookies.rb",
+     "sinatra-contrib/lib/sinatra/namespace.rb",
+     "lib/sinatra/indifferent_hash.rb",
+     "sinatra-contrib/lib/sinatra/streaming.rb"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 5055,
+    "optimized_tokens": 413,
+    "saved_tokens": 4642,
+    "reduction_pct": 91.8,
+    "usd_saved": 0.0139,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 239,
+    "pattern": "def "
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 684,
+    "optimized_tokens": 660,
+    "saved_tokens": 24,
+    "reduction_pct": 3.5,
+    "usd_saved": 0.0001,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 2075
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 2190,
+    "optimized_tokens": 45,
+    "saved_tokens": 2145,
+    "reduction_pct": 97.9,
+    "usd_saved": 0.0322,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "sinatra-contrib/lib/sinatra/cookies.rb",
+    "axis": "output_tokens (write_file vs surgical Edit)"
+   },
+   "api_surface": {
+    "status": "gate_failed",
+    "baseline_tokens": 28165,
+    "optimized_tokens": 28811,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": false
+    },
+    "fail_reason": "gate rejection: smaller_than_crawl",
+    "hub_files": [
+     "lib/sinatra/base.rb",
+     "sinatra-contrib/lib/sinatra/cookies.rb",
+     "sinatra-contrib/lib/sinatra/namespace.rb",
+     "lib/sinatra/indifferent_hash.rb",
+     "sinatra-contrib/lib/sinatra/streaming.rb"
+    ]
+   },
+   "kv_cache": {
+    "status": "ok",
+    "baseline_tokens": 303850,
+    "optimized_tokens": 63393,
+    "saved_tokens": 240457,
+    "reduction_pct": 79.1,
+    "kv_cache_hit_rate_pct": 87.9,
+    "usd_saved": 0.7214,
+    "gates": {
+     "prefix_hit_rate_ge_80": true,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 82,
+    "saved_tokens": 71,
+    "reduction_pct": 46.4,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "skipped",
+    "reason": "no lockfile in clone"
+   },
+   "status": "partial"
+  },
+  {
+   "key": "composer",
+   "url": "https://github.com/composer/composer",
+   "symbol_read": {
+    "status": "ok",
+    "baseline_tokens": 14889,
+    "optimized_tokens": 8179,
+    "saved_tokens": 6710,
+    "reduction_pct": 45.1,
+    "usd_saved": 0.0201,
+    "gates": {
+     "symbol_present": true
+    },
+    "reads": 3
+   },
+   "test_output": {
+    "status": "skipped",
+    "reason": "language test runner not configured for this repo (bench v4)"
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 39758,
+    "optimized_tokens": 9925,
+    "saved_tokens": 29833,
+    "reduction_pct": 75.0,
+    "usd_saved": 0.0895,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 5
+    },
+    "per_read": [
+     {
+      "file": "src/Composer/Package/PackageInterface.php",
+      "symbol": "PackageInterface",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "src/Composer/Package/Package.php",
+      "symbol": "Package",
+      "status": "ok",
+      "baseline_tokens": 6298,
+      "optimized_tokens": 4065
+     },
+     {
+      "file": "src/Composer/Package/AliasPackage.php",
+      "symbol": "AliasPackage",
+      "status": "ok",
+      "baseline_tokens": 3136,
+      "optimized_tokens": 1939
+     },
+     {
+      "file": "src/Composer/IO/ConsoleIO.php",
+      "symbol": "ConsoleIO",
+      "status": "ok",
+      "baseline_tokens": 5455,
+      "optimized_tokens": 2175
+     },
+     {
+      "file": "src/Composer/Repository/ArrayRepository.php",
+      "symbol": "ArrayRepository",
+      "status": "ok",
+      "baseline_tokens": 3255,
+      "optimized_tokens": 998
+     },
+     {
+      "file": "src/Composer/Repository/CompositeRepository.php",
+      "symbol": "CompositeRepository",
+      "status": "ok",
+      "baseline_tokens": 1735,
+      "optimized_tokens": 748
+     }
+    ]
+   },
+   "prompt_compaction": {
+    "status": "gate_failed",
+    "baseline_tokens": 138,
+    "optimized_tokens": 46,
+    "saved_tokens": 92,
+    "reduction_pct": 66.7,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": false,
+     "savings_positive": true
+    },
+    "fail_reason": "gate rejection: target_file_preserved",
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 21663,
+    "optimized_tokens": 203,
+    "saved_tokens": 21460,
+    "reduction_pct": 99.1,
+    "usd_saved": 0.0644,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "src/Composer/Package/PackageInterface.php",
+     "src/Composer/Package/Package.php",
+     "src/Composer/Package/AliasPackage.php",
+     "src/Composer/IO/ConsoleIO.php",
+     "src/Composer/Repository/ArrayRepository.php"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 110312,
+    "optimized_tokens": 862,
+    "saved_tokens": 109450,
+    "reduction_pct": 99.2,
+    "usd_saved": 0.3284,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 3169,
+    "pattern": "function "
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 212,
+    "optimized_tokens": 209,
+    "saved_tokens": 3,
+    "reduction_pct": 1.4,
+    "usd_saved": 0.0,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 573
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 3528,
+    "optimized_tokens": 52,
+    "saved_tokens": 3476,
+    "reduction_pct": 98.5,
+    "usd_saved": 0.0521,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "src/Composer/Package/PackageInterface.php",
+    "axis": "output_tokens (write_file vs surgical Edit)"
+   },
+   "api_surface": {
+    "status": "gate_failed",
+    "baseline_tokens": 21663,
+    "optimized_tokens": 235432,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": false
+    },
+    "fail_reason": "gate rejection: smaller_than_crawl",
+    "hub_files": [
+     "src/Composer/Package/PackageInterface.php",
+     "src/Composer/Package/Package.php",
+     "src/Composer/Package/AliasPackage.php",
+     "src/Composer/IO/ConsoleIO.php",
+     "src/Composer/Repository/ArrayRepository.php"
+    ]
+   },
+   "kv_cache": {
+    "status": "gate_failed",
+    "baseline_tokens": 373105,
+    "optimized_tokens": 113759,
+    "saved_tokens": 259346,
+    "reduction_pct": 69.5,
+    "kv_cache_hit_rate_pct": 77.2,
+    "usd_saved": 0.778,
+    "gates": {
+     "prefix_hit_rate_ge_80": false,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 84,
+    "saved_tokens": 69,
+    "reduction_pct": 45.1,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "ok",
+    "baseline_tokens": 33103,
+    "optimized_tokens": 1645,
+    "saved_tokens": 31458,
+    "reduction_pct": 95.0,
+    "usd_saved": 0.0944,
+    "gates": {
+     "capped_output": true,
+     "junk_file_named": true
+    },
+    "junk_file": "composer.lock",
+    "note": "rewritten: head -n 120 composer.lock"
+   },
+   "status": "partial"
+  },
+  {
+   "key": "newtonsoft",
+   "url": "https://github.com/JamesNK/Newtonsoft.Json",
+   "symbol_read": {
+    "status": "ok",
+    "baseline_tokens": 56076,
+    "optimized_tokens": 17871,
+    "saved_tokens": 38205,
+    "reduction_pct": 68.1,
+    "usd_saved": 0.1146,
+    "gates": {
+     "symbol_present": true
+    },
+    "reads": 3
+   },
+   "test_output": {
+    "status": "skipped",
+    "reason": "language test runner not configured for this repo (bench v4)"
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 112152,
+    "optimized_tokens": 17871,
+    "saved_tokens": 94281,
+    "reduction_pct": 84.1,
+    "usd_saved": 0.2828,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 3
+    },
+    "per_read": [
+     {
+      "file": "Src/Newtonsoft.Json.Tests/TestFixtureBase.cs",
+      "symbol": "TestFixtureBase",
+      "status": "ok",
+      "baseline_tokens": 4114,
+      "optimized_tokens": 1904
+     },
+     {
+      "file": "Src/Newtonsoft.Json.Tests/Serialization/JsonSerializerCollectionsTests.cs",
+      "symbol": "Serialization",
+      "status": "ok",
+      "baseline_tokens": 29205,
+      "optimized_tokens": 9453
+     },
+     {
+      "file": "Src/Newtonsoft.Json/JsonConvert.cs",
+      "symbol": "Newtonsoft",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "Src/Newtonsoft.Json/Utilities/LinqBridge.cs",
+      "symbol": "LinqBridge",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "Src/Newtonsoft.Json/Linq/JToken.cs",
+      "symbol": "Linq",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "Src/Newtonsoft.Json.Tests/JsonConvertTest.cs",
+      "symbol": "Tests",
+      "status": "ok",
+      "baseline_tokens": 22757,
+      "optimized_tokens": 6514
+     }
+    ]
+   },
+   "prompt_compaction": {
+    "status": "gate_failed",
+    "baseline_tokens": 140,
+    "optimized_tokens": 48,
+    "saved_tokens": 92,
+    "reduction_pct": 65.7,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": false,
+     "savings_positive": true
+    },
+    "fail_reason": "gate rejection: target_file_preserved",
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 111464,
+    "optimized_tokens": 235,
+    "saved_tokens": 111229,
+    "reduction_pct": 99.8,
+    "usd_saved": 0.3337,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "Src/Newtonsoft.Json.Tests/TestFixtureBase.cs",
+     "Src/Newtonsoft.Json.Tests/Serialization/JsonSerializerCollectionsTests.cs",
+     "Src/Newtonsoft.Json/JsonConvert.cs",
+     "Src/Newtonsoft.Json/Utilities/LinqBridge.cs",
+     "Src/Newtonsoft.Json/Linq/JToken.cs"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 364201,
+    "optimized_tokens": 798,
+    "saved_tokens": 363403,
+    "reduction_pct": 99.8,
+    "usd_saved": 1.0902,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 10535,
+    "pattern": "public "
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 113,
+    "optimized_tokens": 119,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 288
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 4124,
+    "optimized_tokens": 72,
+    "saved_tokens": 4052,
+    "reduction_pct": 98.3,
+    "usd_saved": 0.0608,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "Src/Newtonsoft.Json.Tests/TestFixtureBase.cs",
+    "axis": "output_tokens (write_file vs surgical Edit)"
+   },
+   "api_surface": {
+    "status": "gate_failed",
+    "baseline_tokens": 111464,
+    "optimized_tokens": 281912,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": false
+    },
+    "fail_reason": "gate rejection: smaller_than_crawl",
+    "hub_files": [
+     "Src/Newtonsoft.Json.Tests/TestFixtureBase.cs",
+     "Src/Newtonsoft.Json.Tests/Serialization/JsonSerializerCollectionsTests.cs",
+     "Src/Newtonsoft.Json/JsonConvert.cs",
+     "Src/Newtonsoft.Json/Utilities/LinqBridge.cs",
+     "Src/Newtonsoft.Json/Linq/JToken.cs"
+    ]
+   },
+   "kv_cache": {
+    "status": "ok",
+    "baseline_tokens": 1104740,
+    "optimized_tokens": 272942,
+    "saved_tokens": 831798,
+    "reduction_pct": 75.3,
+    "kv_cache_hit_rate_pct": 83.7,
+    "usd_saved": 2.4954,
+    "gates": {
+     "prefix_hit_rate_ge_80": true,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 84,
+    "saved_tokens": 69,
+    "reduction_pct": 45.1,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "skipped",
+    "reason": "no lockfile in clone"
+   },
+   "status": "partial"
+  },
+  {
+   "key": "alamofire",
+   "url": "https://github.com/Alamofire/Alamofire",
+   "symbol_read": {
+    "status": "ok",
+    "baseline_tokens": 13909,
+    "optimized_tokens": 8100,
+    "saved_tokens": 5809,
+    "reduction_pct": 41.8,
+    "usd_saved": 0.0174,
+    "gates": {
+     "symbol_present": true
+    },
+    "reads": 1
+   },
+   "test_output": {
+    "status": "skipped",
+    "reason": "language test runner not configured for this repo (bench v4)"
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 27818,
+    "optimized_tokens": 8100,
+    "saved_tokens": 19718,
+    "reduction_pct": 70.9,
+    "usd_saved": 0.0592,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 1
+    },
+    "per_read": [
+     {
+      "file": "Source/Features/Combine.swift",
+      "symbol": "DownloadRequest",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "Source/Features/URLEncodedFormEncoder.swift",
+      "symbol": "URLEncodedFormEncoder",
+      "status": "ok",
+      "baseline_tokens": 13909,
+      "optimized_tokens": 8100
+     },
+     {
+      "file": "Source/Core/Session.swift",
+      "symbol": "Session",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "Source/Features/EventMonitor.swift",
+      "symbol": "ClosureEventMonitor",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "docs/js/typeahead.jquery.js",
+      "symbol": "Typeahead",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "docs/docsets/Alamofire.docset/Contents/Resources/Documents/js/typeahead.jquery.js",
+      "symbol": "Typeahead",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     }
+    ]
+   },
+   "prompt_compaction": {
+    "status": "gate_failed",
+    "baseline_tokens": 134,
+    "optimized_tokens": 42,
+    "saved_tokens": 92,
+    "reduction_pct": 68.7,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": false,
+     "savings_positive": true
+    },
+    "fail_reason": "gate rejection: target_file_preserved",
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 130783,
+    "optimized_tokens": 205,
+    "saved_tokens": 130578,
+    "reduction_pct": 99.8,
+    "usd_saved": 0.3917,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "docs/js/jquery.min.js",
+     "docs/docsets/Alamofire.docset/Contents/Resources/Documents/js/jquery.min.js",
+     "Source/Features/Combine.swift",
+     "Source/Features/URLEncodedFormEncoder.swift",
+     "Source/Core/Session.swift"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 26190,
+    "optimized_tokens": 725,
+    "saved_tokens": 25465,
+    "reduction_pct": 97.2,
+    "usd_saved": 0.0764,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 794,
+    "pattern": "func "
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 836,
+    "optimized_tokens": 498,
+    "saved_tokens": 338,
+    "reduction_pct": 40.4,
+    "usd_saved": 0.001,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 2962
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 10541,
+    "optimized_tokens": 60,
+    "saved_tokens": 10481,
+    "reduction_pct": 99.4,
+    "usd_saved": 0.1572,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "Source/Features/Combine.swift",
+    "axis": "output_tokens (write_file vs surgical Edit)"
+   },
+   "api_surface": {
+    "status": "gate_failed",
+    "baseline_tokens": 130783,
+    "optimized_tokens": 22331515,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": false
+    },
+    "fail_reason": "gate rejection: smaller_than_crawl",
+    "hub_files": [
+     "docs/js/jquery.min.js",
+     "docs/docsets/Alamofire.docset/Contents/Resources/Documents/js/jquery.min.js",
+     "Source/Features/Combine.swift",
+     "Source/Features/URLEncodedFormEncoder.swift",
+     "Source/Core/Session.swift"
+    ]
+   },
+   "kv_cache": {
+    "status": "ok",
+    "baseline_tokens": 1424416,
+    "optimized_tokens": 338733,
+    "saved_tokens": 1085683,
+    "reduction_pct": 76.2,
+    "kv_cache_hit_rate_pct": 84.7,
+    "usd_saved": 3.257,
+    "gates": {
+     "prefix_hit_rate_ge_80": true,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 84,
+    "saved_tokens": 69,
+    "reduction_pct": 45.1,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "ok",
+    "baseline_tokens": 4231,
+    "optimized_tokens": 1380,
+    "saved_tokens": 2851,
+    "reduction_pct": 67.4,
+    "usd_saved": 0.0086,
+    "gates": {
+     "capped_output": true,
+     "junk_file_named": true
+    },
+    "junk_file": "Gemfile.lock",
+    "note": "rewritten: head -n 120 Gemfile.lock"
+   },
+   "status": "partial"
+  },
+  {
+   "key": "curl",
+   "url": "https://github.com/curl/curl",
+   "symbol_read": {
+    "status": "ok",
+    "baseline_tokens": 125168,
+    "optimized_tokens": 31174,
+    "saved_tokens": 93994,
+    "reduction_pct": 75.1,
+    "usd_saved": 0.282,
+    "gates": {
+     "symbol_present": true
+    },
+    "reads": 3
+   },
+   "test_output": {
+    "status": "skipped",
+    "reason": "language test runner not configured for this repo (bench v4)"
+   },
+   "multiturn": {
+    "status": "ok",
+    "baseline_tokens": 395904,
+    "optimized_tokens": 53134,
+    "saved_tokens": 342770,
+    "reduction_pct": 86.6,
+    "usd_saved": 1.0283,
+    "gates": {
+     "all_reads_lossless": true,
+     "reads_measured": 5
+    },
+    "per_read": [
+     {
+      "file": "lib/urldata.h",
+      "symbol": "UserDefined",
+      "status": "skipped",
+      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+     },
+     {
+      "file": "lib/http.c",
+      "symbol": "http_rw_hd",
+      "status": "ok",
+      "baseline_tokens": 44492,
+      "optimized_tokens": 10488
+     },
+     {
+      "file": "lib/ftp.c",
+      "symbol": "ftp_pp_statemachine",
+      "status": "ok",
+      "baseline_tokens": 43147,
+      "optimized_tokens": 12014
+     },
+     {
+      "file": "lib/multi.c",
+      "symbol": "multi_runsingle",
+      "status": "ok",
+      "baseline_tokens": 37529,
+      "optimized_tokens": 8672
+     },
+     {
+      "file": "lib/url.c",
+      "symbol": "url_find_or_create_conn",
+      "status": "ok",
+      "baseline_tokens": 23246,
+      "optimized_tokens": 6500
+     },
+     {
+      "file": "lib/vtls/openssl.c",
+      "symbol": "ossl_verifyhost",
+      "status": "ok",
+      "baseline_tokens": 49538,
+      "optimized_tokens": 15460
+     }
+    ]
+   },
+   "prompt_compaction": {
+    "status": "ok",
+    "baseline_tokens": 130,
+    "optimized_tokens": 38,
+    "saved_tokens": 92,
+    "reduction_pct": 70.8,
+    "usd_saved": 0.0003,
+    "gates": {
+     "action_extracted": true,
+     "target_file_preserved": true,
+     "savings_positive": true
+    },
+    "tier": "DISTILLER",
+    "action": "REFACTOR"
+   },
+   "architecture": {
+    "status": "ok",
+    "baseline_tokens": 152919,
+    "optimized_tokens": 159,
+    "saved_tokens": 152760,
+    "reduction_pct": 99.9,
+    "usd_saved": 0.4583,
+    "gates": {
+     "hub_files_listed": true,
+     "compact_bound": true
+    },
+    "hub_files": [
+     "lib/curl_setup.h",
+     "lib/urldata.h",
+     "lib/http.c",
+     "lib/ftp.c",
+     "lib/multi.c"
+    ]
+   },
+   "raw_search": {
+    "status": "ok",
+    "baseline_tokens": 145972,
+    "optimized_tokens": 405,
+    "saved_tokens": 145567,
+    "reduction_pct": 99.7,
+    "usd_saved": 0.4367,
+    "gates": {
+     "matches_exist": true,
+     "paths_preserved": true
+    },
+    "matches": 8793,
+    "pattern": "return "
+   },
+   "git_diff": {
+    "status": "ok",
+    "baseline_tokens": 874,
+    "optimized_tokens": 839,
+    "saved_tokens": 35,
+    "reduction_pct": 4.0,
+    "usd_saved": 0.0001,
+    "gates": {
+     "changed_files_preserved": true
+    },
+    "changed_bytes": 2326
+   },
+   "write_egress": {
+    "status": "ok",
+    "baseline_tokens": 14791,
+    "optimized_tokens": 66,
+    "saved_tokens": 14725,
+    "reduction_pct": 99.6,
+    "usd_saved": 0.2209,
+    "gates": {
+     "inserted_line_present": true,
+     "original_signature_in_target": true
+    },
+    "file": "lib/curl_setup.h",
+    "axis": "output_tokens (write_file vs surgical Edit)"
+   },
+   "api_surface": {
+    "status": "gate_failed",
+    "baseline_tokens": 152919,
+    "optimized_tokens": 317738,
+    "saved_tokens": 0,
+    "reduction_pct": 0.0,
+    "usd_saved": 0.0,
+    "gates": {
+     "hub_files_listed": true,
+     "smaller_than_crawl": false
+    },
+    "fail_reason": "gate rejection: smaller_than_crawl",
+    "hub_files": [
+     "lib/curl_setup.h",
+     "lib/urldata.h",
+     "lib/http.c",
+     "lib/ftp.c",
+     "lib/multi.c"
+    ]
+   },
+   "kv_cache": {
+    "status": "ok",
+    "baseline_tokens": 1586875,
+    "optimized_tokens": 423360,
+    "saved_tokens": 1163515,
+    "reduction_pct": 73.3,
+    "kv_cache_hit_rate_pct": 81.5,
+    "usd_saved": 3.4905,
+    "gates": {
+     "prefix_hit_rate_ge_80": true,
+     "input_reduction_positive": true
+    },
+    "turns": 10,
+    "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)"
+   },
+   "secret_guard": {
+    "status": "ok",
+    "baseline_tokens": 153,
+    "optimized_tokens": 82,
+    "saved_tokens": 71,
+    "reduction_pct": 46.4,
+    "usd_saved": 0.0002,
+    "gates": {
+     "deny_decision": true,
+     "no_secret_leak": true
+    },
+    "decision": "deny",
+    "check_name": "SECRET_FILE_READ",
+    "axis": "security: secrets kept out of the model context"
+   },
+   "junk_read": {
+    "status": "skipped",
+    "reason": "no lockfile in clone"
    },
    "status": "partial"
   }

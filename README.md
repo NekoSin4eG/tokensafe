@@ -228,40 +228,52 @@ TokenSafe combines two multiplicative savings layers rather than relying on AST 
 
 ### Real-Repository Benchmark (measured on live clones)
 
-No modeling: five popular repositories cloned at HEAD, scenarios **pre-registered before measurement** ([`src/bench_scenarios.json`](src/bench_scenarios.json)), every token counted on real bytes, and deterministic zero-loss gates that disqualify any scenario they fail:
+No modeling: fifteen popular repositories across 10 languages (Python, TypeScript, JavaScript, Go, Rust, Java, Ruby, PHP, C#, Swift, C) cloned at HEAD, scenarios **pre-registered before measurement** ([`src/bench_scenarios.json`](src/bench_scenarios.json)), every token counted on real bytes, and deterministic zero-loss gates that disqualify any scenario they fail. Curated rows (all rows in [docs/BENCHMARK_REAL.md](docs/BENCHMARK_REAL.md)):
 
-| Repo | Scenario | Baseline tok | TokenSafe tok | Reduction | Gates |
+| Repo (language) | Scenario | Baseline tok | TokenSafe tok | Reduction | Gates |
 |---|---|---:|---:|---:|:---|
-| fastapi | Architecture discovery (hub crawl → map) | 92,002 | **164** | **-99.8%** | PASS |
-| fastapi | Junk-read guard (uv.lock → 30-line cap) | 367,129 | **855** | **-99.8%** | PASS |
-| rich | Architecture discovery | 76,172 | 158 | **-99.8%** | PASS |
-| fastapi | Write egress (output axis, $15/M) | 2,258 | **51** | **-97.7%** | PASS |
-| rich | Junk-read guard (uv.lock) | 128,203 | 2,642 | **-97.9%** | PASS |
-| flask | Write egress (output axis, $15/M) | 7,106 | **44** | **-99.4%** | PASS |
-| flask | Junk-read guard (uv.lock) | 133,015 | **780** | **-99.4%** | PASS |
-| flask | Architecture discovery | 53,237 | 176 | **-99.7%** | PASS |
-| rich | KV-cache prefix locking (10-turn bill) | 846,669 | 199,282 | **-76.5%** | PASS |
-| flask | KV-cache prefix locking (10-turn bill) | 562,777 | 124,150 | **-77.9%** | PASS |
-| fastapi | KV-cache prefix locking (10-turn bill) | 781,038 | 178,835 | **-77.1%** | PASS |
-| flask | Multi-turn + repeat reads | 45,336 | 5,304 | **-88.3%** | PASS |
-| requests | Multi-turn + repeat reads | 59,380 | 9,561 | **-83.9%** | PASS |
-| flask | Symbol read (AST skeleton) | 18,864 | 3,784 | **-79.9%** | PASS |
-| rich | Symbol read (AST skeleton) | 28,675 | 7,710 | **-73.1%** | PASS |
-| requests | Symbol read (AST skeleton) | 9,743 | 2,849 | **-70.8%** | PASS |
-| httpie | Prompt compaction (TOCP) | 129 | 36 | **-72.1%** | PASS |
-| fastapi | Symbol read (`routing.py`, 73.7K tok) | 73,721 | 39,529 | **-46.4%** | PASS |
-| flask | Secret guard (`cat .env` → deny, 0 leak) | 153 | 82 | **-46.4%** | PASS |
-| rich | Verbose test output (noise strip) | 746 | 385 | **-48.4%** | PASS |
-| flask | Full-suite pytest output | 6,402 | 6,191 | **-3.3%** | PASS |
-| fastapi | Git diff churn → slice | 416 | 393 | **-5.5%** | PASS |
+| lodash (JS) | Symbol read (AST skeleton) | 515,843 | **855** | **-99.8%** | PASS |
+| lodash (JS) | Multi-turn + repeat reads | 1,640,674 | **4,233** | **-99.7%** | PASS |
+| lodash (JS) | Architecture discovery | 802,825 | 178 | **-99.98%** | PASS |
+| lodash (JS) | Junk-read guard | 87,475 | 1,745 | **-98.0%** | PASS |
+| lodash (JS) | KV-cache 10-turn bill | 7,390,347 | 1,567,062 | **-78.8%** | PASS |
+| fastapi (Py) | Junk-read guard (uv.lock cap) | 367,129 | **855** | **-99.8%** | PASS |
+| flask (Py) | Architecture discovery | 53,237 | 176 | **-99.7%** | PASS |
+| sinatra (Ruby) | Architecture discovery | 28,165 | 199 | **-99.3%** | PASS |
+| composer (PHP) | Junk-read guard (composer.lock) | 33,103 | 1,645 | **-95.0%** | PASS |
+| flask (Py) | Write egress (output axis, $15/M) | 7,106 | **44** | **-99.4%** | PASS |
+| flask (Py) | Multi-turn + repeat reads | 45,336 | 5,304 | **-88.3%** | PASS |
+| curl (C) | Symbol read (AST skeleton) | 125,168 | 31,174 | **-75.1%** | PASS |
+| rich (Py) | Multi-turn + repeat reads | 80,036 | 12,329 | **-84.6%** | PASS |
+| requests (Py) | Multi-turn + repeat reads | 59,380 | 9,561 | **-83.9%** | PASS |
+| flask (Py) | Symbol read (AST skeleton) | 18,864 | 3,784 | **-79.9%** | PASS |
+| rich (Py) | Symbol read (AST skeleton) | 28,675 | 7,710 | **-73.1%** | PASS |
+| requests (Py) | Symbol read (AST skeleton) | 9,743 | 2,849 | **-70.8%** | PASS |
+| sinatra (Ruby) | KV-cache 10-turn bill | 303,850 | 63,393 | **-79.1%** | PASS |
+| retrofit (Java) | KV-cache 10-turn bill | 3,312,375 | 673,361 | **-79.7%** | PASS |
+| gin (Go) | KV-cache 10-turn bill | 317,638 | 65,036 | **-79.5%** | PASS |
+| zod (TS) | KV-cache 10-turn bill | 1,905,787 | 431,857 | **-77.3%** | PASS |
+| serde (Rust) | KV-cache 10-turn bill | 1,307,460 | 300,472 | **-77.0%** | PASS |
+| curl (C) | KV-cache 10-turn bill | 1,586,875 | 423,360 | **-73.3%** | PASS |
+| newtonsoft (C#) | Symbol read (AST skeleton) | 56,076 | 17,871 | **-68.1%** | PASS |
+| alamofire (Swift) | Symbol read (AST skeleton) | 13,909 | 8,100 | **-41.8%** | PASS |
+| serde (Rust) | Symbol read (AST skeleton) | 69,610 | 42,671 | **-38.7%** | PASS |
+| gin (Go) | Symbol read (AST skeleton) | 23,567 | 14,938 | **-36.6%** | PASS |
+| flask (Py) | Secret guard (cat .env -> deny, 0 leak) | 153 | 82 | **-46.4%** | PASS |
+| rich (Py) | Verbose test output (noise strip) | 746 | 385 | **-48.4%** | PASS |
+| composer (PHP) | Prompt compaction (TOCP) | 138 | 46 | **-66.7%** | FAIL |
+| flask (Py) | Full-suite pytest output | 6,402 | 6,191 | **-3.3%** | PASS |
+| fastapi (Py) | Git diff churn -> slice | 416 | 393 | **-5.5%** | PASS |
 
-Aggregate: **~3.06M measured tokens saved** per traced pass over all 5 repositories (input at `$3/M`, output axis at `$15/M`, KV-cache hits billed at `$0.30/M`). Clean pytest suites honestly score ~0-3% — savings are never invented. Five scenarios are published as **FAIL with reasons attached** (e.g. fastapi's test-output: strict warning filters escalate a `pytest-asyncio` deprecation into a pytest `INTERNALERROR`; whole-repo API surfaces bigger than hub crawls for fastapi/httpie) — gates reject them and no savings are claimed. Full table + raw JSON: [docs/BENCHMARK_REAL.md](docs/BENCHMARK_REAL.md) · live page: <https://tokensafe.dev/bench> · methodology post: <https://tokensafe.dev/blog/real-repo-benchmark-5-repos>. Reproduce:
+Aggregate: **~25.7M measured tokens saved** per traced pass over all 15 repositories in 10 languages (142 gated-OK rows; input at `$3/M`, output axis at `$15/M`, KV-cache hits billed at `$0.30/M`). Clean pytest suites honestly score ~0-3% — savings are never invented. **17 gate-FAILs and 21 skips are published with reasons** on the live page (e.g. fastapi's test-output: strict warning filters escalate a `pytest-asyncio` deprecation into a pytest `INTERNALERROR`; whole-repo API surfaces bigger than hub crawls for fastapi/httpie; httpie's `core.py` refuses skeletonization — one function is most of the file). Full table + raw JSON: [docs/BENCHMARK_REAL.md](docs/BENCHMARK_REAL.md) · live page: <https://tokensafe.dev/bench> · methodology post: <https://tokensafe.dev/blog/real-repo-benchmark-5-repos>. Reproduce:
 
 ```bash
-tokensafe bench --real                        # all 5 pre-registered repos
+tokensafe bench --real                        # all 15 pre-registered repos
 tokensafe bench --real --repo=pallets/flask   # one repo
 tokensafe bench --real --here                 # your current repository
 ```
+
+## Metrics Honesty
 
 ## Metrics Honesty
 
