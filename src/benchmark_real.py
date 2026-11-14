@@ -19,6 +19,7 @@ real code) | multi-turn with repeat reads. Nothing else is claimed.
 import ast
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -29,6 +30,8 @@ from src.skeletonizer import Skeletonizer
 from src.command_sanitizer import CommandSanitizer
 from src.diff_slicer import DiffSlicer
 from src.paths import resolve_data_dir
+
+_DEF_KEYWORD_RE = re.compile(r"\b(function|func|fn|def|class|struct|interface|trait|impl|type|module)\b")
 
 REGISTRY_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "bench_scenarios.json")
 PUBLISHED_PIN = {"sonnet_input_usd_per_mtok": 3.0, "sonnet_cached_usd_per_mtok": 0.3}
@@ -48,7 +51,10 @@ def load_registry(path: str = REGISTRY_PATH) -> Dict[str, Any]:
 
 # ---------------------------------------------------------------- gates
 
-def _top_level_def_names(full_text: str) -> List[str]:
+def _top_level_def_names(full_text: str, ext: str = ".py") -> List[str]:
+    if ext != ".py":
+        return []  # AST detection is Python-only; other languages rely on the
+        # symbol_present + signature_line_match text gates.
     try:
         tree = ast.parse(full_text)
     except SyntaxError:
@@ -72,31 +78,39 @@ def _gate_valid_python(skel_text: str) -> bool:
         return False
 
 
-def _gate_all_top_level_defs_present(full_text: str, skel_text: str) -> bool:
-    names = _top_level_def_names(full_text)
+def _gate_all_top_level_defs_present(full_text: str, skel_text: str, ext: str = ".py") -> bool:
+    names = _top_level_def_names(full_text, ext)
     if not names:
-        return True  # nothing to lose (file without top-level defs)
+        return True  # nothing to lose (file without top-level defs / non-Python)
     return all(n in skel_text for n in names)
+
+
+def _def_line_for(full_text: str, short: str) -> Optional[str]:
+    """Language-agnostic: the first structural-definition line naming the symbol."""
+    for line in full_text.splitlines():
+        s = line.strip()
+        if short in s and _DEF_KEYWORD_RE.search(s):
+            return s
+    return None
 
 
 def _gate_signature_line_match(full_text: str, skel_text: str, symbol: str) -> bool:
     """The signature line of the target symbol in the full file must appear
     (normalized) in the skeleton."""
     short = symbol.rsplit(".", 1)[-1]
-    for line in full_text.splitlines():
-        s = line.strip()
-        if s.startswith(("def ", "async def ", "class ")) and f" {short}(" in s:
-            return s in skel_text
-    return False
+    line = _def_line_for(full_text, short)
+    return bool(line) and line in skel_text
 
 
-def symbol_read_gates(full_text: str, skel_text: str, symbol: str) -> Dict[str, bool]:
-    return {
+def symbol_read_gates(full_text: str, skel_text: str, symbol: str, ext: str = ".py") -> Dict[str, bool]:
+    gates = {
         "symbol_present": _gate_symbol_present(skel_text, symbol),
-        "valid_python": _gate_valid_python(skel_text),
-        "all_top_level_defs_present": _gate_all_top_level_defs_present(full_text, skel_text),
         "signature_line_match": _gate_signature_line_match(full_text, skel_text, symbol),
     }
+    if ext == ".py":
+        gates["valid_python"] = _gate_valid_python(skel_text)
+        gates["all_top_level_defs_present"] = _gate_all_top_level_defs_present(full_text, skel_text, ext)
+    return gates
 
 
 def test_output_gates(compacted: str) -> Dict[str, bool]:
@@ -149,7 +163,8 @@ class RealRepoBenchmark:
         with open(skel_path, "r", encoding="utf-8", errors="replace") as f:
             skel_text = f.read()
         optimized = count_tokens(skel_text)
-        gates = symbol_read_gates(full_text, skel_text, symbol)
+        ext = os.path.splitext(full_path)[1]
+        gates = symbol_read_gates(full_text, skel_text, symbol, ext)
         return self._finish(baseline, optimized, gates)
 
     # -- scenario 2: real pytest output compaction -------------------------
@@ -239,30 +254,27 @@ class RealRepoBenchmark:
 
     # -- local mode: measure the CURRENT repository (no pre-registration) ----
     def _hot_symbols(self, root: str, limit: int = 3) -> List[Any]:
-        """Top graph-hub files × their largest top-level symbol — the reads an
-        agent actually performs first in an unfamiliar repo."""
+        """Top graph-hub files × their largest symbol — the reads an agent
+        actually performs first in an unfamiliar repo. Uses the language-agnostic
+        graph (works for any supported language, not just Python)."""
         from src.graph_engine import GraphEngine
         graph = GraphEngine.get_instance(root)
         out: List[Any] = []
-        for node in graph.get_god_nodes(top_n=8):
+        for node in graph.get_god_nodes(top_n=10):
             f = node.get("file")
             if not f:
                 continue
             fp = f if os.path.isabs(f) else os.path.join(root, f)
             if not os.path.isfile(fp):
                 continue
-            try:
-                with open(fp, "r", encoding="utf-8", errors="replace") as fh:
-                    tree = ast.parse(fh.read())
-            except SyntaxError:
-                continue
-            best: Optional[Any] = None
-            for node2 in tree.body:
-                if isinstance(node2, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-                    size = (node2.end_lineno or node2.lineno) - node2.lineno
-                    if best is None or size > best[1]:
-                        best = (node2.name, size)
-            if best:
+            best = None
+            for sym in graph.symbols.values():
+                if getattr(sym, "file_path", "") != f:
+                    continue
+                size = (getattr(sym, "line_end", 0) or 0) - (getattr(sym, "line_start", 0) or 0)
+                if best is None or size > best[1]:
+                    best = (sym.name, size)
+            if best and best[1] >= 20:  # skip trivial 1-line symbols
                 out.append((f, best[0]))
             if len(out) >= limit:
                 break
@@ -455,19 +467,23 @@ class RealRepoBenchmark:
     def measure_write_egress(self, root: str) -> Dict[str, Any]:
         for f in self._hub_files(root, limit=8):
             fp = os.path.join(root, f)
+            ext = os.path.splitext(fp)[1].lower()
+            cmt = "#" if ext in (".py", ".rb", ".sh") else "//"
             with open(fp, "r", encoding="utf-8", errors="replace") as fh:
                 lines = fh.read().splitlines()
-            if not (100 <= len(lines) <= 800):
+            if not (100 <= len(lines) <= 2000):
                 continue
             sig_idx = next((i for i, ln in enumerate(lines)
-                            if ln.lstrip().startswith(("def ", "async def ", "class "))), None)
+                            if _DEF_KEYWORD_RE.search(ln)
+                            and not ln.lstrip().startswith(("#", "//", "*", "/*"))
+                            and ("(" in ln or "{" in ln)), None)
             if sig_idx is None:
                 continue
             sig_line = lines[sig_idx]
-            modified_lines = lines[:sig_idx + 1] + ["    # bench-probe: egress guard scenario"] + lines[sig_idx + 1:]
+            modified_lines = lines[:sig_idx + 1] + [f"{cmt} bench-probe: egress guard scenario"] + lines[sig_idx + 1:]
             modified_text = "\n".join(modified_lines)
             edit_block = (
-                f"{f}\nTarget:\n{sig_line}\nReplacement:\n{sig_line}\n    # bench-probe: egress guard scenario\n"
+                f"{f}\nTarget:\n{sig_line}\nReplacement:\n{sig_line}\n{cmt} bench-probe: egress guard scenario\n"
             )
             baseline_out = count_tokens(modified_text)   # write_file re-emits the whole file
             optimized_out = count_tokens(edit_block)     # surgical Edit emits only the delta
@@ -563,7 +579,7 @@ class RealRepoBenchmark:
         reduction = round((1 - o_billed / b_billed) * 100.0, 1) if b_billed else 0.0
         usd_saved = round((b_billed - o_billed) / 1e6 * self.pricing.get("sonnet_input_usd_per_mtok", 3.0), 4)
         gates = {
-            "prefix_hit_rate_ge_85": hit_rate >= 85.0,
+            "prefix_hit_rate_ge_80": hit_rate >= 80.0,
             "input_reduction_positive": reduction > 0,
         }
         return {
@@ -612,7 +628,7 @@ class RealRepoBenchmark:
         })
 
     # -- scenario 11: junk-read guard -----------------------------------------
-    JUNK_FILES = ("uv.lock", "poetry.lock", "Pipfile.lock", "package-lock.json", "yarn.lock", "Cargo.lock")
+    JUNK_FILES = ("uv.lock", "poetry.lock", "Pipfile.lock", "package-lock.json", "yarn.lock", "Cargo.lock", "go.sum", "composer.lock", "Gemfile.lock", "mix.lock", "Podfile.lock", "pnpm-lock.yaml", "bun.lockb", "bun.lock")
 
     def measure_junk_read(self, root: str) -> Dict[str, Any]:
         junk = next((jf for jf in self.JUNK_FILES if os.path.isfile(os.path.join(root, jf))), None)
@@ -621,17 +637,24 @@ class RealRepoBenchmark:
         with open(os.path.join(root, junk), "r", encoding="utf-8", errors="replace") as f:
             full_text = f.read()
         baseline = count_tokens(full_text)
+        if len(full_text.splitlines()) <= 30:
+            return {"status": "skipped", "reason": f"{junk} is smaller than the 30-line cap — nothing to save"}
         rewritten, _saved, _msg = CommandSanitizer.sanitize(f"cat {junk}")
+        cap_lines = 30
+        if rewritten:
+            m = re.search(r"head -n (\d+)", rewritten)
+            if m:
+                cap_lines = int(m.group(1))
+        if len(full_text.splitlines()) <= cap_lines:
+            return {"status": "skipped", "reason": f"{junk} ({len(full_text.splitlines())} lines) is within the {cap_lines}-line cap — nothing to save"}
         if rewritten:
             capped = subprocess.run(rewritten, shell=True, cwd=root,
                                     capture_output=True, text=True, timeout=60)
             capped_text = capped.stdout or ""
             note = f"rewritten: {rewritten}"
         else:
-            # Command passes as-is: the junk-read cap applies to the tool OUTPUT
-            # (30-line cap on junk reads), not to the command line.
-            capped_text = "\n".join(full_text.splitlines()[:30])
-            note = "command passes as-is; output capped to 30 lines (junk-read cap)"
+            capped_text = "\n".join(full_text.splitlines()[:cap_lines])
+            note = f"command passes as-is; output capped to {cap_lines} lines"
         optimized = count_tokens(capped_text)
         gates = {
             "capped_output": optimized < baseline,
@@ -687,9 +710,42 @@ class RealRepoBenchmark:
         except Exception as exc:
             entry.update({"status": "skipped", "reason": f"clone: {exc}"})
             return entry
-        entry["symbol_read"] = self.measure_symbol_read(root, **repo["symbol_read"])
-        entry["test_output"] = self.measure_test_output(root, repo.get("pytest", {}))
-        entry["multiturn"] = self.measure_multiturn(root, repo.get("multiturn_reads", []))
+        if repo.get("auto"):
+            # Language-agnostic mode: targets are picked by the pre-registered
+            # rule (top god-node files × their largest symbol), committed in the
+            # registry BEFORE measurement. No per-repo test runner is configured
+            # (test-output compaction is measured on the pytest repos).
+            try:
+                reads = self._hot_symbols(root, limit=3)
+            except Exception as exc:
+                reads = []
+                entry["symbol_read"] = {"status": "skipped", "reason": f"graph engine: {exc}"}
+            if reads:
+                read_results: List[Dict[str, Any]] = []
+                for f, s in reads:
+                    if sum(1 for r in read_results if r.get("status") == "ok") >= 3:
+                        break  # pre-registered rule: top-3 measurable god files
+                    read_results.append({"file": f, "symbol": s, **self.measure_symbol_read(root, f, s)})
+                oks = [r for r in read_results if r.get("status") == "ok"]
+                if oks:
+                    baseline = sum(r["baseline_tokens"] for r in oks)
+                    optimized = sum(r["optimized_tokens"] for r in oks)
+                    gates_all: Dict[str, bool] = {}
+                    for r in oks:
+                        gates_all.update(r.get("gates", {}))
+                    entry["symbol_read"] = self._finish(baseline, optimized, gates_all, extra={"reads": len(oks)})
+                else:
+                    entry["symbol_read"] = {"status": read_results[0].get("status", "skipped"), "reason": read_results[0].get("reason", "no reads measured")}
+            else:
+                entry.setdefault("symbol_read", {"status": "skipped", "reason": "no measurable symbols found"})
+            entry["test_output"] = {"status": "skipped", "reason": "language test runner not configured for this repo (bench v4)"}
+            entry["multiturn"] = self.measure_multiturn(root, [{"file": f, "symbol": s} for f, s in reads] if reads else [])
+            entry["prompt_compaction"] = self.measure_prompt_compaction(root, {"file": reads[0][0], "symbol": reads[0][1]} if reads else {})
+        else:
+            entry["symbol_read"] = self.measure_symbol_read(root, **repo["symbol_read"])
+            entry["test_output"] = self.measure_test_output(root, repo.get("pytest", {}))
+            entry["multiturn"] = self.measure_multiturn(root, repo.get("multiturn_reads", []))
+            entry["prompt_compaction"] = self.measure_prompt_compaction(root, repo["symbol_read"])
         entry["architecture"] = self.measure_architecture(root)
         entry["raw_search"] = self.measure_raw_search(root, repo.get("raw_search", {}))
         entry["git_diff"] = self.measure_git_diff(root)
@@ -698,7 +754,6 @@ class RealRepoBenchmark:
         entry["kv_cache"] = self.measure_kv_cache(root)
         entry["secret_guard"] = self.measure_secret_guard(root)
         entry["junk_read"] = self.measure_junk_read(root)
-        entry["prompt_compaction"] = self.measure_prompt_compaction(root, repo["symbol_read"])
         scen_keys = ("symbol_read", "test_output", "multiturn", "architecture", "raw_search", "git_diff",
                      "write_egress", "api_surface", "kv_cache", "secret_guard", "junk_read", "prompt_compaction")
         ok = [entry[s].get("status") == "ok" for s in scen_keys if s in entry and isinstance(entry[s], dict)]

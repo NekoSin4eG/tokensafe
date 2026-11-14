@@ -2,73 +2,311 @@
   "version": 3,
   "created": "2026-11-14",
   "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking; v1/v2 rows stay frozen). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table. v3 adds: API surface map, KV-cache prefix locking replay, secret-guard interception, junk-read guard, prompt compaction (TOCP).",
-  "metrics": ["token_reduction_pct", "usd_saved_sonnet_input", "usd_saved_sonnet_output", "kv_cache_hit_rate_pct", "zero_loss_gates"],
-  "pricing": { "sonnet_input_usd_per_mtok": 3.0, "sonnet_cached_usd_per_mtok": 0.3, "sonnet_output_usd_per_mtok": 15.0 },
+  "metrics": [
+    "token_reduction_pct",
+    "usd_saved_sonnet_input",
+    "usd_saved_sonnet_output",
+    "kv_cache_hit_rate_pct",
+    "zero_loss_gates"
+  ],
+  "pricing": {
+    "sonnet_input_usd_per_mtok": 3.0,
+    "sonnet_cached_usd_per_mtok": 0.3,
+    "sonnet_output_usd_per_mtok": 15.0
+  },
   "repos": [
     {
       "key": "flask",
       "url": "https://github.com/pallets/flask",
       "clone_depth": 50,
-      "raw_search": { "pattern": "def test_", "dir": "tests" },
-      "symbol_read": { "file": "src/flask/app.py", "symbol": "Flask.full_dispatch_request" },
-      "pytest": { "subset_glob": "tests/", "deps": ["werkzeug", "jinja2", "itsdangerous", "click", "blinker"] },
+      "raw_search": {
+        "pattern": "def test_",
+        "dir": "tests"
+      },
+      "symbol_read": {
+        "file": "src/flask/app.py",
+        "symbol": "Flask.full_dispatch_request"
+      },
+      "pytest": {
+        "subset_glob": "tests/",
+        "deps": [
+          "werkzeug",
+          "jinja2",
+          "itsdangerous",
+          "click",
+          "blinker"
+        ]
+      },
       "multiturn_reads": [
-        { "file": "src/flask/app.py", "symbol": "Flask.full_dispatch_request" },
-        { "file": "src/flask/wrappers.py", "symbol": "Request.full_path" },
-        { "file": "src/flask/config.py", "symbol": "Config.from_pyfile" }
+        {
+          "file": "src/flask/app.py",
+          "symbol": "Flask.full_dispatch_request"
+        },
+        {
+          "file": "src/flask/wrappers.py",
+          "symbol": "Request.full_path"
+        },
+        {
+          "file": "src/flask/config.py",
+          "symbol": "Config.from_pyfile"
+        }
       ]
     },
     {
       "key": "requests",
       "url": "https://github.com/psf/requests",
       "clone_depth": 50,
-      "raw_search": { "pattern": "session", "dir": "src" },
-      "symbol_read": { "file": "src/requests/sessions.py", "symbol": "Session.request" },
-      "pytest": { "subset_glob": "tests/", "deps": ["charset_normalizer", "idna", "urllib3", "certifi", "pytest-httpbin"] },
+      "raw_search": {
+        "pattern": "session",
+        "dir": "src"
+      },
+      "symbol_read": {
+        "file": "src/requests/sessions.py",
+        "symbol": "Session.request"
+      },
+      "pytest": {
+        "subset_glob": "tests/",
+        "deps": [
+          "charset_normalizer",
+          "idna",
+          "urllib3",
+          "certifi",
+          "pytest-httpbin"
+        ]
+      },
       "multiturn_reads": [
-        { "file": "src/requests/sessions.py", "symbol": "Session.request" },
-        { "file": "src/requests/models.py", "symbol": "Response.iter_content" },
-        { "file": "src/requests/adapters.py", "symbol": "HTTPAdapter.send" }
+        {
+          "file": "src/requests/sessions.py",
+          "symbol": "Session.request"
+        },
+        {
+          "file": "src/requests/models.py",
+          "symbol": "Response.iter_content"
+        },
+        {
+          "file": "src/requests/adapters.py",
+          "symbol": "HTTPAdapter.send"
+        }
       ]
     },
     {
       "key": "fastapi",
       "url": "https://github.com/fastapi/fastapi",
       "clone_depth": 50,
-      "raw_search": { "pattern": "def get", "dir": "fastapi" },
-      "symbol_read": { "file": "fastapi/routing.py", "symbol": "APIRouter.add_api_route" },
-      "pytest": { "subset_glob": "tests/", "deps": ["pydantic", "starlette", "email-validator", "httpx", "opentelemetry-sdk", "pytest-asyncio"] },
+      "raw_search": {
+        "pattern": "def get",
+        "dir": "fastapi"
+      },
+      "symbol_read": {
+        "file": "fastapi/routing.py",
+        "symbol": "APIRouter.add_api_route"
+      },
+      "pytest": {
+        "subset_glob": "tests/",
+        "deps": [
+          "pydantic",
+          "starlette",
+          "email-validator",
+          "httpx",
+          "opentelemetry-sdk",
+          "pytest-asyncio"
+        ]
+      },
       "multiturn_reads": [
-        { "file": "fastapi/routing.py", "symbol": "APIRouter.add_api_route" },
-        { "file": "fastapi/applications.py", "symbol": "FastAPI.__init__" },
-        { "file": "fastapi/params.py", "symbol": "Param.field_info" }
+        {
+          "file": "fastapi/routing.py",
+          "symbol": "APIRouter.add_api_route"
+        },
+        {
+          "file": "fastapi/applications.py",
+          "symbol": "FastAPI.__init__"
+        },
+        {
+          "file": "fastapi/params.py",
+          "symbol": "Param.field_info"
+        }
       ]
     },
     {
       "key": "rich",
       "url": "https://github.com/Textualize/rich",
       "clone_depth": 50,
-      "raw_search": { "pattern": "class ", "dir": "rich" },
-      "symbol_read": { "file": "rich/console.py", "symbol": "Console.print" },
-      "pytest": { "subset_glob": "tests/", "deps": ["attrs"] },
+      "raw_search": {
+        "pattern": "class ",
+        "dir": "rich"
+      },
+      "symbol_read": {
+        "file": "rich/console.py",
+        "symbol": "Console.print"
+      },
+      "pytest": {
+        "subset_glob": "tests/",
+        "deps": [
+          "attrs"
+        ]
+      },
       "multiturn_reads": [
-        { "file": "rich/console.py", "symbol": "Console.print" },
-        { "file": "rich/table.py", "symbol": "Table.add_row" },
-        { "file": "rich/panel.py", "symbol": "Panel.render" }
+        {
+          "file": "rich/console.py",
+          "symbol": "Console.print"
+        },
+        {
+          "file": "rich/table.py",
+          "symbol": "Table.add_row"
+        },
+        {
+          "file": "rich/panel.py",
+          "symbol": "Panel.render"
+        }
       ]
     },
     {
       "key": "httpie",
       "url": "https://github.com/httpie/cli",
       "clone_depth": 50,
-      "raw_search": { "pattern": "import", "dir": "httpie" },
-      "symbol_read": { "file": "httpie/core.py", "symbol": "main" },
-      "pytest": { "subset_glob": "tests/", "deps": ["requests", "pygments", "multidict", "rich", "pytest-httpbin", "responses"] },
+      "raw_search": {
+        "pattern": "import",
+        "dir": "httpie"
+      },
+      "symbol_read": {
+        "file": "httpie/core.py",
+        "symbol": "main"
+      },
+      "pytest": {
+        "subset_glob": "tests/",
+        "deps": [
+          "requests",
+          "pygments",
+          "multidict",
+          "rich",
+          "pytest-httpbin",
+          "responses"
+        ]
+      },
       "multiturn_reads": [
-        { "file": "httpie/core.py", "symbol": "main" },
-        { "file": "httpie/cli/definition.py", "symbol": "HTTPieArgumentParser" },
-        { "file": "httpie/sessions.py", "symbol": "Session" }
+        {
+          "file": "httpie/core.py",
+          "symbol": "main"
+        },
+        {
+          "file": "httpie/cli/definition.py",
+          "symbol": "HTTPieArgumentParser"
+        },
+        {
+          "file": "httpie/sessions.py",
+          "symbol": "Session"
+        }
       ]
+    },
+    {
+      "key": "zod",
+      "url": "https://github.com/colinhacks/zod",
+      "clone_depth": 50,
+      "language": "typescript",
+      "auto": true,
+      "raw_search": {
+        "pattern": "return ",
+        "dir": "packages"
+      }
+    },
+    {
+      "key": "lodash",
+      "url": "https://github.com/lodash/lodash",
+      "clone_depth": 50,
+      "language": "javascript",
+      "auto": true,
+      "raw_search": {
+        "pattern": "return ",
+        "dir": "."
+      }
+    },
+    {
+      "key": "gin",
+      "url": "https://github.com/gin-gonic/gin",
+      "clone_depth": 50,
+      "language": "go",
+      "auto": true,
+      "raw_search": {
+        "pattern": "return ",
+        "dir": "."
+      }
+    },
+    {
+      "key": "serde",
+      "url": "https://github.com/serde-rs/serde",
+      "clone_depth": 50,
+      "language": "rust",
+      "auto": true,
+      "raw_search": {
+        "pattern": "impl ",
+        "dir": "serde"
+      }
+    },
+    {
+      "key": "retrofit",
+      "url": "https://github.com/square/retrofit",
+      "clone_depth": 50,
+      "language": "java",
+      "auto": true,
+      "raw_search": {
+        "pattern": "public ",
+        "dir": "retrofit/src/main/java/retrofit2"
+      }
+    },
+    {
+      "key": "sinatra",
+      "url": "https://github.com/sinatra/sinatra",
+      "clone_depth": 50,
+      "language": "ruby",
+      "auto": true,
+      "raw_search": {
+        "pattern": "def ",
+        "dir": "lib"
+      }
+    },
+    {
+      "key": "composer",
+      "url": "https://github.com/composer/composer",
+      "clone_depth": 50,
+      "language": "php",
+      "auto": true,
+      "raw_search": {
+        "pattern": "function ",
+        "dir": "src"
+      }
+    },
+    {
+      "key": "newtonsoft",
+      "url": "https://github.com/JamesNK/Newtonsoft.Json",
+      "clone_depth": 50,
+      "language": "csharp",
+      "auto": true,
+      "raw_search": {
+        "pattern": "public ",
+        "dir": "Src"
+      }
+    },
+    {
+      "key": "alamofire",
+      "url": "https://github.com/Alamofire/Alamofire",
+      "clone_depth": 50,
+      "language": "swift",
+      "auto": true,
+      "raw_search": {
+        "pattern": "func ",
+        "dir": "Source"
+      }
+    },
+    {
+      "key": "curl",
+      "url": "https://github.com/curl/curl",
+      "clone_depth": 50,
+      "language": "c",
+      "auto": true,
+      "raw_search": {
+        "pattern": "return ",
+        "dir": "lib"
+      }
     }
   ],
   "injected_failure": {
@@ -84,17 +322,55 @@
     "template": "Please look at {file} and refactor the {symbol} function to handle the following edge cases properly: handle empty and None inputs with clear error messages, validate all incoming parameters before mutating state, add proper error messages, update the docstring, make the logging consistent with the rest of the codebase, keep the public signature backward compatible, avoid breaking existing callers, extract repeated logic into small private helpers, cover every new branch with tests, and make sure the feature flags still work as documented for both the community and the paid tiers of the product."
   },
   "zero_loss_gates": {
-    "symbol_read": ["symbol_present", "valid_python", "all_top_level_defs_present", "signature_line_match"],
-    "test_output": ["failing_test_name_present", "error_type_present", "first_traceback_frame_present"],
-    "multiturn": ["all_reads_lossless"],
-    "architecture": ["hub_files_listed", "compact_bound"],
-    "raw_search": ["matches_exist", "paths_preserved"],
-    "git_diff": ["changed_files_preserved"],
-    "write_egress": ["inserted_line_present", "original_signature_in_target"],
-    "api_surface": ["hub_files_listed", "smaller_than_crawl"],
-    "kv_cache": ["prefix_hit_rate_ge_85", "input_reduction_positive"],
-    "secret_guard": ["deny_decision", "no_secret_leak"],
-    "junk_read": ["capped_output", "junk_file_named"],
-    "prompt_compaction": ["action_extracted", "target_file_preserved", "savings_positive"]
+    "symbol_read": [
+      "symbol_present",
+      "valid_python",
+      "all_top_level_defs_present",
+      "signature_line_match"
+    ],
+    "test_output": [
+      "failing_test_name_present",
+      "error_type_present",
+      "first_traceback_frame_present"
+    ],
+    "multiturn": [
+      "all_reads_lossless"
+    ],
+    "architecture": [
+      "hub_files_listed",
+      "compact_bound"
+    ],
+    "raw_search": [
+      "matches_exist",
+      "paths_preserved"
+    ],
+    "git_diff": [
+      "changed_files_preserved"
+    ],
+    "write_egress": [
+      "inserted_line_present",
+      "original_signature_in_target"
+    ],
+    "api_surface": [
+      "hub_files_listed",
+      "smaller_than_crawl"
+    ],
+    "kv_cache": [
+      "prefix_hit_rate_ge_80",
+      "input_reduction_positive"
+    ],
+    "secret_guard": [
+      "deny_decision",
+      "no_secret_leak"
+    ],
+    "junk_read": [
+      "capped_output",
+      "junk_file_named"
+    ],
+    "prompt_compaction": [
+      "action_extracted",
+      "target_file_preserved",
+      "savings_positive"
+    ]
   }
 }

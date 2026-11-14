@@ -60,6 +60,9 @@ class TestRegistryPreRegistration(unittest.TestCase):
         self.assertGreaterEqual(len(reg["repos"]), 5, "pre-registration promises 5 repos")
         for repo in reg["repos"]:
             self.assertIn("url", repo)
+            if repo.get("auto"):
+                self.assertIn("language", repo)
+                continue
             self.assertIn("symbol", repo["symbol_read"])
             self.assertIn("file", repo["symbol_read"])
             self.assertGreaterEqual(len(repo.get("multiturn_reads", [])), 3)
