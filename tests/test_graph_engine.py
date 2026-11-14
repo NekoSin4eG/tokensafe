@@ -6,7 +6,7 @@ import unittest
 import os
 import shutil
 import tempfile
-from src.graph_engine import CodeGraph, GraphEngine
+from src.graph_engine import CodeGraph, CodeSymbol, GraphEngine
 
 class TestGraphEngine(unittest.TestCase):
 
@@ -322,3 +322,65 @@ func run() {
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestApiSurfaceCompaction(unittest.TestCase):
+    """QA sweep finding: on real repos generate_api_surface exploded to 114M
+    tokens — minified/generated one-liners leaked WHOLE LINES into symbol
+    signatures (157KB each) and testdata/vendor were not filtered. The map is
+    now bounded and must not mutate the target repository."""
+
+    def _graph_with(self, files: dict):
+        g = CodeGraph(root_dir=".", use_disk_cache=False)
+        for path, sigs in files.items():
+            for name, sig in sigs:
+                key = f"{path}::{name}"
+                g.symbols[key] = CodeSymbol(name, "function", path, 1, 2, signature=sig)
+                g.file_symbols.setdefault(path, []).append(key)
+        return g
+
+    def test_minified_signature_truncated_at_declaration_boundary(self):
+        monster = 'var P=function(A){"use strict";' + "x" * 100_000
+        g = self._graph_with({"src/p.js": [("P", monster)]})
+        out = g.generate_api_surface()
+        self.assertIn("var P=function(A)", out)
+        self.assertNotIn("use strict", out)
+        self.assertLess(len(out), 10_000)
+
+    def test_interior_dict_literal_not_cut(self):
+        g = self._graph_with({"src/cfg.py": [("f", 'def f(a: dict = {"x": 1}) -> None:')]})
+        out = g.generate_api_surface()
+        self.assertIn('def f(a: dict = {"x": 1}) -> None:', out)
+
+    def test_testdata_vendor_minified_paths_skipped(self):
+        g = self._graph_with({
+            "modules/x/testdata/f.go": [("keep_out", "func keep_out()")],
+            "vendor/v/v.go": [("vendor_fn", "func vendor_fn()")],
+            "dist/b.min.js": [("minified_fn", "function minified_fn(){var a=1}")],
+            "src/real.go": [("real_fn", "func real_fn() error {")],
+        })
+        out = g.generate_api_surface()
+        self.assertIn("real_fn", out)
+        self.assertNotIn("keep_out", out)
+        self.assertNotIn("vendor_fn", out)
+        self.assertNotIn("minified_fn", out)
+
+    def test_map_bounded_with_budget_tail(self):
+        files = {f"src/m{i}.py": [(f"fn_{i}_{j}", f"def fn_{i}_{j}(a, b, c) -> dict: {'x' * 300}") for j in range(40)]
+                 for i in range(500)}
+        g = self._graph_with(files)
+        out = g.generate_api_surface()
+        self.assertLess(len(out), 80_000)  # budget + headers
+        self.assertIn("more source files omitted (API surface budget)", out)
+
+    def test_no_implicit_repo_write(self):
+        import tempfile, os
+        with tempfile.TemporaryDirectory() as tmp:
+            g = self._graph_with({"src/app.py": [("a", "def a():")]})
+            g.root_dir = tmp
+            out = g.generate_api_surface()
+            self.assertTrue(out)
+            self.assertFalse(os.path.exists(os.path.join(tmp, "tokensafe-out")))
+            out_file = os.path.join(tmp, "tokensafe-out", "API_SURFACE.md")
+            g.generate_api_surface(out_file)
+            self.assertTrue(os.path.isfile(out_file))

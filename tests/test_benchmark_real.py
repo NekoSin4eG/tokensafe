@@ -267,3 +267,25 @@ class TestGitDiffGateChangedPaths(unittest.TestCase):
         sliced = "diff --git a/src/kept.py b/src/kept.py\n+++ b/src/kept.py\n"  # lost.svg absent entirely
         gates = RealRepoBenchmark.git_diff_gates(raw, sliced)
         self.assertFalse(gates["changed_files_preserved"])
+
+
+class TestKVCacheStabilityGate(unittest.TestCase):
+    """v5 (QA sweep finding): the raw >=80% hit-rate threshold measured hub-file
+    SIZE distribution, not normalizer quality — uptime-kuma's ceiling was 77.9%
+    with a perfectly byte-stable normalizer (achieved prefix == theoretical
+    append-only ceiling). v5 gates achieved-vs-ceiling instead."""
+
+    def test_registry_v5_renames_stability_gate(self):
+        bench = RealRepoBenchmark()
+        self.assertEqual(bench.reg.get("version"), 5)
+        kv_gates = bench.reg["zero_loss_gates"]["kv_cache"]
+        self.assertIn("prefix_stability_ge_95", kv_gates)
+        self.assertNotIn("prefix_hit_rate_ge_80", kv_gates)
+        self.assertIn("v5 renames the kv_cache gate", bench.reg.get("methodology", ""))
+
+    def test_dominant_last_file_has_low_ceiling(self):
+        # append-only ceiling = sum(T[i-1]) / sum(T[i]); when the last hub file
+        # dominates, the ceiling drops below any fixed hit-rate threshold
+        totals = [100, 110, 120, 130, 140, 150, 160, 170, 180, 900]
+        ceiling = sum(totals[:-1]) / sum(totals)
+        self.assertLess(ceiling, 0.80)  # v4 gate unreachable with perfect stability

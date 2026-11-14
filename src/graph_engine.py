@@ -983,12 +983,55 @@ class CodeGraph:
     # -------------------------------------------------------------
     # 3. API Surface Generator (tokensafe-out/API_SURFACE.md)
     # -------------------------------------------------------------
+    # API-surface map guards (QA sweep finding: on real repos the map exploded to
+    # 114M tokens — minified/generated bundles leaked WHOLE LINES into symbol
+    # signatures (157KB each) and testdata/vendor files were not filtered).
+    _SURFACE_SKIP_DIR_SEGMENTS = frozenset((
+        "tests", "test", "testdata", "test_fixtures", "__tests__", "__mocks__",
+        "spec", "specs", "fixtures", "mocks", "examples", "docs", "doc",
+        "vendor", "third_party", "thirdparty", "node_modules", "dist", "build",
+        "out", "target", "__pycache__", ".venv", "venv", "generated",
+    ))
+    _SURFACE_SKIP_FILE_PATTERNS = (".min.js", ".min.css", ".bundle.js", ".map", ".d.ts")
+    _SURFACE_SIG_MAX = 160        # per-symbol signature cap (chars)
+    _SURFACE_BODY_BUDGET = 60_000  # whole-map body budget (chars, ~15k tokens)
+
+    @classmethod
+    def _surface_skip_path(cls, rel_path: str) -> bool:
+        low = rel_path.lower()
+        if any(p in low for p in cls._SURFACE_SKIP_FILE_PATTERNS):
+            return True
+        if low.endswith((".lock", ".sum", ".lockb")):
+            return True
+        return any(seg in cls._SURFACE_SKIP_DIR_SEGMENTS
+                   for seg in low.replace("\\", "/").split("/")[:-1])
+
+    @classmethod
+    def _surface_signature(cls, sig: str) -> str:
+        sig = (sig or "").strip()
+        if not sig:
+            return ""
+        # Cut minified/generated one-liners at the declaration boundary: the
+        # text right before the first '{' of a function declaration ends with
+        # ')' (e.g. 'var X=function(A){'); interior dict literals keep intact.
+        cut = re.search(r"[{;]", sig)
+        if cut and cut.start() >= 1 and sig[: cut.start()].rstrip().endswith(")"):
+            sig = sig[: cut.start()].rstrip()
+        if len(sig) > cls._SURFACE_SIG_MAX:
+            sig = sig[: cls._SURFACE_SIG_MAX - 3] + "..."
+        return sig
+
     def generate_api_surface(self, output_path: Optional[str] = None) -> str:
         """
         Generates a high-density, agent-friendly Markdown map of all classes,
-        types, and exported interfaces in the project (~1,500 tokens).
+        types, and exported interfaces in the project. Bounded: signatures are
+        capped, testdata/vendor/minified paths skipped, whole map capped at
+        _SURFACE_BODY_BUDGET chars (~15k tokens) — god-node files listed first.
+        Writes a file ONLY when output_path is passed explicitly (the MCP tool
+        and benchmarks consume the returned text; no implicit repo mutation).
         """
         god_nodes = self.get_god_nodes(top_n=5)
+        god_files = {g["file"] for g in god_nodes}
         lines = [
             "# TokenSafe Architecture & API Surface",
             f"*Generated locally at {time.strftime('%Y-%m-%d %H:%M:%S')} • Zero LLM Cost*",
@@ -1007,28 +1050,47 @@ class CodeGraph:
             ""
         ])
 
+        sections: List[Tuple[str, List[str]]] = []
         for rel_path, sym_keys in sorted(self.file_symbols.items()):
-            if not sym_keys:
+            if not sym_keys or self._surface_skip_path(rel_path):
                 continue
-            lines.append(f"### `{rel_path}`")
+            sym_lines = []
             for k in sym_keys:
                 sym = self.symbols.get(k)
                 if sym:
-                    lines.append(f"- `{sym.kind}` **`{sym.name}`** (line {sym.line_start}): `{sym.signature}`")
+                    sym_lines.append(
+                        f"- `{sym.kind}` **`{sym.name}`** (line {sym.line_start}): "
+                        f"`{self._surface_signature(sym.signature)}`")
+            if sym_lines:
+                sections.append((rel_path, sym_lines))
+
+        # God-node files first (highest architectural value), then the rest.
+        ordered = ([s for s in sections if s[0] in god_files]
+                   + [s for s in sections if s[0] not in god_files])
+        omitted_files = 0
+        used = 0
+        for rel_path, sym_lines in ordered:
+            block = len(rel_path) + sum(len(l) for l in sym_lines)
+            if used + block > self._SURFACE_BODY_BUDGET:
+                omitted_files += 1
+                continue
+            used += block
+            lines.append(f"### `{rel_path}`")
+            lines.extend(sym_lines)
             lines.append("")
+
+        if omitted_files:
+            lines.append(f"*+ {omitted_files} more source files omitted (API surface budget)*")
 
         output_content = "\n".join(lines)
 
-        if output_path is None:
-            out_dir = os.path.join(self.root_dir, "tokensafe-out")
-            output_path = os.path.join(out_dir, "API_SURFACE.md")
-
-        try:
-            os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
-            with open(output_path, "w", encoding="utf-8") as f:
-                f.write(output_content)
-        except OSError:
-            pass
+        if output_path:
+            try:
+                os.makedirs(os.path.dirname(os.path.abspath(output_path)), exist_ok=True)
+                with open(output_path, "w", encoding="utf-8") as f:
+                    f.write(output_content)
+            except OSError:
+                pass
 
         return output_content
 

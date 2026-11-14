@@ -142,3 +142,26 @@ class TestPromptCompactor(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestFileRegexExtensionIntegrity(unittest.TestCase):
+    """QA sweep finding: the extension alternation listed short suffixes before
+    long ones with no trailing \\b, so FILE_REGEX truncated extracted target
+    files (App.tsx -> App.ts) — DISTILLER-tier target_file metadata was wrong
+    for every .tsx/.jsx/.cpp/.hpp prompt. Ruby/PHP/Swift/Kotlin were missing
+    entirely."""
+
+    def test_no_extension_truncation(self):
+        for path in ("packages/x/components/App.tsx", "src/a.jsx", "lib/b.cpp",
+                     "inc/c.hpp", "d.rb", "e.php", "f.swift", "g.kt",
+                     "h.mjs", "i.cjs", "j.mdx", "k.vue", "l.scala"):
+            self.assertIn(path, PromptCompactor.FILE_REGEX.findall(path),
+                          f"extension truncated or missing for {path}")
+
+    def test_prefix_safe_ordering(self):
+        exts = PromptCompactor._FILE_EXTS
+        for short in ("ts", "js", "c", "h", "md"):
+            for e in exts:
+                if e != short and e.endswith(short):
+                    self.assertLess(exts.index(e), exts.index(short),
+                                    f"{e} must precede {short} (longest-first)")

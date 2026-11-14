@@ -217,7 +217,7 @@ class RealRepoBenchmark:
             targets.append("tests/")
         proc = subprocess.run(
             [venv_py, "-m", "pytest", *targets, "-q", "--tb=long", "--no-header", "-p", "no:cacheprovider"],
-            cwd=repo_root, capture_output=True, text=True, timeout=300,
+            cwd=repo_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300,
         )
         raw = (proc.stdout or "") + (proc.stderr or "")
         if not raw.strip():
@@ -326,7 +326,7 @@ class RealRepoBenchmark:
                 py_args += ["-o", "asyncio_default_fixture_loop_scope=function"]
         py_args += [*targets, "-q", "--tb=long", "--no-header", "-p", "no:cacheprovider"]
         try:
-            proc = subprocess.run(py_args, cwd=root, capture_output=True, text=True, timeout=300)
+            proc = subprocess.run(py_args, cwd=root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=300)
         except subprocess.TimeoutExpired:
             return {"status": "skipped", "reason": "pytest timeout 300s"}
         raw = (proc.stdout or "") + (proc.stderr or "")
@@ -481,7 +481,7 @@ class RealRepoBenchmark:
         except ValueError:
             return {"status": "skipped", "reason": "no commit history"}
         proc = subprocess.run(["git", "diff", "HEAD~1", "HEAD"], cwd=root,
-                              capture_output=True, text=True, timeout=180)
+                              capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=180)
         raw = proc.stdout or ""
         if not raw.strip():
             return {"status": "skipped", "reason": "empty diff at HEAD~1"}
@@ -596,6 +596,7 @@ class RealRepoBenchmark:
         b_in = 0
         o_in = 0
         hit_toks = 0
+        cur_totals: List[int] = []
         for msgs in turns:
             # inject_cache_control=False: we measure prefix BYTE-STABILITY (the
             # property that makes provider caching possible). Rolling breakpoints
@@ -605,6 +606,7 @@ class RealRepoBenchmark:
             units = _extract_canonical_units(None, norm_msgs)
             cur = sum(_cached_tokens(u, tok_cache) for u in units)
             b_in += cur
+            cur_totals.append(cur)
             prefix = _longest_prefix_tokens(prev_units, units, tok_cache) if prev_units else 0
             hit_toks += prefix
             o_in += max(0, cur - prefix) + prefix  # full input still sent; prefix billed at cached rate
@@ -619,8 +621,17 @@ class RealRepoBenchmark:
         b_billed = b_in
         reduction = round((1 - o_billed / b_billed) * 100.0, 1) if b_billed else 0.0
         usd_saved = round((b_billed - o_billed) / 1e6 * self.pricing.get("sonnet_input_usd_per_mtok", 3.0), 4)
+        # Theoretical ceiling for an append-only replay: every turn could hit the
+        # ENTIRE previous turn's mass, so the ceiling is sum(T[i-1]) / sum(T[i]).
+        # A raw hit-rate threshold (v4: >=80%) actually measured hub-file SIZE
+        # distribution — a repo whose last hub file dominates can never reach 80%
+        # with a perfectly stable normalizer (QA sweep: uptime-kuma ceiling 77.9%
+        # with 99.96% per-turn stability). v5 gates the property under test —
+        # normalizer churn — as achieved prefix vs that ceiling.
+        ceiling_total = sum(cur_totals[:-1])
+        stability = round((hit_toks / ceiling_total) * 100.0, 1) if ceiling_total else 0.0
         gates = {
-            "prefix_hit_rate_ge_80": hit_rate >= 80.0,
+            "prefix_stability_ge_95": stability >= 95.0,
             "input_reduction_positive": reduction > 0,
         }
         result = {
@@ -630,15 +641,16 @@ class RealRepoBenchmark:
             "saved_tokens": max(0, b_billed - o_billed),
             "reduction_pct": reduction,
             "kv_cache_hit_rate_pct": hit_rate,
+            "prefix_stability_pct": stability,
             "usd_saved": usd_saved,
             "gates": gates,
             "turns": len(turns),
-            "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)",
+            "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet); stability = achieved prefix vs append-only ceiling",
         }
         if not all(gates.values()):
             result["fail_reason"] = (
                 "gate rejection: " + ", ".join(g for g, ok in gates.items() if not ok)
-                + f" (hit_rate={hit_rate}%, billed_reduction={reduction}%)")
+                + f" (stability={stability}%, hit_rate={hit_rate}%, billed_reduction={reduction}%)")
         return result
 
     # -- scenario 10: secret guard --------------------------------------------

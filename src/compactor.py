@@ -248,15 +248,55 @@ class PromptCompactor:
         )),
     ]
 
+    # Extension alternation is sorted LONGEST-FIRST at class-definition time:
+    # a naive "ts|js|tsx|jsx" order (plus no trailing word boundary) made the
+    # regex match 'file.ts' inside 'file.tsx' and truncate the extracted
+    # target_file (QA sweep finding on real repos: App.tsx -> App.ts).
+    # Longest-first + \b is prefix-safe for every current and future extension.
+    _FILE_EXTS = sorted(
+        (
+            "tsx", "jsx", "cpp", "hpp", "ts", "js", "py", "go", "rs", "java",
+            "c", "h", "json", "yaml", "yml", "md", "mdx", "proto", "toml",
+            "sql", "html", "css", "scss", "sh", "bash", "zsh", "lock", "vue",
+            "svelte", "graphql", "prisma", "rb", "php", "swift", "kt", "scala",
+            "dart", "mjs", "cjs", "lua", "cs", "fs", "vb", "ex", "exs", "erl",
+            "clj", "zig", "nim",
+        ),
+        key=len,
+        reverse=True,
+    )
     FILE_REGEX = re.compile(
         r'(?:'
-        r'(?:[\w\-\./\\]+[\/\\])?[\w\-\.]+\.(?:ts|js|tsx|jsx|py|go|rs|java|c|cpp|h|hpp|json|yaml|yml|md|proto|toml|sql|html|css|scss|sh|bash|zsh|lock|vue|svelte|graphql|prisma)'
+        r'(?:[\w\-\./\\][\w\-\./\\ ]*[\/\\])?[\w\-\.]+\.(?:' + "|".join(_FILE_EXTS) + r')\b'
         r'|(?:\.env(?:\.[\w\-]+)?|\.gitignore|\.dockerignore|\.prettierrc[\w\.\-]*|\.eslintrc[\w\.\-]*|\.npmignore|\.npmrc|\.yarnrc)'
         r'|\b(?:Dockerfile(?:\.[\w\-]+)?|Makefile|Procfile|Gemfile|Vagrantfile|Containerfile)\b'
         r'|\b(?:README(?:\.md)?|LICENSE|CHANGELOG(?:\.md)?)\b'
         r')',
         re.I
     )
+
+    # Space-tolerant path extraction: Swift-style dirs ('Splay Tree/SplayTree.swift')
+    # contain spaces, so the leading directory group may include them; that can
+    # drag in sentence fillers ('look at docs/a.py') — trimmed below.
+    _PATH_NOISE_WORDS = frozenset((
+        "please", "look", "at", "in", "the", "a", "an", "file", "open", "read",
+        "see", "check", "review", "edit", "fix", "update", "modify", "show",
+        "find", "inspect", "refactor", "and", "to", "of", "on", "for",
+        "изучи", "открой", "прочитай", "файл", "в", "на",
+    ))
+
+    @classmethod
+    def _trim_path_noise(cls, path: str) -> str:
+        """Space-tolerant FILE_REGEX can drag sentence words into the match
+        ('function calculate_tax in src/billing.py', 'please look at Splay
+        Tree/SplayTree.swift'). Everything BEFORE the LAST noise word is
+        sentence context — keep only the tail after it."""
+        tokens = path.split(" ")
+        last_noise = -1
+        for i, tok in enumerate(tokens[:-1]):  # the final token is path material
+            if tok.strip().lower() in cls._PATH_NOISE_WORDS:
+                last_noise = i
+        return " ".join(tokens[last_noise + 1:]) if last_noise >= 0 else path
 
     TRAIT_MAPPINGS = [
         (re.compile(r"\b(async|асинхронн\w*|as[ií]ncron\w*|asynchrone|asynchron)\b|(异步|非同期)", re.I), "async"),
@@ -426,7 +466,7 @@ class PromptCompactor:
 
                         # Extract file if present
                         files = cls.FILE_REGEX.findall(distilled)
-                        target_file = files[0] if files else ""
+                        target_file = cls._trim_path_noise(files[0]) if files else ""
 
                         # Extract symbol
                         symbol = cls.extract_symbol(raw_text, target_file)
@@ -464,7 +504,7 @@ class PromptCompactor:
         code_free = re.sub(r"```[\s\S]*?```|`[^`\n]+`", _mask_span, url_free)
 
         files = cls.FILE_REGEX.findall(url_free)
-        target_file = files[0] if files else ""
+        target_file = cls._trim_path_noise(files[0]) if files else ""
 
         action = "TASK"
         matched_action_regex = None

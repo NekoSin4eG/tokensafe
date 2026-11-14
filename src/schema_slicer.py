@@ -18,6 +18,8 @@ smart_read_file so agents use one familiar entry point.
 import json
 import os
 import re
+
+from src.tokenizer import count_tokens
 from typing import Any, Dict, List, Optional, Tuple
 
 _MAX_REF_CHAIN = 15
@@ -55,17 +57,33 @@ class SchemaSlicer:
 
     @classmethod
     def slice_file(cls, path: str, target: str = "") -> Tuple[str, Dict[str, Any]]:
-        """Returns (sliced_text, info). Empty `target` yields a compact overview."""
+        """Returns (sliced_text, info). Empty `target` yields a compact overview.
+
+        Never EXPANDS: when the slice is not smaller than the raw file (tiny
+        toy schemas — QA sweep found 14-token graphql fixtures growing to 23),
+        the raw text is returned unchanged, same honest pass-through as
+        DiffSlicer."""
+        raw_text = ""
+        try:
+            with open(path, "r", encoding="utf-8", errors="replace") as f:
+                raw_text = f.read()
+        except OSError:
+            pass
         kind = cls.detect(path)
+        sliced = ""
         if kind == "openapi":
-            return cls._slice_openapi(path, target.strip())
-        if kind == "prisma":
-            return cls._slice_prisma(path, target.strip())
-        if kind == "graphql":
-            return cls._slice_graphql(path, target.strip())
-        if kind == "sql":
-            return cls._slice_sql(path, target.strip())
-        return "", {"kind": None}
+            sliced, info = cls._slice_openapi(path, target.strip())
+        elif kind == "prisma":
+            sliced, info = cls._slice_prisma(path, target.strip())
+        elif kind == "graphql":
+            sliced, info = cls._slice_graphql(path, target.strip())
+        elif kind == "sql":
+            sliced, info = cls._slice_sql(path, target.strip())
+        else:
+            return "", {"kind": None}
+        if not target.strip() and count_tokens(sliced) >= count_tokens(raw_text):
+            return raw_text, info  # overview pass-through; targeted slices keep precision semantics
+        return sliced, info
 
     # ------------------------------------------------------------------ OpenAPI
 
