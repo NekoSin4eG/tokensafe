@@ -504,27 +504,79 @@ class RealRepoBenchmark:
 
     # -- scenario 9: KV-cache prefix locking ---------------------------------
     def measure_kv_cache(self, root: str) -> Dict[str, Any]:
+        """Repo-agnostic 10-turn replay: each turn appends one more hub file to a
+        growing conversation. Byte-identical prefixes between consecutive turns are
+        cache-hit tokens (billed at the 0.1x cached rate); the PromptCacheNormalizer
+        must keep those prefixes byte-identical or the gate fails."""
         from src.graph_engine import GraphEngine
-        from src.benchmark import BenchmarkSuite
+        from src.cache_normalizer import PromptCacheNormalizer
+        from src.benchmark import _extract_canonical_units, _longest_prefix_tokens, _cached_tokens
+
+        hub_files = self._hub_files(root, limit=10)
+        if len(hub_files) < 5:
+            return {"status": "skipped", "reason": "fewer than 5 hub files for a multi-turn replay"}
         graph = GraphEngine.get_instance(root)
-        data = BenchmarkSuite.run_kv_cache_benchmark(graph=graph, pkg_dir=root)
-        if not data or not data.get("base_input_tokens"):
-            return {"status": "skipped", "reason": "kv replay produced no plan"}
+        normalizer = PromptCacheNormalizer()
+        sys_prompt = "You are an expert AI coding assistant working inside this repository. Follow clean engineering rules and use minimal diffs."
+
+        turns: List[List[Dict[str, Any]]] = []
+        for i, f in enumerate(hub_files):
+            # Append-only conversation (mirrors real agent sessions + the Append-Only
+            # Epoch Governor): every hub file appears as the SAME user/assistant triplet
+            # in the turn it is introduced and in every later turn, so normalized
+            # prefixes stay byte-identical and only the final continuation prompt is new.
+            msgs: List[Dict[str, Any]] = [{"role": "system", "content": sys_prompt}]
+            for pf in hub_files[:i + 1]:
+                with open(os.path.join(root, pf), "r", encoding="utf-8", errors="replace") as pfh:
+                    pf_content = pfh.read()
+                msgs.append({"role": "user", "content": f"Explore this repository step by step. File {pf}:\n{pf_content}"})
+                msgs.append({"role": "assistant", "content": f"Analyzed {pf}: indexed symbols and call graph."})
+            msgs.append({"role": "user", "content": "Continue the analysis with the next file."})
+            turns.append(msgs)
+
+        tok_cache: Dict[str, int] = {}
+        prev_units: List[str] = []
+        b_in = 0
+        o_in = 0
+        hit_toks = 0
+        for msgs in turns:
+            # inject_cache_control=False: we measure prefix BYTE-STABILITY (the
+            # property that makes provider caching possible). Rolling breakpoints
+            # move the cacheable boundary every turn by design and would
+            # understate the stable prefix.
+            norm_msgs, _nstats = normalizer.normalize_messages([dict(m) for m in msgs], inject_cache_control=False)
+            units = _extract_canonical_units(None, norm_msgs)
+            cur = sum(_cached_tokens(u, tok_cache) for u in units)
+            b_in += cur
+            prefix = _longest_prefix_tokens(prev_units, units, tok_cache) if prev_units else 0
+            hit_toks += prefix
+            o_in += max(0, cur - prefix) + prefix  # full input still sent; prefix billed at cached rate
+            prev_units = units
+
+        if b_in == 0:
+            return {"status": "skipped", "reason": "empty replay"}
+        hit_rate = round(hit_toks / b_in * 100.0, 1)
+        # Billed tokens: cache-hit portion at the 0.1x cached rate, rest at full input price
+        billed_nonhit = o_in - hit_toks
+        o_billed = billed_nonhit + round(hit_toks * 0.1)
+        b_billed = b_in
+        reduction = round((1 - o_billed / b_billed) * 100.0, 1) if b_billed else 0.0
+        usd_saved = round((b_billed - o_billed) / 1e6 * self.pricing.get("sonnet_input_usd_per_mtok", 3.0), 4)
         gates = {
-            "prefix_hit_rate_ge_85": float(data.get("kv_cache_hit_rate_pct", 0)) >= 85.0,
-            "input_reduction_positive": float(data.get("input_token_reduction_pct", 0)) > 0,
+            "prefix_hit_rate_ge_85": hit_rate >= 85.0,
+            "input_reduction_positive": reduction > 0,
         }
-        usd_saved = round(float(data.get("claude_uncached_base_usd", 0)) - float(data.get("claude_opt_total_usd", 0)), 4)
         return {
             "status": "ok" if all(gates.values()) else "gate_failed",
-            "baseline_tokens": data.get("base_input_tokens"),
-            "optimized_tokens": data.get("opt_input_tokens"),
-            "saved_tokens": int(data.get("base_input_tokens", 0)) - int(data.get("opt_input_tokens", 0)),
-            "reduction_pct": data.get("input_token_reduction_pct"),
-            "kv_cache_hit_rate_pct": data.get("kv_cache_hit_rate_pct"),
+            "baseline_tokens": b_billed,
+            "optimized_tokens": o_billed,
+            "saved_tokens": max(0, b_billed - o_billed),
+            "reduction_pct": reduction,
+            "kv_cache_hit_rate_pct": hit_rate,
             "usd_saved": usd_saved,
             "gates": gates,
-            "note": "multi-turn replay over repo files; USD = Claude Sonnet total bill delta (input+output) vs uncached",
+            "turns": len(turns),
+            "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)",
         }
 
     # -- scenario 10: secret guard --------------------------------------------
@@ -621,6 +673,9 @@ class RealRepoBenchmark:
             "usd_saved": usd,
             "gates": gates,
         }
+        if out["status"] == "gate_failed":
+            failed = [g for g, ok in gates.items() if not ok]
+            out["fail_reason"] = "gate rejection: " + ", ".join(failed)
         if extra:
             out.update(extra)
         return out
