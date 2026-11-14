@@ -574,16 +574,54 @@ class CommandSanitizer:
 
         return cls.join_stages(pairs), total_saved, "; ".join(reasons)
 
+    _DOTS_PROGRESS_RE = re.compile(r'^\s*\.[\s.]*(?:\[\s*\d+%\s*\])?\s*$')
+    _VERBOSE_PASSED_RE = re.compile(r'\bPASSED\b')
+    _VERBOSE_KEEP_RE = re.compile(r'\b(FAILED|ERROR|XFAIL|XPASS|SKIPPED|SKIP|WARNING|Traceback)\b')
+
     @classmethod
-    def compact_test_output(cls, raw: str, exit_code: int = 0) -> str:
+    def _strip_failure_noise(cls, raw: str) -> str:
+        """Failure-output compaction: every traceback/failure frame is kept
+        intact; only zero-information noise is removed (pure progress-dots
+        lines, blank-line runs, verbose PASSED lines collapsed to a counter).
+        Error context is never altered."""
+        lines = raw.splitlines()
+        out: List[str] = []
+        blanks = 0
+        passed_collapsed = 0
+        for ln in lines:
+            s = ln.strip()
+            if not s:
+                blanks += 1
+                if blanks <= 1:
+                    out.append("")
+                continue
+            blanks = 0
+            if cls._DOTS_PROGRESS_RE.match(ln):
+                continue  # pure progress dots: counts live in the summary line
+            if cls._VERBOSE_PASSED_RE.search(s) and not cls._VERBOSE_KEEP_RE.search(s):
+                passed_collapsed += 1
+                continue
+            out.append(ln)
+        if passed_collapsed:
+            out.append(f"[verbose runner: {passed_collapsed} passed test lines collapsed — all failures kept intact]")
+        while out and not out[-1].strip():
+            out.pop()
+        return "\n".join(out)
+
+    @classmethod
+    def compact_test_output(cls, raw: str, exit_code: int=0) -> str:
         """
         Compacts test execution output to prevent context bloating in Messages history.
-        - If exit_code != 0: returns full raw output untouched to preserve error context.
+        - If exit_code != 0: strips only zero-information noise (progress dots, blank-line
+          runs, verbose PASSED lines); every traceback, failing test name, error type and
+          file:line frame is preserved untouched.
         - If exit_code == 0: extracts concise summary lines (e.g. 'PASS: 42 passed in 1.2s')
           discarding repetitive passing test lines.
         """
-        if exit_code != 0 or not raw or not raw.strip():
+        if not raw or (not raw.strip()):
             return raw
+        if exit_code != 0:
+            return cls._strip_failure_noise(raw)
 
         lines = [line.strip() for line in raw.splitlines() if line.strip()]
         if not lines:
@@ -682,12 +720,21 @@ class CommandSanitizer:
         if not raw or len(raw) < 400:
             return None
         if resolved_exit is None:
-            # Unknown exit status: refuse to mute anything that looks like a failure
+            # Unknown exit status: refuse to mute anything that looks like a failure,
+            # but allow noise-only stripping (tracebacks stay intact) when it saves >=15%.
             if re.search(r"Traceback|AssertionError|\bERROR\b|FAILED|exit code [1-9]", raw):
+                stripped = cls._strip_failure_noise(raw)
+                if len(stripped) < len(raw) * 0.85:
+                    return stripped, len(raw), len(stripped)
                 return None
             resolved_exit = 0
         elif resolved_exit != 0:
-            return None
+            # Failed run: failure noise (progress dots / blank runs / verbose PASSED lines)
+            # is stripped while every traceback frame stays intact; skip when it saves <15%.
+            stripped = cls._strip_failure_noise(raw)
+            if len(stripped) >= len(raw) * 0.85:
+                return None
+            return stripped, len(raw), len(stripped)
         compacted = cls.compact_test_output(raw, resolved_exit)
         if compacted is raw or len(compacted) >= len(raw) * 0.6:
             return None

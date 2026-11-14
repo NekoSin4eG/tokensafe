@@ -14,10 +14,10 @@
    "symbol_read": {
     "status": "ok",
     "baseline_tokens": 18864,
-    "optimized_tokens": 5506,
-    "saved_tokens": 13358,
-    "reduction_pct": 70.8,
-    "usd_saved": 0.0401,
+    "optimized_tokens": 3784,
+    "saved_tokens": 15080,
+    "reduction_pct": 79.9,
+    "usd_saved": 0.0452,
     "gates": {
      "symbol_present": true,
      "valid_python": true,
@@ -28,10 +28,10 @@
    "test_output": {
     "status": "ok",
     "baseline_tokens": 6402,
-    "optimized_tokens": 6402,
-    "saved_tokens": 0,
-    "reduction_pct": 0.0,
-    "usd_saved": 0.0,
+    "optimized_tokens": 6191,
+    "saved_tokens": 211,
+    "reduction_pct": 3.3,
+    "usd_saved": 0.0006,
     "gates": {
      "failing_test_name_present": true,
      "error_type_present": true,
@@ -46,10 +46,10 @@
    "multiturn": {
     "status": "ok",
     "baseline_tokens": 45336,
-    "optimized_tokens": 7628,
-    "saved_tokens": 37708,
-    "reduction_pct": 83.2,
-    "usd_saved": 0.1131,
+    "optimized_tokens": 5304,
+    "saved_tokens": 40032,
+    "reduction_pct": 88.3,
+    "usd_saved": 0.1201,
     "gates": {
      "all_reads_lossless": true,
      "reads_measured": 2
@@ -60,7 +60,7 @@
       "symbol": "Flask.full_dispatch_request",
       "status": "ok",
       "baseline_tokens": 18864,
-      "optimized_tokens": 5506
+      "optimized_tokens": 3784
      },
      {
       "file": "src/flask/wrappers.py",
@@ -83,7 +83,7 @@
       "symbol": "Config.from_pyfile",
       "status": "ok",
       "baseline_tokens": 3804,
-      "optimized_tokens": 2122
+      "optimized_tokens": 1520
      }
     ]
    },
@@ -154,10 +154,10 @@
    "symbol_read": {
     "status": "ok",
     "baseline_tokens": 9743,
-    "optimized_tokens": 4657,
-    "saved_tokens": 5086,
-    "reduction_pct": 52.2,
-    "usd_saved": 0.0153,
+    "optimized_tokens": 2849,
+    "saved_tokens": 6894,
+    "reduction_pct": 70.8,
+    "usd_saved": 0.0207,
     "gates": {
      "symbol_present": true,
      "valid_python": true,
@@ -167,11 +167,11 @@
    },
    "test_output": {
     "status": "ok",
-    "baseline_tokens": 43138,
-    "optimized_tokens": 43138,
-    "saved_tokens": 0,
-    "reduction_pct": 0.0,
-    "usd_saved": 0.0,
+    "baseline_tokens": 43130,
+    "optimized_tokens": 42725,
+    "saved_tokens": 405,
+    "reduction_pct": 0.9,
+    "usd_saved": 0.0012,
     "gates": {
      "failing_test_name_present": true,
      "error_type_present": true,
@@ -186,10 +186,10 @@
    "multiturn": {
     "status": "ok",
     "baseline_tokens": 59380,
-    "optimized_tokens": 13413,
-    "saved_tokens": 45967,
-    "reduction_pct": 77.4,
-    "usd_saved": 0.1379,
+    "optimized_tokens": 9561,
+    "saved_tokens": 49819,
+    "reduction_pct": 83.9,
+    "usd_saved": 0.1495,
     "gates": {
      "all_reads_lossless": true,
      "reads_measured": 3
@@ -200,21 +200,21 @@
       "symbol": "Session.request",
       "status": "ok",
       "baseline_tokens": 9743,
-      "optimized_tokens": 4657
+      "optimized_tokens": 2849
      },
      {
       "file": "src/requests/models.py",
       "symbol": "Response.iter_content",
       "status": "ok",
       "baseline_tokens": 12078,
-      "optimized_tokens": 4128
+      "optimized_tokens": 3589
      },
      {
       "file": "src/requests/adapters.py",
       "symbol": "HTTPAdapter.send",
       "status": "ok",
       "baseline_tokens": 7869,
-      "optimized_tokens": 4628
+      "optimized_tokens": 3123
      }
     ]
    },
@@ -285,10 +285,10 @@
    "symbol_read": {
     "status": "ok",
     "baseline_tokens": 73721,
-    "optimized_tokens": 39420,
-    "saved_tokens": 34301,
-    "reduction_pct": 46.5,
-    "usd_saved": 0.1029,
+    "optimized_tokens": 39529,
+    "saved_tokens": 34192,
+    "reduction_pct": 46.4,
+    "usd_saved": 0.1026,
     "gates": {
      "symbol_present": true,
      "valid_python": true,
@@ -299,9 +299,9 @@
    "test_output": {
     "status": "gate_failed",
     "baseline_tokens": 751,
-    "optimized_tokens": 751,
-    "saved_tokens": 0,
-    "reduction_pct": 0.0,
+    "optimized_tokens": 750,
+    "saved_tokens": 1,
+    "reduction_pct": 0.1,
     "usd_saved": 0.0,
     "gates": {
      "failing_test_name_present": false,
@@ -313,16 +313,16 @@
      "tests/"
     ],
     "exit_code": 3,
-    "fail_reason": "gate rejection: failing_test_name_present, error_type_present, first_traceback_frame_present (pytest exit=3; collection/import errors mean repo deps were not installable)",
+    "fail_reason": "gate rejection: failing_test_name_present, error_type_present, first_traceback_frame_present (pytest exit=3 — suite could not be collected/run cleanly; see excerpt)",
     "output_excerpt": "INTERNALERROR> Traceback (most recent call last):\nINTERNALERROR>   File \"/Users/olegsavelev/.tokensafe/data/bench/.venv-fastapi/lib/python3.13/site-packages/_pytest/main.py\", line 329, in wrap_session\nINTERNALERROR>     config._do_configure()\nINTERNALERROR>     ~~~~~~~~~~~~~~~~~~~~^^\nINTERNALERROR>   File \"/Users/olegsavelev/.tokensafe/data/bench/.venv-fastapi/lib/python3.13/site-packages/_pytest/"
    },
    "multiturn": {
     "status": "ok",
     "baseline_tokens": 147442,
-    "optimized_tokens": 39420,
-    "saved_tokens": 108022,
-    "reduction_pct": 73.3,
-    "usd_saved": 0.3241,
+    "optimized_tokens": 39529,
+    "saved_tokens": 107913,
+    "reduction_pct": 73.2,
+    "usd_saved": 0.3237,
     "gates": {
      "all_reads_lossless": true,
      "reads_measured": 1
@@ -333,7 +333,7 @@
       "symbol": "APIRouter.add_api_route",
       "status": "ok",
       "baseline_tokens": 73721,
-      "optimized_tokens": 39420
+      "optimized_tokens": 39529
      },
      {
       "file": "fastapi/applications.py",
@@ -426,10 +426,10 @@
    "symbol_read": {
     "status": "ok",
     "baseline_tokens": 28675,
-    "optimized_tokens": 9444,
-    "saved_tokens": 19231,
-    "reduction_pct": 67.1,
-    "usd_saved": 0.0577,
+    "optimized_tokens": 7710,
+    "saved_tokens": 20965,
+    "reduction_pct": 73.1,
+    "usd_saved": 0.0629,
     "gates": {
      "symbol_present": true,
      "valid_python": true,
@@ -440,10 +440,10 @@
    "test_output": {
     "status": "ok",
     "baseline_tokens": 746,
-    "optimized_tokens": 746,
-    "saved_tokens": 0,
-    "reduction_pct": 0.0,
-    "usd_saved": 0.0,
+    "optimized_tokens": 385,
+    "saved_tokens": 361,
+    "reduction_pct": 48.4,
+    "usd_saved": 0.0011,
     "gates": {
      "failing_test_name_present": true,
      "error_type_present": true,
@@ -458,10 +458,10 @@
    "multiturn": {
     "status": "ok",
     "baseline_tokens": 80036,
-    "optimized_tokens": 15435,
-    "saved_tokens": 64601,
-    "reduction_pct": 80.7,
-    "usd_saved": 0.1938,
+    "optimized_tokens": 12329,
+    "saved_tokens": 67707,
+    "reduction_pct": 84.6,
+    "usd_saved": 0.2031,
     "gates": {
      "all_reads_lossless": true,
      "reads_measured": 2
@@ -472,14 +472,14 @@
       "symbol": "Console.print",
       "status": "ok",
       "baseline_tokens": 28675,
-      "optimized_tokens": 9444
+      "optimized_tokens": 7710
      },
      {
       "file": "rich/table.py",
       "symbol": "Table.add_row",
       "status": "ok",
       "baseline_tokens": 11343,
-      "optimized_tokens": 5991
+      "optimized_tokens": 4619
      },
      {
       "file": "rich/panel.py",
@@ -564,16 +564,26 @@
    "key": "httpie",
    "url": "https://github.com/httpie/cli",
    "symbol_read": {
-    "status": "skipped",
-    "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+    "status": "ok",
+    "baseline_tokens": 2933,
+    "optimized_tokens": 689,
+    "saved_tokens": 2244,
+    "reduction_pct": 76.5,
+    "usd_saved": 0.0067,
+    "gates": {
+     "symbol_present": true,
+     "valid_python": true,
+     "all_top_level_defs_present": true,
+     "signature_line_match": true
+    }
    },
    "test_output": {
     "status": "ok",
-    "baseline_tokens": 20188,
-    "optimized_tokens": 20188,
-    "saved_tokens": 0,
-    "reduction_pct": 0.0,
-    "usd_saved": 0.0,
+    "baseline_tokens": 20395,
+    "optimized_tokens": 20141,
+    "saved_tokens": 254,
+    "reduction_pct": 1.2,
+    "usd_saved": 0.0008,
     "gates": {
      "failing_test_name_present": true,
      "error_type_present": true,
@@ -587,21 +597,22 @@
    },
    "multiturn": {
     "status": "ok",
-    "baseline_tokens": 5610,
-    "optimized_tokens": 1115,
-    "saved_tokens": 4495,
-    "reduction_pct": 80.1,
-    "usd_saved": 0.0135,
+    "baseline_tokens": 11476,
+    "optimized_tokens": 1767,
+    "saved_tokens": 9709,
+    "reduction_pct": 84.6,
+    "usd_saved": 0.0291,
     "gates": {
      "all_reads_lossless": true,
-     "reads_measured": 1
+     "reads_measured": 2
     },
     "per_read": [
      {
       "file": "httpie/core.py",
       "symbol": "main",
-      "status": "skipped",
-      "reason": "no skeleton produced — target symbol is >=70% of the file (product refusal threshold) or file unparseable"
+      "status": "ok",
+      "baseline_tokens": 2933,
+      "optimized_tokens": 689
      },
      {
       "file": "httpie/cli/definition.py",
@@ -614,7 +625,7 @@
       "symbol": "Session",
       "status": "ok",
       "baseline_tokens": 2805,
-      "optimized_tokens": 1115
+      "optimized_tokens": 1078
      }
     ]
    },
@@ -677,7 +688,7 @@
     "file": "tests/utils/__init__.py",
     "axis": "output_tokens (write_file vs surgical Edit)"
    },
-   "status": "partial"
+   "status": "ok"
   }
  ]
 }

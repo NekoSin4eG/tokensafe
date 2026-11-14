@@ -729,10 +729,12 @@ class Skeletonizer:
         return "\n".join(out)
 
     @classmethod
-    def get_skeleton_file(cls, original_path: str, target_symbol: Optional[str] = None) -> Tuple[Optional[str], int, int]:
+    def get_skeleton_file(cls, original_path: str, target_symbol: Optional[str] = None, dep_mode: str = "signature") -> Tuple[Optional[str], int, int]:
         """
         Reads original_path, checks mtime cache, generates skeleton if modified or absent.
         If target_symbol is provided, applies Graph-Guided AST skeletonization retaining 1-hop dependencies.
+        dep_mode: 'signature' (default; 1-hop external deps collapse to one-line signatures —
+        mirrors the smart_read_file contract) or 'full' (legacy: 1-hop bodies kept intact).
         Returns: (skeleton_path_or_none, orig_tokens, skeleton_tokens)
         """
         if not original_path or not os.path.exists(original_path):
@@ -748,7 +750,7 @@ class Skeletonizer:
         os.makedirs(cls.CACHE_DIR, exist_ok=True)
         path_hash = hashlib.md5(original_path.encode("utf-8")).hexdigest()[:8]
         base_name = os.path.basename(original_path)
-        sym_suffix = f"_{target_symbol}" if target_symbol else ""
+        sym_suffix = f"_{target_symbol}_{dep_mode}" if target_symbol else ""
         skeleton_filename = f"{path_hash}{sym_suffix}_{base_name}"
         skeleton_path = os.path.join(cls.CACHE_DIR, skeleton_filename)
         meta_path = os.path.join(cls.CACHE_DIR, f"{path_hash}{sym_suffix}_{base_name}.meta.json")
@@ -783,7 +785,7 @@ class Skeletonizer:
             try:
                 from src.graph_engine import GraphEngine
                 graph, rel_path = GraphEngine.for_file(original_path)
-                graph_content = graph.graph_guided_skeletonize(original_path, target_symbol=target_symbol)
+                graph_content = graph.graph_guided_skeletonize(original_path, target_symbol=target_symbol, dep_mode=dep_mode)
                 skeleton_content = graph_content if graph_content else cls.skeletonize_code(code, ext)
             except Exception:
                 skeleton_content = cls.skeletonize_code(code, ext)

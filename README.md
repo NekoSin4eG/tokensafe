@@ -234,18 +234,19 @@ No modeling: five popular repositories cloned at HEAD, scenarios **pre-registere
 |---|---|---:|---:|---:|:---|
 | flask | Architecture discovery (hub crawl → map) | 53,237 | **176** | **-99.7%** | PASS |
 | flask | Write egress (output axis, $15/M) | 7,106 | **44** | **-99.4%** | PASS |
-| flask | Multi-turn + repeat reads | 45,336 | 7,628 | **-83.2%** | PASS |
-| flask | Symbol read (AST skeleton) | 18,864 | 5,506 | **-70.8%** | PASS |
+| flask | Multi-turn + repeat reads | 45,336 | 5,304 | **-88.3%** | PASS |
+| httpie | Multi-turn + repeat reads | 5,610 | 1,115 | **-84.6%** | PASS |
+| flask | Symbol read (AST skeleton) | 18,864 | 3,784 | **-79.9%** | PASS |
 | flask | Raw search → scoped results | 7,967 | 523 | **-93.4%** | PASS |
-| rich | Symbol read (AST skeleton) | 28,675 | 9,444 | **-67.1%** | PASS |
-| rich | Architecture discovery | 76,172 | 158 | **-99.8%** | PASS |
-| fastapi | Symbol read (`routing.py`, 73.7K tok) | 73,721 | 39,420 | **-46.5%** | PASS |
-| fastapi | Multi-turn + repeat reads | 147,442 | 39,420 | **-73.3%** | PASS |
-| httpie | Raw search → scoped results | 9,568 | 462 | **-95.2%** | PASS |
-| flask | Full-suite pytest output | 6,391 | 6,391 | **0.0%** | PASS |
+| rich | Symbol read (AST skeleton) | 28,675 | 7,710 | **-73.1%** | PASS |
+| requests | Multi-turn + repeat reads | 59,380 | 9,561 | **-83.9%** | PASS |
+| requests | Symbol read (AST skeleton) | 9,743 | 2,849 | **-70.8%** | PASS |
+| fastapi | Symbol read (`routing.py`, 73.7K tok) | 73,721 | 39,529 | **-46.4%** | PASS |
+| rich | Verbose test output (noise strip) | 746 | 385 | **-48.4%** | PASS |
+| flask | Full-suite pytest output | 6,402 | 6,191 | **-3.3%** | PASS |
 | fastapi | Git diff churn → slice | 416 | 393 | **-5.5%** | PASS |
 
-Aggregate: **~670,000 measured tokens saved** per traced pass over all 5 repositories (input at `$3/M`, output axis at `$15/M`). A clean pytest suite honestly scores **0.0%** — savings are never invented. One scenario is published as **FAIL** with its reason: fastapi's test-output — fastapi's strict warning filters escalate a `pytest-asyncio` configuration deprecation into a pytest `INTERNALERROR`, so the suite cannot be collected in the bench venv; the gate rejects the output and no savings are claimed for it. Full table + raw JSON: [docs/BENCHMARK_REAL.md](docs/BENCHMARK_REAL.md) · live page: <https://tokensafe.dev/bench> · methodology post: <https://tokensafe.dev/blog/real-repo-benchmark-5-repos>. Reproduce:
+Aggregate: **~693,900 measured tokens saved** per traced pass over all 5 repositories (input at `$3/M`, output axis at `$15/M`). Test-output rows are honest about noise: a clean suite scores ~0-3% (only true noise is stripped), a verbose failing run scores -48%. One scenario is published as **FAIL** with its reason: fastapi's test-output — fastapi's strict warning filters escalate a `pytest-asyncio` configuration deprecation into a pytest `INTERNALERROR`, so the suite cannot be collected in the bench venv; the gate rejects the output and no savings are claimed for it. Full table + raw JSON: [docs/BENCHMARK_REAL.md](docs/BENCHMARK_REAL.md) · live page: <https://tokensafe.dev/bench> · methodology post: <https://tokensafe.dev/blog/real-repo-benchmark-5-repos>. Reproduce:
 
 ```bash
 tokensafe bench --real                        # all 5 pre-registered repos

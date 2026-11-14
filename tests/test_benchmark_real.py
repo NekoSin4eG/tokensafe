@@ -175,6 +175,42 @@ class TestNewScenarioGates(unittest.TestCase):
         self.assertEqual(bench.pricing.get("sonnet_output_usd_per_mtok"), 15.0)
 
 
+class TestFailureNoiseStrip(unittest.TestCase):
+    RAW_VERBOSE_FAIL = (
+        "============================= test session starts ==============================\n"
+        "collected 21 items\n"
+        "\n"
+        "tests/test_a.py::test_alpha PASSED [  4%]\n"
+        "tests/test_a.py::test_beta PASSED [  9%]\n"
+        "tests/test_a.py::test_gamma PASSED [ 14%]\n"
+        "........................................................................ [ 60%]\n"
+        "\n"
+        "=================================== FAILURES ===================================\n"
+        "________________________________ test_bench_injected_regression ________________\n"
+        "tests/test_bench_injected.py:2: in test_bench_injected_regression\n"
+        "    assert False, \"bench: pre-registered injected regression\"\n"
+        "E   AssertionError: bench: pre-registered injected regression\n"
+        "=========================== short test summary info ============================\n"
+        "FAILED tests/test_bench_injected.py::test_bench_injected_regression - AssertionError\n"
+    )
+
+    def test_failure_noise_stripped_but_failures_intact(self):
+        from src.command_sanitizer import CommandSanitizer
+        compacted = CommandSanitizer.compact_test_output(self.RAW_VERBOSE_FAIL, 1)
+        gates = test_output_gates(compacted)
+        self.assertTrue(all(gates.values()), "injected test name / error / frame must survive")
+        self.assertNotIn("PASSED [", compacted)
+        self.assertIn("passed test lines collapsed", compacted)
+        self.assertIn("E   AssertionError", compacted, "failure frame must stay intact")
+        self.assertLess(len(compacted), len(self.RAW_VERBOSE_FAIL))
+
+    def test_dots_only_lines_dropped_mixed_lines_kept(self):
+        from src.command_sanitizer import CommandSanitizer
+        compacted = CommandSanitizer.compact_test_output("..... [ 53%]\n....F... [ 99%]\n", 1)
+        self.assertIn("....F...", compacted, "lines marking a failure position must stay")
+        self.assertNotIn("..... [ 53%]", compacted)
+
+
 class TestRunLocal(unittest.TestCase):
     def test_run_local_on_tmp_repo(self):
         with tempfile.TemporaryDirectory() as tmp:
