@@ -459,8 +459,16 @@ class RealRepoBenchmark:
 
     # -- scenario 6: git-diff churn → slice_diff ----------------------------
     @staticmethod
+    def _changed_paths(raw_text: str) -> List[str]:
+        """Changed file paths from `+++ b/<path>` metadata lines (prefix stripped
+        correctly: '+++ b/' is 6 chars; the old [4:] slice left a 'b/' artifact
+        that broke path containment against omission notes — QA sweep finding)."""
+        return [ln[4:].strip().removeprefix("b/") for ln in raw_text.splitlines()
+                if ln.startswith("+++ b/")]
+
+    @staticmethod
     def git_diff_gates(raw_text: str, sliced_text: str) -> Dict[str, bool]:
-        changed = [ln[4:].strip() for ln in raw_text.splitlines() if ln.startswith("+++ b/")]
+        changed = RealRepoBenchmark._changed_paths(raw_text)
         non_lock = [p for p in changed if "lock" not in p.lower()]
         return {"changed_files_preserved": bool(non_lock) and all(p in sliced_text for p in non_lock)}
 
@@ -477,6 +485,12 @@ class RealRepoBenchmark:
         raw = proc.stdout or ""
         if not raw.strip():
             return {"status": "skipped", "reason": "empty diff at HEAD~1"}
+        # Zero-loss degenerate case: when the last commit touches ONLY
+        # lockfiles/binary assets there is nothing non-ignorable to preserve —
+        # that is a skip, not a gate rejection (QA sweep: ~10/150 real repos
+        # have asset-only HEAD~1 commits).
+        if not [p for p in self._changed_paths(raw) if "lock" not in p.lower()]:
+            return {"status": "skipped", "reason": "last commit only touches lockfiles/assets — nothing to slice"}
         baseline = count_tokens(raw)
         sliced, _orig, _new = DiffSlicer.slice_diff(raw)
         optimized = count_tokens(sliced)
@@ -609,7 +623,7 @@ class RealRepoBenchmark:
             "prefix_hit_rate_ge_80": hit_rate >= 80.0,
             "input_reduction_positive": reduction > 0,
         }
-        return {
+        result = {
             "status": "ok" if all(gates.values()) else "gate_failed",
             "baseline_tokens": b_billed,
             "optimized_tokens": o_billed,
@@ -621,6 +635,11 @@ class RealRepoBenchmark:
             "turns": len(turns),
             "note": "10-turn replay over repo hub files; cache-hit tokens billed at the 0.1x cached rate (Sonnet)",
         }
+        if not all(gates.values()):
+            result["fail_reason"] = (
+                "gate rejection: " + ", ".join(g for g, ok in gates.items() if not ok)
+                + f" (hit_rate={hit_rate}%, billed_reduction={reduction}%)")
+        return result
 
     # -- scenario 10: secret guard --------------------------------------------
     def measure_secret_guard(self, root: str) -> Dict[str, Any]:

@@ -246,8 +246,8 @@ class TestWave2SecurityParsersAndSlicers(unittest.TestCase):
             "index 111..222 100644\n"
             "--- a/a.py\n"
             "+++ b/a.py\n"
-            "@@ -1,5 +1,5 @@\n"
-            " line1\n line2\n-old\n+new\n line4\n"
+            "@@ -1,12 +1,12 @@\n"
+            " line1\n line2\n line3\n-old\n+new\n line4\n line5\n line6\n line7\n line8\n line9\n line10\n line11\n"
         )
         sliced, _, _ = DiffSlicer.slice_diff(diff_txt, max_context_lines=0)
         self.assertNotIn(" line1", sliced)

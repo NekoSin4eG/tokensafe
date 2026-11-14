@@ -75,6 +75,21 @@ def repair_json(s: str) -> Optional[str]:
             if sb:
                 candidates.append(sb)
 
+    # Truncation fallback (last resort): cut back to the last safe structural
+    # boundary, then re-balance. Handles payloads cut MID-TOKEN that no closer
+    # appender can fix — '{"a": tru', '{"count": 12' cut after a value,
+    # '{"a": 1, "b": ' cut after a colon, '{"na' cut mid-key. Strictly
+    # validated like every other stage: json.loads must accept the result.
+    trunc = _truncate_to_last_boundary(ctrl_fixed)
+    if trunc is not None:
+        bases = [trunc]
+        balanced = _balance_brackets(_strip_trailing_commas(trunc))
+        if balanced:
+            bases.insert(0, balanced)
+        for base in bases:
+            candidates.append(base)
+            candidates.append(_strip_trailing_commas(base))
+
     for cand in candidates:
         if cand is None:
             continue
@@ -122,6 +137,39 @@ def _escape_control_chars_in_strings(s: str) -> str:
                 quote = ch
             out.append(ch)
     return "".join(out)
+
+
+def _truncate_to_last_boundary(s: str) -> Optional[str]:
+    """Cuts the text back to the last safe structural boundary outside strings —
+    right after an opener ('{', '['), separator (','), colon, closing bracket,
+    or closing quote. This is the repair stage for truncated payloads cut
+    mid-token, where appending closers alone cannot produce valid JSON.
+    Returns None when there is no safe boundary to cut to."""
+    last = -1
+    in_str = False
+    quote = ""
+    escaped = False
+    for i, ch in enumerate(s):
+        if in_str:
+            if escaped:
+                escaped = False
+            elif ch == "\\":
+                escaped = True
+            elif ch == quote:
+                in_str = False
+                last = i  # right after a closing quote is a safe boundary
+            continue
+        if ch in ('"', "'"):
+            in_str = True
+            quote = ch
+        elif ch in "{[,:}]":
+            last = i
+    if last < 0:
+        return None
+    cut = s[: last + 1].rstrip()
+    if cut.endswith(":"):
+        cut += " null"  # a dangling colon needs a value before the closers
+    return cut
 
 
 def _balance_brackets(s: str) -> Optional[str]:

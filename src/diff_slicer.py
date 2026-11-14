@@ -103,6 +103,13 @@ class DiffSlicer:
         compact_diff = "\n".join(output_lines)
         compact_tokens = count_tokens(compact_diff)
 
+        # Honest pass-through: when slicing earns nothing — tiny diffs where the
+        # omission annotations cost more than the context they save — return the
+        # raw diff unchanged (QA sweep finding: negative savings on ~30/150 real
+        # repos, 17 of them on diffs under 800 tokens).
+        if compact_tokens >= orig_tokens:
+            return raw_diff, orig_tokens, orig_tokens
+
         return compact_diff, orig_tokens, compact_tokens
 
     @classmethod

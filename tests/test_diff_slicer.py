@@ -46,3 +46,38 @@ class TestDiffSlicer(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestDiffSlicerPassThrough(unittest.TestCase):
+    def test_pass_through_when_slicing_earns_nothing(self):
+        # QA sweep finding: tiny diffs came out BIGGER after slicing (omission
+        # annotations cost more than the context they save) -> negative savings.
+        # DiffSlicer must return the raw diff unchanged in that case.
+        tiny_diff = (
+            "diff --git a/x.py b/x.py\n"
+            "index 111..222 100644\n"
+            "--- a/x.py\n"
+            "+++ b/x.py\n"
+            "@@ -1,3 +1,4 @@\n"
+            " context line one\n"
+            " context line two\n"
+            "+added line"
+        )
+        sliced, orig_t, compact_t = DiffSlicer.slice_diff(tiny_diff)
+        self.assertEqual(sliced, tiny_diff)
+        self.assertEqual(orig_t, compact_t)
+
+    def test_pass_through_on_forced_expansion(self):
+        diff = (
+            "diff --git a/a.py b/a.py\n"
+            "--- a/a.py\n"
+            "+++ b/a.py\n"
+            "@@ -1,2 +1,2 @@\n"
+            " ctx1\n"
+            " ctx2\n"
+            "+plus\n"
+            " ctx3\n"
+        )
+        sliced, orig_t, compact_t = DiffSlicer.slice_diff(diff, max_context_lines=0)
+        self.assertEqual(sliced, diff)
+        self.assertEqual(compact_t, orig_t)

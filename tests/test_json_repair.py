@@ -100,3 +100,42 @@ class TestJsonRepair(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+import json
+
+
+class TestTruncationRepair(unittest.TestCase):
+    """QA sweep finding: repair_json returned None on payloads cut MID-TOKEN
+    (no closer appender can fix '{"a": tru') — a truncation-boundary stage was
+    added as the last-resort candidate."""
+
+    def test_cut_mid_literal(self):
+        r = repair_json('{"count": 42, "flag": tru')
+        self.assertIsNotNone(r)
+        self.assertEqual(sorted(json.loads(r).keys()), ["count", "flag"])
+
+    def test_cut_after_colon(self):
+        r = repair_json('{"a": 1, "b": ')
+        self.assertIsNotNone(r)
+        self.assertEqual(sorted(json.loads(r).keys()), ["a", "b"])
+
+    def test_cut_mid_key(self):
+        r = repair_json('{"na')
+        self.assertIsNotNone(r)
+        self.assertEqual(json.loads(r), {})
+
+    def test_cut_mid_string_with_escape(self):
+        r = repair_json('{"a": "x\\')
+        self.assertIsNotNone(r)
+        self.assertEqual(json.loads(r), {"a": None})  # cut past the dangling colon keeps the key
+
+    def test_cut_mid_array_literal(self):
+        r = repair_json('{"items": [1, 2, tru')
+        self.assertIsNotNone(r)
+        self.assertEqual(json.loads(r)["items"], [1, 2])
+
+    def test_plain_number_truncation_keeps_value(self):
+        r = repair_json('{"count": 12')
+        self.assertIsNotNone(r)
+        self.assertEqual(json.loads(r), {"count": 12})

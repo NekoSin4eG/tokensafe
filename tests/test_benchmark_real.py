@@ -240,3 +240,30 @@ class TestRunLocal(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TestGitDiffGateChangedPaths(unittest.TestCase):
+    """QA sweep finding: the gate sliced '+++ b/' as [4:] leaving a 'b/' prefix,
+    so paths never matched DiffSlicer omission notes ('...asset '<path>'') and
+    asset-only HEAD~1 commits failed changed_files_preserved."""
+
+    def test_gate_accepts_omission_note_path(self):
+        raw = (
+            "diff --git a/docs/assets/logo.svg b/docs/assets/logo.svg\n"
+            "--- a/docs/assets/logo.svg\n"
+            "+++ b/docs/assets/logo.svg\n"
+            "+<svg/>\n"
+        )
+        sliced = "[Diff Slicer: Omitted diff for lockfile/binary asset 'docs/assets/logo.svg']"
+        gates = RealRepoBenchmark.git_diff_gates(raw, sliced)
+        self.assertTrue(gates["changed_files_preserved"])
+
+    def test_changed_paths_strips_b_prefix(self):
+        raw = "+++ b/src/app.py\n+++ /dev/null\n"
+        self.assertEqual(RealRepoBenchmark._changed_paths(raw), ["src/app.py"])  # +++ /dev/null is not a "+++ b/" path
+
+    def test_gate_still_fails_when_path_truly_lost(self):
+        raw = "+++ b/src/kept.py\n+++ b/docs/lost.svg\n"
+        sliced = "diff --git a/src/kept.py b/src/kept.py\n+++ b/src/kept.py\n"  # lost.svg absent entirely
+        gates = RealRepoBenchmark.git_diff_gates(raw, sliced)
+        self.assertFalse(gates["changed_files_preserved"])

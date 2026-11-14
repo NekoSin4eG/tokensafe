@@ -59,9 +59,9 @@ UNIFIED_TOKENSAFE_RULE = (
     "11. **Secret Leak Prevention Directive (Zero Hardcoded Fallbacks)**:\n"
     "Never hardcode real private keys, API secrets, access tokens, or webhook secrets as default fallback arguments in `os.environ.get()`, `os.getenv()`, or `process.env`. If an environment variable is absent, raise an explicit configuration error or use an empty string / test mock. Whenever a secret fallback attempt is blocked, state:\n"
     "`🛡️ **TokenSafe Security Guard**: Prevented secret / private key leak into git (<target_file>: <details>)`\n"
-    "12. **Proof-of-Savings Turn Footer (always in English)**:\n"
-    "At the end of your response for any turn where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer in English:\n"
-    "`⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown>) | Cumulative Total: <total> tokens (≈$<usd> approx)`\n"
+    "12. **Proof-of-Savings Turn Footer (strictly English)**:\n"
+    "At the end of your response for any turn where tools were executed, files were inspected, commands were sanitized, or prompts were compacted, append a compact 1-line footer. The ENTIRE footer is product-facing copy — 100% English, including the savings breakdown in parentheses, regardless of the chat language:\n"
+    "`⚡ **TokenSafe Turn Savings**: +<tokens> tokens saved on this turn (<breakdown in English>) | Cumulative Total: <total> tokens (≈$<usd> approx)`\n"
 )
 
 # Short pointer written into PROJECT-level rule files when the full protocol is
