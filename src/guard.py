@@ -378,6 +378,44 @@ class TokenSafeGuard:
                             )
                         )
 
+        # 2b. Secret-File Read Interception: reading credential stores (.env, private
+        # keys, credential bundles) pulls live secrets into the model context —
+        # and off the machine — even without any exfil pipe. Example files are exempt.
+        def _is_secret_file_read(path: str) -> bool:
+            base = os.path.basename(path.strip("'\"")).lower()
+            if not base:
+                return False
+            if "example" in base or "sample" in base or "template" in base:
+                return False
+            if base == ".env" or base.startswith(".env."):
+                return True
+            if base.endswith((".pem", ".key", ".p12", ".pfx", ".keystore")):
+                return True
+            if base.startswith(("id_rsa", "id_ed25519", "id_ecdsa")):
+                return True
+            if base == ".git-credentials" or (base.endswith((".json", ".yaml", ".yml", ".toml", ".txt")) and ("credential" in base or "secret" in base)):
+                return True
+            return False
+
+        for stage in stages:
+            cmd_tok, cmd_args = cls._stage_cmd_tokens(stage)
+            if cmd_tok not in {"cat", "less", "more", "head", "tail", "bat", "vi", "vim", "nvim", "nano", "open"}:
+                continue
+            secret_hit = next(
+                (a for a in cmd_args if not a.startswith("-") and _is_secret_file_read(a)),
+                None,
+            )
+            if secret_hit:
+                return GuardResult(
+                    blocked=True,
+                    check_name="SECRET_FILE_READ",
+                    reason=(
+                        f"Secret file read blocked: '{cmd}'. Reading credential stores ('{secret_hit}') pulls live "
+                        f"secrets into the model context and off the machine. Reference the values you need through "
+                        f"environment variables instead of printing the file contents."
+                    ),
+                )
+
         # 3. Network Data Exfiltration Prevention (piping or posting secrets to curl/wget/nc)
         _SENS_EXFIL = r"(?:\.env(?:\.[\w-]+)?|id_rsa|id_ed25519|\.key|\.pem|credentials\.json|service_account\.json|secret|password|token)"
         exfil_pattern = re.search(

@@ -1,8 +1,8 @@
 {
-  "version": 2,
+  "version": 3,
   "created": "2026-11-14",
-  "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking; v1 scenarios measured in 784628d remain untouched). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table. v2 adds four angles: architecture discovery, raw search leak, git-diff churn, write-egress (output-token axis).",
-  "metrics": ["token_reduction_pct", "usd_saved_sonnet_input", "usd_saved_sonnet_output", "cache_hit_ratio", "zero_loss_gates"],
+  "methodology": "Pre-registered real-repo benchmark. Scenarios are committed BEFORE any measurement (anti cherry-picking; v1/v2 rows stay frozen). All token counts are measured with the calibrated BPE tokenizer on real repository bytes. Every scenario carries deterministic zero-loss gates; a gate failure disqualifies the scenario from the savings table. v3 adds: API surface map, KV-cache prefix locking replay, secret-guard interception, junk-read guard, prompt compaction (TOCP).",
+  "metrics": ["token_reduction_pct", "usd_saved_sonnet_input", "usd_saved_sonnet_output", "kv_cache_hit_rate_pct", "zero_loss_gates"],
   "pricing": { "sonnet_input_usd_per_mtok": 3.0, "sonnet_cached_usd_per_mtok": 0.3, "sonnet_output_usd_per_mtok": 15.0 },
   "repos": [
     {
@@ -76,6 +76,13 @@
     "test_source": "def test_bench_injected_regression():\n    assert False, \"bench: pre-registered injected regression\"\n",
     "file": "tests/test_bench_injected.py"
   },
+  "secret_guard": {
+    "note": "Security scenario: a pre-registered FAKE .env fixture is written into the temp clone (values are synthetic, never real secrets); the guard must deny reading it and leak zero secret values into the model context.",
+    "env_content": "# Database credentials (bench fixture — synthetic values)\nDATABASE_URL=postgres://admin:SuperSecret9f3b@db.internal:5432/prod\nAPI_KEY=sk-live-4c9a1f77e2b34d08a91c6d5e7f0b2a3d\nJWT_SECRET=9f3b1c77e2b34d08a91c6d5e7f0b2a3d9f3b\nSTRIPE_WEBHOOK_SECRET=whsec_5f4eecb9821a4c1d9e7f0b2a3d4c5e6f\nSMTP_PASS=P@ssw0rd-bench-7712\n"
+  },
+  "prompt_compaction": {
+    "template": "Please look at {file} and refactor the {symbol} function to handle the following edge cases properly: handle empty and None inputs with clear error messages, validate all incoming parameters before mutating state, add proper error messages, update the docstring, make the logging consistent with the rest of the codebase, keep the public signature backward compatible, avoid breaking existing callers, extract repeated logic into small private helpers, cover every new branch with tests, and make sure the feature flags still work as documented for both the community and the paid tiers of the product."
+  },
   "zero_loss_gates": {
     "symbol_read": ["symbol_present", "valid_python", "all_top_level_defs_present", "signature_line_match"],
     "test_output": ["failing_test_name_present", "error_type_present", "first_traceback_frame_present"],
@@ -83,6 +90,11 @@
     "architecture": ["hub_files_listed", "compact_bound"],
     "raw_search": ["matches_exist", "paths_preserved"],
     "git_diff": ["changed_files_preserved"],
-    "write_egress": ["inserted_line_present", "original_signature_in_target"]
+    "write_egress": ["inserted_line_present", "original_signature_in_target"],
+    "api_surface": ["hub_files_listed", "smaller_than_crawl"],
+    "kv_cache": ["prefix_hit_rate_ge_85", "input_reduction_positive"],
+    "secret_guard": ["deny_decision", "no_secret_leak"],
+    "junk_read": ["capped_output", "junk_file_named"],
+    "prompt_compaction": ["action_extracted", "target_file_preserved", "savings_positive"]
   }
 }

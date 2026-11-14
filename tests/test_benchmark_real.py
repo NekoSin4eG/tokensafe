@@ -151,7 +151,7 @@ class TestMarkdownRendering(unittest.TestCase):
 class TestNewScenarioGates(unittest.TestCase):
     def test_registry_v2_fields(self):
         reg = load_registry()
-        self.assertEqual(reg.get("version"), 2)
+        self.assertGreaterEqual(reg.get("version"), 2)
         self.assertIn("sonnet_output_usd_per_mtok", reg["pricing"])
         for repo in reg["repos"]:
             self.assertGreaterEqual(repo.get("clone_depth", 0), 50, "git_diff scenario needs history")
